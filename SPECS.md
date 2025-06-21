@@ -12,6 +12,7 @@ This table lists all the formal specification documents for the project.
 |---|---|
 | [`specs/environment-setup.md`](./specs/environment-setup.md) | Details the software and tools required, and the setup process. |
 | [`specs/project-structure.md`](./specs/project-structure.md) | Defines the directory layout for organizing files. |
+| [`specs/vscode-guide.md`](./specs/vscode-guide.md) | A step-by-step guide for using TidalCycles with VS Code. |
 | [`specs/techno-production-guide.md`](./specs/techno-production-guide.md) | A practical tutorial for composing Techno with TidalCycles. |
 | [`specs/house-production-guide.md`](./specs/house-production-guide.md) | A practical tutorial for composing House music with TidalCycles. |
 
@@ -28,7 +29,7 @@ This plan outlines the key phases and deliverables for getting the project under
 | Phase | Focus Area | Key Deliverables | Related Specs | Status |
 |---|---|---|---|---|
 | 1 | **Environment Setup** | Install SuperCollider, SuperDirt, and TidalCycles. | [`specs/environment-setup.md`](./specs/environment-setup.md) | Done |
-| 2 | **Project Scaffolding** | Create the directory structure (`compositions`, `notes`, `samples`). | [`specs/project-structure.md`](./specs/project-structure.md) | To Do |
-| 3 | **First Techno Beat** | Create and save a basic Techno loop following the tutorial. | [`specs/techno-production-guide.md`](./specs/techno-production-guide.md) | To Do |
+| 2 | **Project Scaffolding** | Create the directory structure (`compositions`, `notes`, `samples`). | [`specs/project-structure.md`](./specs/project-structure.md) | Done |
+| 3 | **First Techno Beat** | Create and save a basic Techno loop following the tutorial. | [`specs/techno-production-guide.md`](./specs/techno-production-guide.md) | Done |
 | 4 | **First House Groove** | Create and save a basic House loop following the tutorial. | [`specs/house-production-guide.md`](./specs/house-production-guide.md) | To Do |
 | 5 | **AI Collaboration Workflow** | Document the process for using AI assistance in composition. | `TBD` | To Do | 

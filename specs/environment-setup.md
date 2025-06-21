@@ -18,7 +18,7 @@ The environment consists of two primary components that communicate with each ot
 | **SuperCollider** | An audio programming language and environment that hosts SuperDirt. | [Official Downloads](https://supercollider.github.io/downloads) |
 | **SuperDirt** | The default sampler/synthesizer for TidalCycles. It is installed as a "quark" within SuperCollider. | [Installation Docs](https://github.com/musikinformatik/SuperDirt) |
 | **TidalCycles** | The pattern language itself. | [Installation Docs](https://tidalcycles.org/docs/getting-started/macos_install) |
-| **Text Editor** | An editor with a TidalCycles plugin is required to send code to the running Tidal process. Cursor is used for this project. | N/A |
+| **Text Editor** | An editor with a TidalCycles plugin is required to send code to the running Tidal process. | See the [VS Code Guide](./vscode-guide.md) |
 
 ## 4. Startup Procedure
 
