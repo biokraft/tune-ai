@@ -27,7 +27,7 @@ This plan outlines the key phases and deliverables for getting the project under
 
 | Phase | Focus Area | Key Deliverables | Related Specs | Status |
 |---|---|---|---|---|
-| 1 | **Environment Setup** | Install SuperCollider, SuperDirt, and TidalCycles. | [`specs/environment-setup.md`](./specs/environment-setup.md) | To Do |
+| 1 | **Environment Setup** | Install SuperCollider, SuperDirt, and TidalCycles. | [`specs/environment-setup.md`](./specs/environment-setup.md) | Done |
 | 2 | **Project Scaffolding** | Create the directory structure (`compositions`, `notes`, `samples`). | [`specs/project-structure.md`](./specs/project-structure.md) | To Do |
 | 3 | **First Techno Beat** | Create and save a basic Techno loop following the tutorial. | [`specs/techno-production-guide.md`](./specs/techno-production-guide.md) | To Do |
 | 4 | **First House Groove** | Create and save a basic House loop following the tutorial. | [`specs/house-production-guide.md`](./specs/house-production-guide.md) | To Do |
