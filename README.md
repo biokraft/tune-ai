@@ -71,6 +71,20 @@ brew install --cask supercollider
 
 After these steps, your environment should be ready!
 
+## 🚀 How to Play Your Compositions
+
+With the environment installed, you need a way to send your code to the sound engine. This project is set up to use **Visual Studio Code (VS Code)**.
+
+### Quick Start Workflow
+
+1.  **Start the Sound Engine**: Open the **SuperCollider** application and run `SuperDirt.start`.
+2.  **Open Your Code**: Open this project folder in **VS Code**.
+3.  **Play a Pattern**: Open a `.tidal` file (like `compositions/techno/basic-techno-loop.tidal`) and use the key commands to start the music.
+
+For a complete, step-by-step guide on configuring VS Code, including the necessary extensions and key commands, please read our dedicated guide:
+
+-   **➡️ [Full VS Code Guide for TidalCycles](./specs/vscode-guide.md)**
+
 ## What is TidalCycles?
 
 TidalCycles (or Tidal for short) is a live coding environment for making patterns with code. It is a powerful tool for creating complex musical patterns from simple components.
