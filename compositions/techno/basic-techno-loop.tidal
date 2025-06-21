@@ -1,0 +1,44 @@
+-- Basic Techno Loop
+-- Created following the Techno Production Guide
+-- This file demonstrates the core elements of a techno track in TidalCycles
+
+-- Set the tempo to a typical techno BPM (around 130 BPM)
+setcps(130/60/4)
+
+-- Step 1: The Four-on-the-Floor Kick
+-- The kick drum is the heartbeat of a techno track
+d1 $ sound "bd bd bd bd"
+
+-- Step 2: Adding Off-beat Hi-Hats
+-- Hi-hats create the rhythmic pulse
+-- Using 16th-note hi-hats for a driving feel
+d2 $ sound "ch*16"
+
+-- Step 3: Layering Snares and Claps
+-- The snare provides the backbeat on beats 2 and 4
+d3 $ sound "~ sn ~ sn"
+
+-- Step 4: Writing a Bassline
+-- A simple, repetitive bassline using the "arpy" synth
+-- This creates a melodic foundation with notes C, C, Eb, C, G, C, Eb, C
+d4 $ note "0 0 3 0 7 0 3 0" # s "arpy" # gain 0.8
+
+-- Alternative patterns to experiment with:
+
+-- Variation 1: More complex hi-hat pattern
+-- d2 $ sound "ch ~ ch ch ~ ch ~ ch"
+
+-- Variation 2: Different bassline rhythm
+-- d4 $ note "0 ~ 3 ~ 7 ~ 3 ~" # s "arpy" # gain 0.8
+
+-- Variation 3: Add some atmospheric elements
+-- d5 $ sound "~ ~ ~ hh" # gain 0.6
+
+-- To stop all patterns, uncomment the following line:
+-- hush
+
+-- Instructions for use:
+-- 1. Evaluate each pattern line (d1, d2, d3, d4) separately to hear layers build up
+-- 2. Try the variations by commenting out the main patterns and uncommenting alternatives
+-- 3. Use 'hush' to stop all patterns
+-- 4. Experiment with different samples by replacing 'bd', 'ch', 'sn', etc. 
