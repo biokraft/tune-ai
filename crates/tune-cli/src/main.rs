@@ -154,6 +154,9 @@ fn build_spec(a: &Render303) -> Result<RenderSpec, String> {
 fn run(a: &Render303) -> Result<(), String> {
     let spec = build_spec(a)?;
     let samples = render_acid(&spec).map_err(|e| e.to_string())?;
+    if spec.distortion.is_none() && spec.params.iter().any(|(id, _)| id.starts_with("dist.")) {
+        eprintln!("note: distortion bypassed (no --dist); dist.* values ignored");
+    }
     write_wav(&a.out, &samples, spec.sample_rate).map_err(|e| e.to_string())?;
     let peak = samples.iter().fold(0.0_f32, |m, x| m.max(x.abs()));
     let secs = samples.len() as f64 / f64::from(spec.sample_rate);

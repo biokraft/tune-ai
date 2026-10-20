@@ -233,3 +233,34 @@ fn output_parent_that_is_a_file_exits_2() {
     assert!(stderr.contains("cannot write"), "{stderr}");
     assert!(blocker.is_file());
 }
+
+#[test]
+fn dist_values_without_dist_note_bypass() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("x.wav");
+    let assert = tune()
+        .args([
+            "render-303",
+            "--pattern",
+            "C2 C2",
+            "--set",
+            "dist.drive=6",
+            "--out",
+        ])
+        .arg(&out)
+        .assert()
+        .success();
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(
+        stderr.contains("note: distortion bypassed (no --dist); dist.* values ignored"),
+        "{stderr}"
+    );
+    // The demo enables distortion, so no note there.
+    let assert = tune()
+        .args(["render-303", "--demo", "--set", "dist.drive=6", "--out"])
+        .arg(&out)
+        .assert()
+        .success();
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(!stderr.contains("bypassed"), "{stderr}");
+}
