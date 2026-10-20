@@ -83,6 +83,38 @@ git -C "$T" mv notes.txt moved.txt
 echo "mail someone${AT}gmail.com" >> "$T/moved.txt"; git -C "$T" add moved.txt
 run_case "rename with email" 1 "moved.txt: email address"
 
+# Non-ASCII paths: git quotes them unless listed NUL-delimited.
+DASH="$(printf '\342\200\223')"
+new_repo
+: > "$T/Artist ${DASH} Track.mp3"; git -C "$T" add -f "Artist ${DASH} Track.mp3"
+run_case "non-ascii audio filename (staged)" 1 "Track.mp3: audio file"
+
+new_repo
+echo "see ${U1}someone/file" > "$T/notes ${DASH} e.md"; git -C "$T" add "notes ${DASH} e.md"
+run_case "non-ascii text file home path (staged)" 1 "e.md: home path"
+
+new_repo
+: > "$T/Artist ${DASH} Track.mp3"; git -C "$T" add -f "Artist ${DASH} Track.mp3"
+git -C "$T" -c user.name=t -c user.email=t${AT}example.com commit -q -m t --no-verify
+out="$(cd "$T" && bash scripts/check-privacy.sh 2>&1)"; rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -qF "Track.mp3: audio file"; then
+  echo "ok: non-ascii audio filename (full scan)"
+else
+  echo "FAIL: non-ascii audio filename (full scan) (exit $rc)"; FAILS=$((FAILS + 1))
+fi
+rm -rf "$T"
+
+new_repo
+echo "see ${U1}someone/file" > "$T/notes ${DASH} e.md"; git -C "$T" add "notes ${DASH} e.md"
+git -C "$T" -c user.name=t -c user.email=t${AT}example.com commit -q -m t --no-verify
+out="$(cd "$T" && bash scripts/check-privacy.sh 2>&1)"; rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -qF "e.md: home path"; then
+  echo "ok: non-ascii text file home path (full scan)"
+else
+  echo "FAIL: non-ascii text file home path (full scan) (exit $rc)"; FAILS=$((FAILS + 1))
+fi
+rm -rf "$T"
+
 # Non-staged mode scans tracked files.
 new_repo
 echo "see ${U1}someone/file" > "$T/a.txt"; git -C "$T" add a.txt

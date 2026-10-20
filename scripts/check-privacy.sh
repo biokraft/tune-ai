@@ -25,9 +25,9 @@ is_allowlisted() {
 }
 
 if [ "$STAGED" -eq 1 ]; then
-  FILES="$(git diff --cached --name-only --no-renames --diff-filter=ACM)"
+  LIST=(git diff --cached --name-only -z --no-renames --diff-filter=ACM)
 else
-  FILES="$(git ls-files)"
+  LIST=(git ls-files -z)
 fi
 
 # Configured git identity must never appear in files (unless allowlisted).
@@ -44,7 +44,8 @@ content() {
   if [ "$STAGED" -eq 1 ]; then git show ":$1" 2>/dev/null; else cat -- "$1" 2>/dev/null; fi
 }
 
-while IFS= read -r f; do
+# NUL-delimited so non-ASCII names are not quoted by git and newlines are safe.
+while IFS= read -r -d '' f; do
   [ -n "$f" ] || continue
 
   if printf '%s' "$f" | grep -qiE "$AUDIO_RE"; then
@@ -80,6 +81,6 @@ while IFS= read -r f; do
       done <<< "$IDENTITY"
     fi
   fi
-done <<< "$FILES"
+done < <("${LIST[@]}")
 
 exit "$FOUND"
