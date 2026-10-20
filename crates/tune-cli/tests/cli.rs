@@ -181,3 +181,30 @@ fn explicit_flags_override_demo() {
     let r = hound::WavReader::open(&out).unwrap();
     assert_eq!(r.duration(), 96_000);
 }
+
+#[test]
+fn bad_sample_rate_and_length_exit_2() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("x.wav");
+    let o = out.to_str().unwrap();
+    assert_fails(
+        &["--demo", "--sample-rate", "48", "--out", o],
+        "sample rate",
+        dir.path(),
+    );
+    assert_fails(
+        &["--demo", "--sample-rate", "1", "--out", o],
+        "sample rate",
+        dir.path(),
+    );
+    assert_fails(
+        &["--demo", "--sample-rate", "500000", "--out", o],
+        "8000..=384000",
+        dir.path(),
+    );
+    assert_fails(
+        &["--demo", "--bpm", "0.0001", "--out", o],
+        "too long",
+        dir.path(),
+    );
+}

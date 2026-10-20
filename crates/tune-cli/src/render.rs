@@ -81,6 +81,11 @@ fn apply(
     }
 }
 
+/// Sample rates the voice is known to handle (the wavetable needs a sane Nyquist).
+const MIN_SAMPLE_RATE: std::ops::RangeInclusive<u32> = 8_000..=384_000;
+/// Longest render accepted, in seconds of audio.
+const MAX_RENDER_SECONDS: f64 = 30.0 * 60.0;
+
 /// Renders `spec` to mono samples (`round(bars * 4 * 60 / bpm * sample_rate)` of them).
 pub fn render_acid(spec: &RenderSpec) -> Result<Vec<f32>, RenderError> {
     if !(spec.bpm.is_finite() && spec.bpm > 0.0) {
@@ -95,13 +100,28 @@ pub fn render_acid(spec: &RenderSpec) -> Result<Vec<f32>, RenderError> {
             value: "0".into(),
         });
     }
-    if spec.sample_rate == 0 {
+    if !MIN_SAMPLE_RATE.contains(&spec.sample_rate) {
         return Err(RenderError::InvalidSpec {
             what: "sample rate",
-            value: "0".into(),
+            value: format!(
+                "{} (valid range is {}..={})",
+                spec.sample_rate,
+                MIN_SAMPLE_RATE.start(),
+                MIN_SAMPLE_RATE.end()
+            ),
         });
     }
     let sr = f64::from(spec.sample_rate);
+    let len_f = (f64::from(spec.bars) * 4.0 * 60.0 / spec.bpm * sr).round();
+    if len_f > MAX_RENDER_SECONDS * sr {
+        return Err(RenderError::InvalidSpec {
+            what: "render length",
+            value: format!(
+                "{:.0}s of audio is too long (limit {MAX_RENDER_SECONDS:.0}s)",
+                len_f / sr
+            ),
+        });
+    }
     let mut voice = Acid303::new(sr);
     let mut dist = Distortion::new(sr);
 
@@ -133,7 +153,7 @@ pub fn render_acid(spec: &RenderSpec) -> Result<Vec<f32>, RenderError> {
         dist.set_mode(mode);
     }
 
-    let len = (f64::from(spec.bars) * 4.0 * 60.0 / spec.bpm * sr).round() as usize;
+    let len = len_f as usize;
     let mut player = AcidPlayer::new(spec.pattern.clone(), spec.bpm, sr);
     let mut out = Vec::with_capacity(len);
     for n in 0..len {
@@ -150,6 +170,12 @@ pub fn render_acid(spec: &RenderSpec) -> Result<Vec<f32>, RenderError> {
         let mut x = voice.get_sample();
         if spec.distortion.is_some() {
             x = dist.process(x);
+        }
+        if !x.is_finite() {
+            return Err(RenderError::InvalidSpec {
+                what: "render",
+                value: format!("non-finite output at sample {n}"),
+            });
         }
         out.push(x as f32);
     }
