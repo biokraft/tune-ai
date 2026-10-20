@@ -528,6 +528,37 @@ impl Acid303 {
 
     // audio processing
 
+    /// Clears all DSP state: the voice then sounds exactly like a freshly
+    /// constructed one with the same parameters. Parameters (cutoff,
+    /// resonance, levels, slide time, filter mode, tuning, ...) are kept.
+    ///
+    /// Cleared: oscillator phase, filter and highpass/allpass/notch/anti-alias
+    /// memories, the amp and main envelopes, the pitch slew limiter and the
+    /// two envelope RCs, the note list and current note, the accent gain, and
+    /// `idle` (set true, so the next trigger also resets phase and filters).
+    pub fn reset(&mut self) {
+        self.oscillator.reset_phase();
+        self.filter.reset();
+        self.amp_env.reset_state();
+        self.main_env.reset_state();
+        self.pitch_slew_limiter.reset();
+        self.amp_de_clicker.reset();
+        self.rc1.reset();
+        self.rc2.reset();
+        self.highpass1.reset();
+        self.highpass2.reset();
+        self.allpass.reset();
+        self.notch.reset();
+        self.anti_alias_filter.reset();
+
+        self.osc_freq = 440.0;
+        self.accent_gain = 0.0;
+        self.current_note = -1;
+        self.current_vel = 0;
+        self.idle = true;
+        self.note_list.clear();
+    }
+
     /// `getSample` without the sequencer branch.
     #[inline]
     pub fn get_sample(&mut self) -> f64 {
