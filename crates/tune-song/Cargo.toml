@@ -1,0 +1,15 @@
+[package]
+name = "tune-song"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+indexmap = "2.14"
+serde = "1.0.228"
+thiserror = "2"
+toml = { version = "=1.1.2", default-features = false, features = ["std", "serde", "parse", "preserve_order"] }
+tune-dsp = { path = "../tune-dsp" }
