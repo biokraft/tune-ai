@@ -208,3 +208,28 @@ fn bad_sample_rate_and_length_exit_2() {
         dir.path(),
     );
 }
+
+#[test]
+fn creates_missing_output_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("a/b/x.wav");
+    demo_to(&out);
+    assert!(out.is_file());
+    assert!(!dir.path().join("a/b/x.wav.tmp").exists());
+}
+
+#[test]
+fn output_parent_that_is_a_file_exits_2() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"x").unwrap();
+    let out = blocker.join("x.wav");
+    let assert = tune()
+        .args(["render-303", "--demo", "--out"])
+        .arg(&out)
+        .assert()
+        .code(2);
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("cannot write"), "{stderr}");
+    assert!(blocker.is_file());
+}

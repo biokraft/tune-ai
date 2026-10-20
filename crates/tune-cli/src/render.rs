@@ -179,6 +179,12 @@ pub fn write_wav(path: &Path, mono: &[f32], sample_rate: u32) -> Result<(), Rend
     let mut tmp_name = path.as_os_str().to_owned();
     tmp_name.push(".tmp");
     let tmp = PathBuf::from(tmp_name);
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent).map_err(|source| RenderError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    }
     let result = write_inner(&tmp, mono, sample_rate).and_then(|()| {
         fs::rename(&tmp, path).map_err(|source| RenderError::Io {
             path: path.to_path_buf(),
