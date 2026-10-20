@@ -53,14 +53,25 @@ pub mod consts {
         pub const SQUARE303: i32 = 5;
         pub const SAW303: i32 = 6;
     }
-    /// `TeeBeeFilter::modes` (only the ones other tests are likely to need).
+    /// `TeeBeeFilter::modes` (every member except `NUM_MODES`).
     pub mod tee_bee_mode {
         pub const FLAT: i32 = 0;
         pub const LP_6: i32 = 1;
         pub const LP_12: i32 = 2;
         pub const LP_18: i32 = 3;
         pub const LP_24: i32 = 4;
+        pub const HP_6: i32 = 5;
+        pub const HP_12: i32 = 6;
+        pub const HP_18: i32 = 7;
+        pub const HP_24: i32 = 8;
+        pub const BP_12_12: i32 = 9;
+        pub const BP_6_18: i32 = 10;
+        pub const BP_18_6: i32 = 11;
+        pub const BP_6_12: i32 = 12;
+        pub const BP_12_6: i32 = 13;
+        pub const BP_6_6: i32 = 14;
         pub const TB_303: i32 = 15;
+        pub const NUM_MODES: i32 = 16;
     }
     /// `AcidSequencer::sequencerModes`.
     pub mod seq_mode {
