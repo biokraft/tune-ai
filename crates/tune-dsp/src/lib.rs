@@ -7,6 +7,6 @@ pub mod drums;
 pub mod fx;
 pub mod param;
 
-pub use drums::{DrumHit, DrumPattern, DrumPatternError, Noise};
+pub use drums::{ACCENT_GAIN_DB, DrumHit, DrumPattern, DrumPatternError, KICK_PARAMS, Kick, Noise};
 pub use fx::{DIST_PARAMS, Distortion, DistortionMode};
 pub use param::{Curve, ParamError, ParamSpec, find_spec};
