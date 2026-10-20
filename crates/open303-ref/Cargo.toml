@@ -1,0 +1,13 @@
+[package]
+name = "open303-ref"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Test-only C++ reference build of the vendored Open303, used for parity tests"
+
+[build-dependencies]
+cc = "1"
+
+[lints]
+workspace = true
