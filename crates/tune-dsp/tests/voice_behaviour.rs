@@ -280,3 +280,91 @@ fn with_param_defaults_differs_from_new_only_by_params() {
         assert!((d - f * scale).abs() <= 1e-12, "{d} vs {}", f * scale);
     }
 }
+
+/// Instantaneous pitch track: for each pair of successive rising zero
+/// crossings (sub-sample interpolated), `(midpoint in samples, Hz)`.
+fn pitch_track(x: &[f64], fs: f64) -> Vec<(f64, f64)> {
+    let mut crossings = Vec::new();
+    for i in 1..x.len() {
+        if x[i - 1] < 0.0 && x[i] >= 0.0 {
+            crossings.push(i as f64 - 1.0 + (-x[i - 1]) / (x[i] - x[i - 1]));
+        }
+    }
+    crossings
+        .windows(2)
+        .map(|w| ((w[0] + w[1]) / 2.0, fs / (w[1] - w[0])))
+        .collect()
+}
+
+fn cents(f: f64, reference: f64) -> f64 {
+    1200.0 * (f / reference).log2()
+}
+
+/// Pitch (Hz) at `at` samples after the slide starts: the estimate whose
+/// midpoint is nearest.
+fn pitch_at(track: &[(f64, f64)], at: f64) -> f64 {
+    track
+        .iter()
+        .min_by(|a, b| (a.0 - at).abs().total_cmp(&(b.0 - at).abs()))
+        .unwrap()
+        .1
+}
+
+/// Glide from C2 to C3 with the given slide time; returns the pitch track
+/// with sample 0 = the `slide_to_note` call.
+fn glide_track(slide_time_ms: f64, len: usize) -> Vec<(f64, f64)> {
+    let mut v = Acid303::with_param_defaults(FS);
+    v.set_param("acid303.resonance", 0.0).unwrap();
+    v.set_param("acid303.env_mod", 0.0).unwrap();
+    v.set_param("acid303.cutoff", 2394.0).unwrap();
+    v.set_param("acid303.slide_time", slide_time_ms).unwrap();
+    v.trigger_note(36, false);
+    render(&mut v, 12_000);
+    v.slide_to_note(48, false);
+    let out = render(&mut v, len);
+    pitch_track(&out, FS)
+}
+
+#[test]
+fn slide_glides_exponentially_to_the_target_pitch() {
+    const C2: f64 = 65.406_391_325_149_66;
+    const C3: f64 = 130.812_782_650_299_3;
+    // The pitch slew is a one-pole filter with time constant 0.2 * slide time
+    // (60 ms default -> 12 ms), so five time constants take 60 ms.
+    let tau = 0.2 * 60.0e-3 * FS;
+    let track = glide_track(60.0, 9_600);
+    let early = pitch_at(&track, 0.25 * tau);
+    let late = pitch_at(&track, 5.0 * tau + 480.0);
+    // Measured: early 93.98 Hz (about 570 cents below C3), late 130.48 Hz
+    // (4.4 cents below C3); the pitch estimate lags the true pitch slightly.
+    println!("early {early:.2} Hz, late {late:.2} Hz");
+    assert!(
+        cents(early, C2) >= -50.0 && cents(early, C3) < -400.0,
+        "pitch should still be far below the target early in the glide: {early}"
+    );
+    assert!(
+        cents(late, C3).abs() <= 25.0,
+        "pitch after 5 time constants is {:.1} cents from C3",
+        cents(late, C3)
+    );
+}
+
+#[test]
+fn longer_slide_time_glides_slower() {
+    const C3: f64 = 130.812_782_650_299_3;
+    let fast = glide_track(20.0, 9_600);
+    let slow = glide_track(200.0, 9_600);
+    // 30 ms after the slide starts.
+    let at = 0.030 * FS;
+    let (f, s) = (pitch_at(&fast, at), pitch_at(&slow, at));
+    // Measured: 130.83 Hz for a 20 ms slide, 100.80 Hz for a 200 ms slide.
+    println!("pitch 30 ms into the glide: slide 20 ms {f:.2} Hz, 200 ms {s:.2} Hz");
+    assert!(
+        cents(f, C3).abs() < 25.0,
+        "short slide should have arrived: {f}"
+    );
+    assert!(
+        cents(s, C3) < -300.0,
+        "long slide should still be well below the target: {s}"
+    );
+}
