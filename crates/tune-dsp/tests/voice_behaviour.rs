@@ -368,3 +368,30 @@ fn longer_slide_time_glides_slower() {
         "long slide should still be well below the target: {s}"
     );
 }
+
+fn notes_output(v: &mut Acid303) -> Vec<u64> {
+    let mut out = Vec::new();
+    for note in [45u8, 52, 57] {
+        v.trigger_note(note, false);
+        out.extend((0..(FS / 3.0) as usize).map(|_| v.get_sample().to_bits()));
+    }
+    out
+}
+
+#[test]
+fn set_param_at_matches_set_param() {
+    for (i, spec) in tune_dsp::acid303::ACID303_PARAMS.iter().enumerate() {
+        let mut a = Acid303::new(FS);
+        let mut b = Acid303::new(FS);
+        a.set_param(spec.id, spec.max).unwrap();
+        b.set_param_at(i, spec.max);
+        assert_eq!(notes_output(&mut a), notes_output(&mut b), "{}", spec.id);
+    }
+}
+
+#[test]
+fn set_param_at_clamps() {
+    let mut v = Acid303::new(FS);
+    v.set_param_at(2, 1e9);
+    assert_eq!(v.cutoff(), 2394.0);
+}

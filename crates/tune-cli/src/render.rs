@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use tune_dsp::acid303::{ACID303_PARAMS, Acid303, AcidPattern, AcidPlayer};
-use tune_dsp::{DIST_PARAMS, Distortion, DistortionMode, ParamError, ParamSpec};
+use tune_dsp::{DIST_PARAMS, Distortion, DistortionMode, ParamError, ParamSpec, find_spec};
 
 /// A linear parameter sweep in normalized (0..=1) space over the whole render.
 #[derive(Clone, Debug, PartialEq)]
@@ -61,11 +61,9 @@ fn route(id: &str) -> Result<(Target, &'static ParamSpec), RenderError> {
     } else {
         return Err(RenderError::UnknownParam(id.to_string()));
     };
-    table
-        .iter()
-        .find(|s| s.id == id)
-        .map(|s| (target, s))
-        .ok_or_else(|| RenderError::UnknownParam(id.to_string()))
+    find_spec(table, id)
+        .map(|(_, s)| (target, s))
+        .map_err(|_| RenderError::UnknownParam(id.to_string()))
 }
 
 fn apply(
