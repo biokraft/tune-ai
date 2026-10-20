@@ -1,4 +1,7 @@
-use tune_dsp::{ACCENT_GAIN_DB, Clap, KICK_PARAMS, Kick, ParamError};
+use tune_dsp::{
+    ACCENT_GAIN_DB, CLAP_PARAMS, Clap, HAT_CLOSED_PARAMS, HAT_OPEN_PARAMS, Hat, HatKind,
+    KICK_PARAMS, Kick, ParamError, ParamSpec,
+};
 
 const SR: f64 = 48_000.0;
 
@@ -141,12 +144,29 @@ fn kick_seeded() {
     assert_ne!(a, run(4));
 }
 
-// ---- clap ----
+// ---- clap and hats ----
 
 fn clap_render(accent: bool, seed: u64, n: usize) -> Vec<f64> {
     let mut c = Clap::new(SR);
     c.trigger(accent, seed);
     (0..n).map(|_| c.get_sample()).collect()
+}
+
+fn hat_render(kind: HatKind, accent: bool, seed: u64, n: usize) -> Vec<f64> {
+    let mut h = Hat::new(kind, SR);
+    h.trigger(accent, seed);
+    (0..n).map(|_| h.get_sample()).collect()
+}
+
+/// Mean absolute first difference over mean absolute level of the first 50 ms.
+fn brightness(x: &[f64]) -> f64 {
+    let x = &x[..ms(50.0)];
+    let d: f64 = x.windows(2).map(|w| (w[1] - w[0]).abs()).sum();
+    d / x.iter().map(|v| v.abs()).sum::<f64>()
+}
+
+fn peak(x: &[f64]) -> f64 {
+    x.iter().fold(0.0f64, |m, v| m.max(v.abs()))
 }
 
 #[test]
@@ -166,4 +186,175 @@ fn clap_tail_follows_decay() {
     let late = rms(&x[ms(270.0)..ms(290.0)]);
     let early = rms(&x[..ms(30.0)]);
     assert!(late < 0.01 * early, "late {late} early {early}");
+}
+
+#[test]
+fn open_hat_rings_longer() {
+    let energy = |kind| {
+        let x = hat_render(kind, false, 1, ms(1000.0));
+        x[ms(150.0)..].iter().map(|v| v * v).sum::<f64>()
+    };
+    let (open, closed) = (energy(HatKind::Open), energy(HatKind::Closed));
+    assert!(open > 10.0 * closed, "open {open} closed {closed}");
+}
+
+#[test]
+fn brightness_order() {
+    let hat = brightness(&hat_render(HatKind::Closed, false, 1, ms(60.0)));
+    let clap = brightness(&clap_render(false, 1, ms(60.0)));
+    let mut k = Kick::new(SR);
+    k.trigger(false, 1);
+    let kick = brightness(&render(&mut k, ms(60.0)));
+    assert!(
+        hat > clap && clap > kick,
+        "hat {hat} clap {clap} kick {kick}"
+    );
+}
+
+#[test]
+fn drum_levels() {
+    let p = [
+        ("clap", peak(&clap_render(false, 1, ms(500.0)))),
+        (
+            "closed",
+            peak(&hat_render(HatKind::Closed, false, 1, ms(500.0))),
+        ),
+        (
+            "open",
+            peak(&hat_render(HatKind::Open, false, 1, ms(1500.0))),
+        ),
+    ];
+    for (name, v) in p {
+        assert!((0.2..=1.0).contains(&v), "{name} peak {v}");
+    }
+}
+
+/// One voice under test: label, sample renderer, param table, setter.
+type Voice = (&'static str, fn(bool, u64, usize) -> Vec<f64>);
+
+fn voices() -> [Voice; 3] {
+    [
+        ("clap", clap_render),
+        ("closed", |a, s, n| hat_render(HatKind::Closed, a, s, n)),
+        ("open", |a, s, n| hat_render(HatKind::Open, a, s, n)),
+    ]
+}
+
+#[test]
+fn clap_hats_accent_louder_and_brighter() {
+    for (name, run) in voices() {
+        let (n, a) = (run(false, 5, ms(200.0)), run(true, 5, ms(200.0)));
+        let db = 20.0 * (rms(&a) / rms(&n)).log10();
+        assert!((db - ACCENT_GAIN_DB).abs() <= 1.5, "{name} accent {db} dB");
+        assert!(brightness(&a) > brightness(&n), "{name} brightness");
+    }
+}
+
+#[test]
+fn clap_hats_seeded() {
+    for (name, run) in voices() {
+        let a = run(false, 3, ms(100.0));
+        let b = run(false, 3, ms(100.0));
+        assert!(
+            a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()),
+            "{name}"
+        );
+        assert_ne!(a, run(false, 4, ms(100.0)), "{name}");
+    }
+}
+
+#[test]
+fn clap_hats_reset_is_silent() {
+    let mut c = Clap::new(SR);
+    c.trigger(false, 1);
+    (0..100).for_each(|_| {
+        c.get_sample();
+    });
+    c.reset();
+    assert!((0..1000).all(|_| c.get_sample() == 0.0));
+    for kind in [HatKind::Closed, HatKind::Open] {
+        let mut h = Hat::new(kind, SR);
+        h.trigger(false, 1);
+        (0..100).for_each(|_| {
+            h.get_sample();
+        });
+        h.reset();
+        assert!((0..1000).all(|_| h.get_sample() == 0.0));
+    }
+}
+
+#[test]
+fn clap_hats_params_validate() {
+    let mut c = Clap::new(SR);
+    assert!(matches!(
+        c.set_param("clap.nope", 1.0),
+        Err(ParamError::UnknownId(_))
+    ));
+    assert!(matches!(
+        c.set_param("clap.tone", 5000.0),
+        Err(ParamError::OutOfRange { .. })
+    ));
+    assert!(c.set_param("clap.tone", 1000.0).is_ok());
+    let mut h = Hat::new(HatKind::Closed, SR);
+    assert!(matches!(
+        h.set_param("hat_open.tone", 5000.0),
+        Err(ParamError::UnknownId(_))
+    ));
+    assert!(matches!(
+        h.set_param("hat_closed.metal", 101.0),
+        Err(ParamError::OutOfRange { .. })
+    ));
+    assert!(h.set_param("hat_closed.metal", 10.0).is_ok());
+    assert_eq!(h.params().len(), HAT_CLOSED_PARAMS.len());
+    assert_eq!(
+        Hat::new(HatKind::Open, SR).params().len(),
+        HAT_OPEN_PARAMS.len()
+    );
+}
+
+#[test]
+fn clap_hats_bounded_at_extremes() {
+    let run_set = |specs: &[ParamSpec],
+                   mut set: Box<dyn FnMut(usize, f64)>,
+                   mut hit: Box<dyn FnMut(u64) -> Vec<f64>>| {
+        for extreme in [true, false] {
+            for (i, s) in specs.iter().enumerate() {
+                set(i, if extreme { s.max } else { s.min });
+            }
+            let mut p = 0.0f64;
+            for n in 0..20 {
+                for v in hit(n) {
+                    assert!(v.is_finite());
+                    p = p.max(v.abs());
+                }
+            }
+            assert!(p < 4.0, "extreme {extreme} peak {p}");
+        }
+    };
+    use std::{cell::RefCell, rc::Rc};
+    let c = Rc::new(RefCell::new(Clap::new(SR)));
+    let (c1, c2) = (c.clone(), c.clone());
+    run_set(
+        CLAP_PARAMS,
+        Box::new(move |i, v| c1.borrow_mut().set_param_at(i, v)),
+        Box::new(move |n| {
+            let mut c = c2.borrow_mut();
+            c.trigger(true, n);
+            (0..ms(50.0)).map(|_| c.get_sample()).collect()
+        }),
+    );
+    for kind in [HatKind::Closed, HatKind::Open] {
+        let h = Rc::new(RefCell::new(Hat::new(kind, SR)));
+        let (h1, h2) = (h.clone(), h.clone());
+        let specs = h.borrow().params();
+        run_set(
+            specs,
+            Box::new(move |i, v| h1.borrow_mut().set_param_at(i, v)),
+            Box::new(move |n| {
+                let mut h = h2.borrow_mut();
+                h.trigger(true, n);
+                (0..ms(50.0)).map(|_| h.get_sample()).collect()
+            }),
+        );
+    }
 }
