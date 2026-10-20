@@ -392,6 +392,7 @@ ref_handle! {
         fn trigger_note_raw(&mut self, note: i32, accent: bool) = ref_open303_trigger_note;
         fn slide_to_note_raw(&mut self, note: i32, accent: bool) = ref_open303_slide_to_note;
         fn release_note_raw(&mut self, note: i32) = ref_open303_release_note;
+        fn set_normalizers_raw(&mut self, n1: f64, n2: f64) = ref_open303_set_normalizers;
         fn seq_set_mode(&mut self, mode: i32) = ref_open303_seq_set_mode;
         fn seq_set_tempo(&mut self, bpm: f64) = ref_open303_seq_set_tempo;
         fn seq_set_step_length(&mut self, step_length: f64) = ref_open303_seq_set_step_length;
@@ -475,6 +476,14 @@ impl RefOpen303 {
     /// The protected `releaseNote(note)` (bypasses the note list).
     pub fn release_note(&mut self, note: i32) {
         self.raw.release_note_raw(note);
+    }
+
+    /// Writes the protected normalizers `n1` and `n2`. The `Open303`
+    /// constructor leaves them uninitialised (only `triggerNote` and
+    /// `slideToNote` assign them, always 1.0), yet in sequencer mode
+    /// `getSample` reads them during rests before the first note.
+    pub fn set_normalizers(&mut self, n1: f64, n2: f64) {
+        self.raw.set_normalizers_raw(n1, n2);
     }
 
     /// Calls `getSample()` `n` times.

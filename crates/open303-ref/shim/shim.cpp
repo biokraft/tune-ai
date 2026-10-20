@@ -37,6 +37,8 @@ struct Open303Access : public Open303 {
     (o->*(&Open303Access::slideToNote))(note, accent);
   }
   static void release(Open303* o, int note) { (o->*(&Open303Access::releaseNote))(note); }
+  static double Open303::*n1Member() { return &Open303Access::n1; }
+  static double Open303::*n2Member() { return &Open303Access::n2; }
 };
 
 // BlendOscillator borrows its two wavetables, so own them next to it.
@@ -343,6 +345,12 @@ void ref_open303_slide_to_note(void* p, int note, bool accent) {
 }
 void ref_open303_release_note(void* p, int note) {
   Open303Access::release(static_cast<Open303*>(p), note);
+}
+// The protected normalizers n1 and n2. The Open303 constructor leaves them
+// uninitialised; only triggerNote / slideToNote assign them (always 1.0).
+void ref_open303_set_normalizers(void* p, double n1, double n2) {
+  static_cast<Open303*>(p)->*Open303Access::n1Member() = n1;
+  static_cast<Open303*>(p)->*Open303Access::n2Member() = n2;
 }
 
 // Sequencer access (pattern 0 only, steps 0..15; out-of-range steps are ignored).
