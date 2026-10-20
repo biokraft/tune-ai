@@ -1,0 +1,26 @@
+# Build output
+target/
+node_modules/
+dist/
+
+# Audio never goes into git: reference tracks are copyrighted, samples are
+# large and often licensed, renders are reproducible from song files.
+refs/
+samples/user/
+**/renders/
+*.wav
+*.mp3
+*.flac
+*.aif
+*.aiff
+*.ogg
+*.m4a
+
+# Local settings and secrets
+.env
+*.local.toml
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
