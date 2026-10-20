@@ -358,3 +358,69 @@ fn clap_hats_bounded_at_extremes() {
         );
     }
 }
+
+#[test]
+fn clap_hats_tone_changes_mid_hit() {
+    let at = ms(20.0);
+    let n = ms(60.0);
+    // Renders n samples, setting `tone` after `at` samples when `to` is Some.
+    fn go(
+        n: usize,
+        at: usize,
+        to: Option<f64>,
+        mut set: impl FnMut(f64),
+        mut next: impl FnMut() -> f64,
+    ) -> Vec<f64> {
+        (0..n)
+            .map(|i| {
+                if i == at
+                    && let Some(t) = to
+                {
+                    set(t);
+                }
+                next()
+            })
+            .collect()
+    }
+    let check = |name: &str, a: Vec<f64>, b: Vec<f64>| {
+        assert!(
+            a[..at]
+                .iter()
+                .zip(&b[..at])
+                .all(|(x, y)| x.to_bits() == y.to_bits()),
+            "{name} changed before the tone change"
+        );
+        assert!(a[at..] != b[at..], "{name} ignored the tone change");
+    };
+    let clap = |to: Option<f64>| {
+        let mut c = Clap::new(SR);
+        c.trigger(false, 1);
+        let cell = std::cell::RefCell::new(&mut c);
+        go(
+            n,
+            at,
+            to,
+            |t| cell.borrow_mut().set_param("clap.tone", t).unwrap(),
+            || cell.borrow_mut().get_sample(),
+        )
+    };
+    check("clap", clap(None), clap(Some(2000.0)));
+    for (kind, id) in [
+        (HatKind::Closed, "hat_closed.tone"),
+        (HatKind::Open, "hat_open.tone"),
+    ] {
+        let hat = |to: Option<f64>| {
+            let mut h = Hat::new(kind, SR);
+            h.trigger(false, 1);
+            let cell = std::cell::RefCell::new(&mut h);
+            go(
+                n,
+                at,
+                to,
+                |t| cell.borrow_mut().set_param(id, t).unwrap(),
+                || cell.borrow_mut().get_sample(),
+            )
+        };
+        check(id, hat(None), hat(Some(11000.0)));
+    }
+}

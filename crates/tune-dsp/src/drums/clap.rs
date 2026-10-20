@@ -92,9 +92,7 @@ impl Clap {
         self.t = 0.0;
         self.noise.reseed(seed);
         self.filter.reset();
-        let ratio = if accent { ACCENT_TONE_RATIO } else { 1.0 };
-        self.filter
-            .set_frequency((self.tone * ratio).min(0.45 * self.sample_rate));
+        self.apply_tone();
         self.active = true;
     }
 
@@ -132,6 +130,16 @@ impl Clap {
         y
     }
 
+    /// Points the live filter at `tone` (x1.25 when accented, capped at 0.45 sr).
+    /// Recomputes coefficients only when the frequency changes.
+    fn apply_tone(&mut self) {
+        let ratio = if self.accent { ACCENT_TONE_RATIO } else { 1.0 };
+        let hz = (self.tone * ratio).min(0.45 * self.sample_rate);
+        if hz != self.filter.get_frequency() {
+            self.filter.set_frequency(hz);
+        }
+    }
+
     /// Silences the voice until the next trigger. Parameters stay.
     pub fn reset(&mut self) {
         self.active = false;
@@ -160,7 +168,10 @@ impl Clap {
             plain.clamp(spec.min, spec.max)
         };
         match spec.id {
-            "clap.tone" => self.tone = plain,
+            "clap.tone" => {
+                self.tone = plain;
+                self.apply_tone();
+            }
             "clap.decay" => self.decay_s = plain / 1000.0,
             "clap.spread" => self.spread_s = plain / 1000.0,
             id => unreachable!("CLAP_PARAMS id `{id}` has no setter"),
