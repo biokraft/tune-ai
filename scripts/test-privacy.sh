@@ -69,6 +69,20 @@ new_repo
 echo "fn main() {}" > "$T/a.rs"; git -C "$T" add a.rs
 run_case "clean file" 0 ""
 
+# Renames must still be scanned (rename detection must not hide them).
+new_repo
+echo "plain notes" > "$T/notes.txt"; git -C "$T" add notes.txt
+git -C "$T" -c user.name=t -c user.email=t${AT}example.com commit -q -m t --no-verify
+git -C "$T" mv notes.txt take.wav
+run_case "rename to audio" 1 "take.wav: audio file"
+
+new_repo
+printf 'line one\nline two\nline three\nline four\n' > "$T/notes.txt"; git -C "$T" add notes.txt
+git -C "$T" -c user.name=t -c user.email=t${AT}example.com commit -q -m t --no-verify
+git -C "$T" mv notes.txt moved.txt
+echo "mail someone${AT}gmail.com" >> "$T/moved.txt"; git -C "$T" add moved.txt
+run_case "rename with email" 1 "moved.txt: email address"
+
 # Non-staged mode scans tracked files.
 new_repo
 echo "see ${U1}someone/file" > "$T/a.txt"; git -C "$T" add a.txt

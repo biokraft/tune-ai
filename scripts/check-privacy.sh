@@ -25,7 +25,7 @@ is_allowlisted() {
 }
 
 if [ "$STAGED" -eq 1 ]; then
-  FILES="$(git diff --cached --name-only --diff-filter=ACM)"
+  FILES="$(git diff --cached --name-only --no-renames --diff-filter=ACM)"
 else
   FILES="$(git ls-files)"
 fi
