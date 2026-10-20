@@ -1,0 +1,12 @@
+[package]
+name = "tune-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tune"
+path = "src/main.rs"
+
+[lints]
+workspace = true
