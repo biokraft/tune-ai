@@ -42,7 +42,6 @@ impl AcidPlayer {
     /// A player at step 0, in the state `AcidSequencer::start` and the
     /// sequencer branch of `Open303::noteOn` leave.
     pub fn new(pattern: AcidPattern, bpm: f64, sample_rate: f64) -> Self {
-        assert!(!pattern.steps.is_empty(), "AcidPattern has no steps");
         Self {
             pattern,
             pending: None,
@@ -60,7 +59,6 @@ impl AcidPlayer {
     /// Replaces the pattern from the next step boundary on, keeping the step
     /// position (wrapped to the new length).
     pub fn set_pattern(&mut self, pattern: AcidPattern) {
-        assert!(!pattern.steps.is_empty(), "AcidPattern has no steps");
         self.pending = Some(pattern);
     }
 
@@ -113,13 +111,13 @@ impl AcidPlayer {
 
         if let Some(p) = self.pending.take() {
             self.pattern = p;
-            self.step %= self.pattern.steps.len();
+            self.step %= self.pattern.steps().len();
         }
-        let len = self.pattern.steps.len();
-        let note = &self.pattern.steps[self.step];
+        let len = self.pattern.steps().len();
+        let note = &self.pattern.steps()[self.step];
         self.step = (self.step + 1) % len;
         // AcidSequencer::getNextScheduledNote:
-        let next_has_gate = self.pattern.steps[self.step].note.is_some();
+        let next_has_gate = self.pattern.steps()[self.step].note.is_some();
 
         // back in Open303::getSample:
         match note.note {
