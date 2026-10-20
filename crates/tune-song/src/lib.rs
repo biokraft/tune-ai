@@ -11,6 +11,7 @@ mod error;
 mod model;
 mod raw;
 mod validate;
+mod write;
 
 use std::path::Path;
 
