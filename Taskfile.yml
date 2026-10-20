@@ -34,3 +34,10 @@ tasks:
       - task: lint
       - task: test
       - task: privacy
+
+  demo:
+    desc: Render the demo 303 line and play it
+    cmds:
+      - mkdir -p scratch
+      - cargo run --release -p tune-cli -- render-303 --demo --out scratch/demo.wav
+      - afplay scratch/demo.wav
