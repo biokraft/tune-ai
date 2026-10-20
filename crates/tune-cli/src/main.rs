@@ -97,13 +97,13 @@ fn build_spec(a: &Render303) -> Result<RenderSpec, String> {
         pattern = pattern.or(Some(DEMO_PATTERN));
         bars = 8;
         // No volume override: with the default volume (-12 dB) the demo peaks at
-        // -3.4 dBFS, within the -1 dBFS ceiling (acid303.volume=0 gives -1.3).
+        // -4.1 dBFS, within the -1 dBFS ceiling (acid303.volume=0 gives -1.9).
         params.extend(
             [
                 ("acid303.resonance", 85.0),
                 ("acid303.env_mod", 60.0),
                 ("acid303.decay", 400.0),
-                ("acid303.accent", 80.0),
+                ("acid303.accent", 55.0),
                 ("dist.drive", 12.0),
             ]
             .map(|(k, v)| (k.to_string(), v)),
