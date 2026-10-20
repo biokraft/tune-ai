@@ -1,4 +1,4 @@
-use tune_dsp::{ACCENT_GAIN_DB, KICK_PARAMS, Kick, ParamError};
+use tune_dsp::{ACCENT_GAIN_DB, Clap, KICK_PARAMS, Kick, ParamError};
 
 const SR: f64 = 48_000.0;
 
@@ -139,4 +139,31 @@ fn kick_seeded() {
             .all(|(x, y)| x.to_bits() == y.to_bits())
     );
     assert_ne!(a, run(4));
+}
+
+// ---- clap ----
+
+fn clap_render(accent: bool, seed: u64, n: usize) -> Vec<f64> {
+    let mut c = Clap::new(SR);
+    c.trigger(accent, seed);
+    (0..n).map(|_| c.get_sample()).collect()
+}
+
+#[test]
+fn clap_has_three_slaps() {
+    let x = clap_render(false, 1, ms(100.0));
+    let s = ms(10.0);
+    for b in 1..=2 {
+        let after = rms(&x[b * s..b * s + ms(2.0)]);
+        let before = rms(&x[b * s - ms(2.0)..b * s]);
+        assert!(after > 2.0 * before, "slap {b}: {after} vs {before}");
+    }
+}
+
+#[test]
+fn clap_tail_follows_decay() {
+    let x = clap_render(false, 1, ms(300.0));
+    let late = rms(&x[ms(270.0)..ms(290.0)]);
+    let early = rms(&x[..ms(30.0)]);
+    assert!(late < 0.01 * early, "late {late} early {early}");
 }
