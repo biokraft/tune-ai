@@ -405,6 +405,20 @@ impl Acid303 {
         Ok(())
     }
 
+    /// [`Acid303::new`] (identical to the C++ constructor) followed by
+    /// `set_param(id, default)` for every entry of [`ACID303_PARAMS`], so the
+    /// voice sits at its documented defaults.
+    ///
+    /// [`ACID303_PARAMS`]: super::ACID303_PARAMS
+    pub fn with_param_defaults(sample_rate: f64) -> Self {
+        let mut s = Self::new(sample_rate);
+        for p in super::ACID303_PARAMS {
+            s.set_param(p.id, p.default)
+                .expect("ACID303_PARAMS defaults are within their own ranges");
+        }
+        s
+    }
+
     // inquiry
 
     pub fn waveform(&self) -> f64 {

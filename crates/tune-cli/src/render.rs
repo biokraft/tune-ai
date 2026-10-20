@@ -122,16 +122,8 @@ pub fn render_acid(spec: &RenderSpec) -> Result<Vec<f32>, RenderError> {
             ),
         });
     }
-    let mut voice = Acid303::new(sr);
+    let mut voice = Acid303::with_param_defaults(sr);
     let mut dist = Distortion::new(sr);
-
-    // A fresh voice is not at its documented defaults, so set every one.
-    for p in ACID303_PARAMS {
-        voice.set_param(p.id, p.default)?;
-    }
-    for p in DIST_PARAMS {
-        dist.set_param(p.id, p.default)?;
-    }
     for (id, value) in &spec.params {
         let (target, _) = route(id)?;
         apply(&mut voice, &mut dist, target, id, *value)?;

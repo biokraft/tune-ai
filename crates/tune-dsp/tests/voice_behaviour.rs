@@ -234,3 +234,49 @@ fn idle_voice_is_silent_and_note_off_decays() {
     let tail = render(&mut v, 96_000);
     assert!(tail[tail.len() - 4_800..].iter().all(|x| x.abs() < 1e-4));
 }
+
+#[test]
+fn with_param_defaults_sets_every_documented_default() {
+    use tune_dsp::acid303::ACID303_PARAMS;
+    let v = Acid303::with_param_defaults(FS);
+    let got = |id: &str| match id {
+        "acid303.waveform" => v.waveform(),
+        "acid303.tuning" => v.tuning(),
+        "acid303.cutoff" => v.cutoff(),
+        "acid303.resonance" => v.resonance(),
+        "acid303.env_mod" => v.env_mod(),
+        "acid303.decay" => v.decay(),
+        "acid303.accent" => v.accent(),
+        "acid303.volume" => v.volume(),
+        "acid303.slide_time" => v.slide_time(),
+        other => panic!("test lacks a getter for {other}"),
+    };
+    for p in ACID303_PARAMS {
+        let g = got(p.id);
+        assert!(
+            (g - p.default).abs() <= 1e-9 * p.default.abs().max(1.0),
+            "{}: got {g}, default {}",
+            p.id,
+            p.default
+        );
+    }
+}
+
+#[test]
+fn with_param_defaults_differs_from_new_only_by_params() {
+    // Same note through `new` + manual -12 dB volume (the only default that
+    // changes the level) and through `with_param_defaults` at volume 0 dB.
+    let note = |mut v: Acid303| {
+        v.trigger_note(36, false);
+        render(&mut v, 4_000)
+    };
+    let defaults = note(Acid303::with_param_defaults(FS));
+    let mut quiet = Acid303::with_param_defaults(FS);
+    quiet.set_volume(0.0);
+    let full = note(quiet);
+    let scale = tune_dsp::acid303::math::db2amp(-12.0);
+    assert!(peak(&full) > 0.0);
+    for (d, f) in defaults.iter().zip(&full) {
+        assert!((d - f * scale).abs() <= 1e-12, "{d} vs {}", f * scale);
+    }
+}
