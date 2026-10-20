@@ -604,6 +604,16 @@ impl Acid303 {
         self.current_vel = 0;
     }
 
+    /// Marks the voice active without playing a note: the `idle = false` that
+    /// the sequencer branch of `Open303::noteOn` sets when the C++ sequencer
+    /// starts. From then on the DSP chain runs through rests (the oscillator
+    /// keeps its phase running), and `trigger_note` no longer resets the
+    /// oscillator phase and filter states. `AcidPlayer` calls it to match the
+    /// C++ sequencer.
+    pub fn wake(&mut self) {
+        self.idle = false;
+    }
+
     /// `triggerNote`: starts a note, retriggering both envelopes.
     pub fn trigger_note(&mut self, note: u8, accent: bool) {
         self.trigger_note_number(i32::from(note), accent);
