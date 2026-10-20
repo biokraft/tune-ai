@@ -12,6 +12,7 @@ pub mod fft;
 pub mod leaky_integrator;
 pub mod math;
 pub mod one_pole;
+pub mod teebee;
 pub mod wavetable;
 
 pub use analog_env::AnalogEnvelope;
@@ -21,4 +22,5 @@ pub use decay_env::DecayEnvelope;
 pub use elliptic_qb::EllipticQuarterBandFilter;
 pub use leaky_integrator::LeakyIntegrator;
 pub use one_pole::{OnePoleFilter, OnePoleMode};
+pub use teebee::{FilterMode, TeeBeeFilter};
 pub use wavetable::{WaveTable, Waveform};
