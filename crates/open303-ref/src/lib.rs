@@ -389,6 +389,9 @@ ref_handle! {
         fn get_raw(&mut self, param: i32) -> f64 = ref_open303_get;
         fn note_on_raw(&mut self, note: i32, velocity: i32, detune: f64) = ref_open303_note_on;
         fn get_sample(&mut self) -> f64 = ref_open303_get_sample;
+        fn trigger_note_raw(&mut self, note: i32, accent: bool) = ref_open303_trigger_note;
+        fn slide_to_note_raw(&mut self, note: i32, accent: bool) = ref_open303_slide_to_note;
+        fn release_note_raw(&mut self, note: i32) = ref_open303_release_note;
         fn seq_set_mode(&mut self, mode: i32) = ref_open303_seq_set_mode;
         fn seq_set_tempo(&mut self, bpm: f64) = ref_open303_seq_set_tempo;
         fn seq_set_step_length(&mut self, step_length: f64) = ref_open303_seq_set_step_length;
@@ -424,6 +427,11 @@ impl RefOpen303 {
         self.raw.get_raw(p as i32)
     }
 
+    /// `setSampleRate(sample_rate)`.
+    pub fn set_sample_rate(&mut self, sample_rate: f64) {
+        self.raw.set_sample_rate(sample_rate);
+    }
+
     /// `filter.setMode(mode)` (a `TeeBeeFilter::modes` value).
     pub fn set_filter_mode(&mut self, mode: i32) {
         self.raw.set_filter_mode(mode);
@@ -452,6 +460,21 @@ impl RefOpen303 {
     /// `getSample()`.
     pub fn get_sample(&mut self) -> f64 {
         self.raw.get_sample()
+    }
+
+    /// The protected `triggerNote(note, accent)` (bypasses the note list).
+    pub fn trigger_note(&mut self, note: i32, accent: bool) {
+        self.raw.trigger_note_raw(note, accent);
+    }
+
+    /// The protected `slideToNote(note, accent)` (bypasses the note list).
+    pub fn slide_to_note(&mut self, note: i32, accent: bool) {
+        self.raw.slide_to_note_raw(note, accent);
+    }
+
+    /// The protected `releaseNote(note)` (bypasses the note list).
+    pub fn release_note(&mut self, note: i32) {
+        self.raw.release_note_raw(note);
     }
 
     /// Calls `getSample()` `n` times.

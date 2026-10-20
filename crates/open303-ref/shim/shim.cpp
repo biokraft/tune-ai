@@ -27,6 +27,18 @@ struct AcidPatternAccess : public AcidPattern {
   static int AcidPattern::*numStepsMember() { return &AcidPatternAccess::numSteps; }
 };
 
+// Open303::triggerNote / slideToNote / releaseNote are protected; reach them
+// through pointers-to-member formed in a derived class, as above.
+struct Open303Access : public Open303 {
+  static void trigger(Open303* o, int note, bool accent) {
+    (o->*(&Open303Access::triggerNote))(note, accent);
+  }
+  static void slide(Open303* o, int note, bool accent) {
+    (o->*(&Open303Access::slideToNote))(note, accent);
+  }
+  static void release(Open303* o, int note) { (o->*(&Open303Access::releaseNote))(note); }
+};
+
 // BlendOscillator borrows its two wavetables, so own them next to it.
 struct BlendHolder {
   MipMappedWaveTable wt1, wt2;
@@ -323,6 +335,15 @@ void ref_open303_note_on(void* p, int note, int velocity, double detune) {
   static_cast<Open303*>(p)->noteOn(note, velocity, detune);
 }
 double ref_open303_get_sample(void* p) { return static_cast<Open303*>(p)->getSample(); }
+void ref_open303_trigger_note(void* p, int note, bool accent) {
+  Open303Access::trigger(static_cast<Open303*>(p), note, accent);
+}
+void ref_open303_slide_to_note(void* p, int note, bool accent) {
+  Open303Access::slide(static_cast<Open303*>(p), note, accent);
+}
+void ref_open303_release_note(void* p, int note) {
+  Open303Access::release(static_cast<Open303*>(p), note);
+}
 
 // Sequencer access (pattern 0 only, steps 0..15; out-of-range steps are ignored).
 void ref_open303_seq_set_mode(void* p, int mode) {

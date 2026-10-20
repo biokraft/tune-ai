@@ -19,3 +19,24 @@ fn note_on_sounds_and_note_off_decays_to_silence() {
         "note did not decay to silence"
     );
 }
+
+#[test]
+fn trigger_slide_and_release_drive_the_voice() {
+    use open303_ref::RefParam;
+    let mut synth = RefOpen303::new(48000.0);
+    // `BlendOscillator::blend` is uninitialised in C++; set it explicitly.
+    synth.set(RefParam::Waveform, 0.0);
+    synth.trigger_note(36, true);
+    let head = synth.render(4800);
+    assert!(head.iter().any(|x| x.abs() > 1e-3), "trigger made no sound");
+
+    synth.slide_to_note(43, false);
+    assert!(synth.render(4800).iter().all(|x| x.is_finite()));
+
+    synth.release_note(43);
+    let tail = synth.render(96_000);
+    assert!(
+        tail[tail.len() - 4800..].iter().all(|x| x.abs() < 1e-4),
+        "release did not decay to silence"
+    );
+}
