@@ -103,6 +103,11 @@ impl BlendOscillator {
         &mut self.wave_table_1
     }
 
+    /// Read access to the 2nd wavetable.
+    pub fn wave_table_2(&self) -> &WaveTable {
+        &self.wave_table_2
+    }
+
     /// Access to the 2nd wavetable.
     pub fn wave_table_2_mut(&mut self) -> &mut WaveTable {
         &mut self.wave_table_2
