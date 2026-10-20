@@ -492,6 +492,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tune-engine"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "tune-dsp",
+ "tune-song",
+]
+
+[[package]]
 name = "tune-song"
 version = "0.1.0"
 dependencies = [
