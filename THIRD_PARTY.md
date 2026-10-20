@@ -18,4 +18,22 @@
   are checked sample-for-sample against the C++ reference. Ported files:
   `math.rs`, `leaky_integrator.rs`, `one_pole.rs`, `biquad.rs`,
   `elliptic_qb.rs`, `decay_env.rs`, `analog_env.rs`, `wavetable.rs`,
-  `blend_osc.rs`, `teebee.rs`, `voice.rs`, `pattern.rs`, `player.rs`.
+  `fft.rs`, `blend_osc.rs`, `teebee.rs`, `voice.rs`, `player.rs`.
+- `crates/tune-dsp/src/acid303/pattern.rs` is original tune-ai step notation
+  (`AcidPattern`, parse/format). It is not a port of `rosic_AcidPattern`.
+
+## Ooura FFT package (via Open303)
+
+- Project: General Purpose FFT (Fast Fourier/Cosine/Sine Transform) Package
+  by Takuya Ooura (`fft4g.c`)
+- URL: https://www.kurims.kyoto-u.ac.jp/~ooura/fft.html
+- Vendored: `third_party/open303/fft4g.c`, as shipped inside Open303,
+  unmodified.
+- Use: `crates/tune-dsp/src/acid303/fft.rs` is a Rust port of Open303's
+  `rosic_FourierTransformerRadix2` together with the routines of `fft4g.c`
+  that its real-signal path calls (`rdft`, `makewt`, `makect`, `bitrv2`,
+  `cftfsub`, `cftbsub`, `cft1st`, `cftmdl`, `rftfsub`, `rftbsub`).
+- Terms: the package page permits use, copying and modification for any
+  purpose and without fee, and asks that a modified version carry a
+  reference to the original. This port is a modified version, so the
+  original is credited here and in the `fft.rs` module header.

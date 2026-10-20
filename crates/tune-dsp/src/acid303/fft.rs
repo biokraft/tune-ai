@@ -3,6 +3,10 @@
 //! calls (`rdft`, `makewt`, `makect`, `bitrv2`, `cftfsub`, `cftbsub`,
 //! `cft1st`, `cftmdl`, `rftfsub`, `rftbsub`).
 //!
+//! `fft4g.c` is Takuya Ooura's General Purpose FFT Package
+//! (<https://www.kurims.kyoto-u.ac.jp/~ooura/fft.html>); this is a modified
+//! (ported) version, see `THIRD_PARTY.md`.
+//!
 //! The C++ passes pointer offsets (`ip + 2`, `w + nw`); here those are slices.
 //! All state lives in the instance, so two transformers never interfere.
 
