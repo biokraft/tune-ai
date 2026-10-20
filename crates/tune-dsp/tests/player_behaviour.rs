@@ -185,7 +185,7 @@ fn sixty_four_step_pattern() {
         })
         .collect();
     let pattern = AcidPattern::parse(&tokens.join(" ")).unwrap();
-    assert_eq!(pattern.steps.len(), 64);
+    assert_eq!(pattern.steps().len(), 64);
     let mut v = voice();
     v.set_resonance(85.0);
     v.set_env_mod(70.0);
@@ -261,20 +261,14 @@ fn g9_tie_matches_the_cpp_voice() {
 }
 
 #[test]
-fn notes_above_127_clamp_to_127() {
+fn notes_above_127_are_rejected_at_construction() {
     let step = |note| AcidStep {
         note: Some(note),
         accent: true,
         slide: false,
     };
-    let high = AcidPattern {
-        steps: vec![step(255), step(200)],
-    };
-    let top = AcidPattern {
-        steps: vec![step(127), step(127)],
-    };
-    let n = bars(1.0);
-    assert_eq!(render_with(voice(), high, n), render_with(voice(), top, n));
+    assert!(AcidPattern::new(vec![step(255), step(200)]).is_err());
+    assert!(AcidPattern::new(vec![step(127), step(127)]).is_ok());
 }
 
 #[test]
