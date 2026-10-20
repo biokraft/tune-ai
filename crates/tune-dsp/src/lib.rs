@@ -1,5 +1,7 @@
 //! DSP building blocks for tune-ai.
 
+#![deny(unsafe_code)]
+
 pub mod acid303;
 pub mod fx;
 pub mod param;
