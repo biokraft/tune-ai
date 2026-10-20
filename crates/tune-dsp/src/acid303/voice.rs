@@ -671,7 +671,7 @@ impl Acid303 {
     /// keeps its phase running), and `trigger_note` no longer resets the
     /// oscillator phase and filter states. `AcidPlayer` calls it to match the
     /// C++ sequencer.
-    pub fn wake(&mut self) {
+    pub(crate) fn wake(&mut self) {
         self.idle = false;
     }
 
