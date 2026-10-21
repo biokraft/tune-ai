@@ -42,6 +42,8 @@ pub enum StudioError {
     Audio(String),
     #[error("timed out")]
     Timeout,
+    #[error("the studio has shut down")]
+    Closed,
 }
 
 fn views_summary(views: &[ErrorView]) -> String {

@@ -1291,6 +1291,7 @@ dependencies = [
  "thiserror 2.0.21",
  "toml_edit",
  "tune-dsp",
+ "tune-engine",
  "tune-song",
 ]
 
