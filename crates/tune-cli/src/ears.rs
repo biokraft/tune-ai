@@ -10,6 +10,7 @@ use tune_analysis::{Analysis, Audio, BarMap, SectionSpan, decode_file};
 use tune_engine::{CompiledSong, RenderOptions, render};
 
 use crate::cmd::{load, sample_rate};
+use crate::refs::find_refs;
 use crate::report::{Failure, parse_bar_range};
 
 /// What an analysis command measures.
@@ -235,6 +236,32 @@ fn load_file_input(
         png_name,
         source,
     })
+}
+
+/// Loads the reference called `name` (from `tune refs`). Its source `path`
+/// and any error show the configured path (`~/...`, `refs/<file>`), never the
+/// expanded one, so a home directory stays out of output that gets quoted.
+pub fn load_named_ref(name: &str) -> Result<Input, Vec<Failure>> {
+    let cwd = std::env::current_dir().map_err(|e| fail(e.to_string()))?;
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let refs = find_refs(&cwd, home.as_deref()).map_err(fail)?;
+    let entry = refs.resolve(name).map_err(fail)?;
+    let resolved = entry.path.display().to_string();
+    let hide = |s: &str| s.replace(&resolved, &entry.configured);
+    let mut input = load_input(&entry.path, None, None, None).map_err(|failures| {
+        failures
+            .into_iter()
+            .map(|mut f| {
+                f.message = hide(&f.message);
+                f.file = f.file.as_deref().map(hide);
+                f
+            })
+            .collect::<Vec<_>>()
+    })?;
+    input.source["path"] = Value::String(entry.configured.clone());
+    input.stem = name.to_string();
+    input.png_name = name.to_string();
+    Ok(input)
 }
 
 /// `--png` with no value (or `""`) writes `scratch/<default_name>.png`.

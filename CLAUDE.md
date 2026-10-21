@@ -118,8 +118,12 @@ keeps a faint side residue.
 
 References live outside git. Put `[refs]` `<name> = "~/path/file.mp3"` in
 `tune.local.toml` at the repo root (gitignored) or drop files into `refs/`
-(name = file stem); `tune refs --json` checks that each resolves (it echoes
-the configured paths: keep them out of anything committed). Never read
+(name = file stem); `tune refs --json` checks that each resolves. It echoes
+the configured paths and also the expanded `resolved` path and repo root, so
+keep its output out of reports and anything committed. With `--ref <name>`,
+`tune compare` shows only the configured path (`~/...` or `refs/<file>`) in
+`source.path` and in error messages, never the expanded one; a reference given
+as a path is echoed as typed, so prefer `--ref <name>`. Never read
 or print `tune.local.toml` itself. Never commit references, PNGs or the local
 config.
 
