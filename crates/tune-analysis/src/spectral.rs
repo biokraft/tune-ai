@@ -153,7 +153,8 @@ pub struct Brightness {
     pub median_hz: Option<f64>,
     pub p10_hz: Option<f64>,
     pub p90_hz: Option<f64>,
-    /// `log2(p90 / p10)`: how far the filter moves.
+    /// `log2(p90 / p10)`: how far the whole-mix centroid moves. It follows a
+    /// filter sweep only where the swept part dominates the spectrum.
     pub range_oct: Option<f64>,
     /// Median centroid of each eighth of the duration.
     pub profile_hz: [Option<f64>; 8],
