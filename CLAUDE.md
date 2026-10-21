@@ -28,8 +28,10 @@ Songs are TOML files, `songs/<name>/song.toml`. Loop:
 2. `tune validate <song> --json`. Errors carry `line` and `column`; fix them all.
 3. `tune info <song> --json` for the section, bar and time map.
 4. `tune render <song> --bars A..B --json --out scratch/x.wav` for the passage
-   in question. Read `peak_dbfs` and `pre_clip_peak_dbfs` (pre-clip above 0
-   means the master clipper is working; lower gains).
+   in question. Read `peak_dbfs` and `pre_clip_peak_dbfs`. The soft
+   clipper starts shaping at -6 dBFS; a pre-clip peak above -1 dBFS means it
+   is limiting hard, so lower gains. Text mode prints `warning:` only in that
+   case and `note:` when only the -6 dBFS knee is crossed (both on stderr).
 
 Notation:
 
