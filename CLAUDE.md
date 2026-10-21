@@ -112,9 +112,11 @@ bars. Failures exit 2 with a message.
 A quantity that does not exist (silence, too short) is `null`; a mono
 signal's `side_to_mid_db` floors at -200. In `compare`, a band delta is `null`
 with a "not compared" verdict when one side lacks content there, and the width
-delta is `null` when exactly one side is mono (0 when both are). A side 60 dB
-or more below the mid counts as mono: a mono master in a lossy stereo file
-keeps a faint side residue.
+delta is `null` when exactly one side is mono, with a verdict naming that side
+(0 when both are). A side 60 dB or more below the mid counts as mono: a mono
+master in a lossy stereo file keeps a faint side residue, so its
+`side_to_mid_db` reads about -90, not -200. A side with no mid at all (left
+and right in anti-phase, +200) is not compared either.
 
 References live outside git. Put `[refs]` `<name> = "~/path/file.mp3"` in
 `tune.local.toml` at the repo root (gitignored) or drop files into `refs/`
