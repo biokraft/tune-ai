@@ -194,3 +194,15 @@ fn slice_clamps() {
     assert_eq!(a.slice(90000..200000).frames(), 6000);
     assert_eq!(a.slice(200000..300000).frames(), 0);
 }
+
+#[test]
+fn wav_pcm8_is_centred() {
+    let src = mono(48000, vec![0.0, 0.0, 0.5, -0.5, 0.25, -1.0]);
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("e.wav");
+    write_wav(&p, &src, 8);
+    let got = decode_file(&p).unwrap();
+    assert_eq!(got.channels[0][0], 0.0);
+    assert_eq!(got.channels[0][1], 0.0);
+    assert!(max_err(&got, &src) <= 1.0 / 128.0);
+}
