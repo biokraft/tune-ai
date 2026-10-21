@@ -222,6 +222,9 @@ struct Player {
     /// A song change not sent yet (the command queue was full), and
     /// whether it clears the knob overrides; retried every tick.
     retry: Option<bool>,
+    /// The loop changed and has not reached the engine yet; it goes after
+    /// any waiting swap, so the engine clamps it against the new song.
+    loop_unsent: bool,
 }
 
 impl Player {
@@ -460,6 +463,7 @@ impl Actor {
             rate,
             songs: VecDeque::from([(0, compiled)]),
             retry: None,
+            loop_unsent: false,
         });
         self.cursor_bar = bar;
         self.send_drag();
@@ -488,10 +492,10 @@ impl Actor {
     fn set_loop(&mut self, bars: Option<[u32; 2]>) -> Result<Value, StudioError> {
         let total = self.core()?.song().total_bars();
         self.loop_bars = clamp_loop(bars, total);
-        let range = self.loop_range();
         if let Some(player) = &mut self.player {
-            player.controller.set_loop(range).map_err(audio_error)?;
+            player.loop_unsent = true;
         }
+        self.send_loop();
         self.emit_state();
         Ok(Value::Null)
     }
@@ -651,19 +655,25 @@ impl Actor {
         let total = self.total_bars();
         self.cursor_bar = self.cursor_bar.min(total.saturating_sub(1));
         self.loop_bars = clamp_loop(self.loop_bars, total);
-        let range = self.loop_range();
         let Some(player) = &mut self.player else {
             return;
         };
         player.retry = Some(player.retry.unwrap_or(false) || clear_overrides);
+        player.loop_unsent = true;
         self.send_swap();
+        self.send_loop();
+    }
+
+    /// Sends the stored loop if it has not reached the engine, once no swap
+    /// waits; a full queue leaves it for the next tick.
+    fn send_loop(&mut self) {
+        let range = self.loop_range();
         let Some(player) = &mut self.player else {
             return;
         };
-        if let Err(e) = player.controller.set_loop(range) {
-            self.emit(Event::Error {
-                message: format!("cannot update the loop: {e}"),
-            });
+        if player.loop_unsent && player.retry.is_none() && player.controller.set_loop(range).is_ok()
+        {
+            player.loop_unsent = false;
         }
     }
 
@@ -755,6 +765,7 @@ impl Actor {
                     playing: true,
                 });
                 self.send_swap();
+                self.send_loop();
                 self.refresh_drag();
             }
         }
