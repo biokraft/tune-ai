@@ -1,6 +1,6 @@
 use tune_dsp::{
     ACCENT_GAIN_DB, CLAP_PARAMS, Clap, HAT_CLOSED_PARAMS, HAT_OPEN_PARAMS, Hat, HatKind,
-    KICK_PARAMS, Kick, ParamError, ParamSpec,
+    KICK_PARAMS, Kick, ParamError, ParamSpec, RIDE_PARAMS,
 };
 
 const SR: f64 = 48_000.0;
@@ -456,5 +456,43 @@ fn hats_unchanged_by_ride() {
         hash(HatKind::Open, true),
         11074481127065425725,
         "open accent"
+    );
+}
+
+#[test]
+fn ride_rings_longer_than_open_hat() {
+    let tail = |kind| {
+        let x = hat_render(kind, false, 1, ms(1000.0));
+        rms(&x[ms(600.0)..ms(900.0)])
+    };
+    let (ride, open) = (tail(HatKind::Ride), tail(HatKind::Open));
+    assert!(ride > open, "ride {ride} open {open}");
+}
+
+#[test]
+fn ride_default_peak_in_range() {
+    for seed in 1..=50 {
+        let p = peak(&hat_render(HatKind::Ride, false, seed, ms(3000.0)));
+        assert!((0.6..=1.0).contains(&p), "seed {seed} peak {p}");
+    }
+}
+
+#[test]
+fn ride_accent_is_louder() {
+    let n = rms(&hat_render(HatKind::Ride, false, 5, ms(200.0)));
+    let a = rms(&hat_render(HatKind::Ride, true, 5, ms(200.0)));
+    let db = 20.0 * (a / n).log10();
+    assert!((db - ACCENT_GAIN_DB).abs() <= 1.5, "accent {db} dB");
+}
+
+#[test]
+fn ride_is_deterministic_per_seed() {
+    let a = hat_render(HatKind::Ride, false, 3, ms(100.0));
+    let b = hat_render(HatKind::Ride, false, 3, ms(100.0));
+    assert!(a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()));
+    assert_ne!(a, hat_render(HatKind::Ride, false, 4, ms(100.0)));
+    assert_eq!(
+        Hat::new(HatKind::Ride, SR).params().len(),
+        RIDE_PARAMS.len()
     );
 }

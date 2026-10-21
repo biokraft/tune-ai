@@ -131,6 +131,7 @@ fn instrument_kind_names_round_trip() {
         InstrumentKind::Clap,
         InstrumentKind::HatClosed,
         InstrumentKind::HatOpen,
+        InstrumentKind::Ride,
     ] {
         assert_eq!(InstrumentKind::from_name(kind.name()), Some(kind));
         assert_eq!(kind.is_drum(), kind != InstrumentKind::Acid303);
@@ -361,4 +362,30 @@ fn load_song_invalid_error() {
         Err(LoadError::Invalid(errors)) => assert!(messages(&errors).contains("bpm")),
         other => panic!("expected LoadError::Invalid, got {other:?}"),
     }
+}
+
+#[test]
+fn ride_track_parses() {
+    let src = MINI
+        .replacen(
+            "[patterns.k4]",
+            "[tracks.ride]\ninstrument = \"ride\"\nparams = { \"ride.decay\" = 2000 }\n\n[patterns.r]\ntrack = \"ride\"\nsteps = \"x.x.x.x.x.x.x.x.\"\n\n[patterns.k4]",
+            1,
+        )
+        .replacen("play = { kick = \"k4\", hat = \"h\" }", "play = { kick = \"k4\", hat = \"h\", ride = \"r\" }", 1);
+    let song = parse_song(&src).unwrap_or_else(|e| panic!("{e:?}"));
+    let ride = &song.tracks["ride"];
+    assert_eq!(ride.instrument, InstrumentKind::Ride);
+    assert_eq!(ride.params["ride.decay"], 2000.0);
+    assert_eq!(InstrumentKind::ALL.len(), 6);
+    assert_eq!(InstrumentKind::ALL[5], InstrumentKind::Ride);
+
+    let bad = src.replacen("\"ride.decay\" = 2000", "\"ride.nope\" = 1", 1);
+    let errors = parse_song(&bad).unwrap_err();
+    let text = messages(&errors);
+    assert!(
+        text.contains("unknown parameter `ride.nope` for ride"),
+        "{text}"
+    );
+    assert!(text.contains("ride.tone"), "{text}");
 }
