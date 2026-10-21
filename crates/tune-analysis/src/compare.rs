@@ -77,7 +77,7 @@ pub fn compare(ours: &Analysis, reference: &Analysis) -> Comparison {
     }
     if ol.true_peak_dbtp > TRUE_PEAK_MAX_DBTP {
         v.push(format!(
-            "true peak {:.1} dBTP: over the -1 dBTP ceiling",
+            "true peak {:.2} dBTP: over the -1 dBTP ceiling",
             ol.true_peak_dbtp
         ));
     }
