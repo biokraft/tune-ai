@@ -96,7 +96,7 @@ fn true_peak_over() {
     let c = compare(&o, &r);
     assert!(
         c.verdicts
-            .contains(&"true peak -0.5 dBTP: over the -1 dBTP ceiling".to_string()),
+            .contains(&"true peak -0.50 dBTP: over the -1 dBTP ceiling".to_string()),
         "{:?} tp {}",
         c.verdicts,
         o.loudness.true_peak_dbtp
@@ -132,5 +132,18 @@ fn silent_reference_tolerated() {
     assert_eq!(
         c.to_json()["deltas"]["bands"]["sub"],
         serde_json::Value::Null
+    );
+}
+
+#[test]
+fn true_peak_just_over_shows_two_decimals() {
+    let r = analyze(&six_sine(None), None).unwrap();
+    let o = analyze(&mono(SR, sine(SR, 1000.0, -0.97, 3.0, 0.0)), None).unwrap();
+    let c = compare(&o, &r);
+    assert!(
+        c.verdicts
+            .contains(&"true peak -0.97 dBTP: over the -1 dBTP ceiling".to_string()),
+        "{:?}",
+        c.verdicts
     );
 }
