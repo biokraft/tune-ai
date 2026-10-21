@@ -7,8 +7,10 @@
 
 #![forbid(unsafe_code)]
 
+mod diff;
 mod doc;
 mod path;
 
+pub use diff::{Change, diff_songs, is_whole_replace};
 pub use doc::{EditError, SongDoc, effective_value};
 pub use path::{SongPath, TrackField};
