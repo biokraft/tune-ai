@@ -1,0 +1,11 @@
+target
+crates
+songs
+docs
+pnpm-lock.yaml
+node_modules
+dist
+scratch
+third_party
+.superpowers
+*.md
