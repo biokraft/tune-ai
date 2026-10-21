@@ -200,3 +200,48 @@ fn changes_missing_log() {
     assert_eq!(v["changes"], serde_json::json!([]));
     assert_eq!(v["until"], Value::Null);
 }
+
+fn mixed_copy() -> (TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/mixed.toml");
+    let song = dir.path().join("song.toml");
+    fs::copy(src, &song).unwrap();
+    (dir, song)
+}
+
+#[test]
+fn set_mix_paths() {
+    let (_d, song) = mixed_copy();
+    let s = song.to_str().unwrap();
+    let v = json_out(tune().args([
+        "set",
+        s,
+        "mix.delay.feedback=50",
+        "tracks.acid.send.delay=-10",
+        "mix.master=clip",
+        "--json",
+    ]));
+    assert_eq!(v["changes"].as_array().unwrap().len(), 3);
+    json_out(tune().args(["validate", s, "--json"]));
+    let c = json_out(tune().args(["changes", s, "--json"]));
+    let list = c["changes"].as_array().unwrap();
+    assert_eq!(list.len(), 3, "{c}");
+    assert!(list.iter().all(|e| e["source"] == "claude"), "{c}");
+}
+
+#[test]
+fn set_mix_errors() {
+    let (_d, song) = mixed_copy();
+    let s = song.to_str().unwrap();
+    let out = tune()
+        .args(["set", s, "mix.delay.fedback=1"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let e = String::from_utf8_lossy(&out.stderr);
+    assert!(e.contains("is not a parameter of track `mix`"), "{e}");
+    let out = tune().args(["set", s, "mix.master=loud"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let e = String::from_utf8_lossy(&out.stderr);
+    assert!(e.contains("unknown master mode"), "{e}");
+}
