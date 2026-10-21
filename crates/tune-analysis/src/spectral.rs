@@ -55,11 +55,20 @@ pub(crate) struct Frame<'a> {
     pub right: &'a [Complex<f64>],
 }
 
-/// STFT window length: 85 ms rounded up to a power of two (4096 at 44.1/48 kHz).
+/// STFT bin spacing in Hz, the same at every common rate.
+///
+/// A fixed spacing (not a fixed power-of-two size) keeps the bin centres, the
+/// Hann main lobe and the window and hop lengths in seconds identical at
+/// 44.1 and 48 kHz, so leakage across the 20/60/90/250 Hz edges, where acid
+/// bass fundamentals sit, does not depend on the file's rate. 9.375 Hz divides
+/// 44.1, 48, 88.2 and 96 kHz into sizes that are multiples of four, so the
+/// quarter hop is exact too.
+pub(crate) const BIN_HZ: f64 = 9.375;
+
+/// STFT window length: `sample_rate / BIN_HZ` rounded (5120 at 48 kHz, 4704
+/// at 44.1 kHz, about 107 ms).
 pub(crate) fn stft_size(sample_rate: u32) -> usize {
-    ((f64::from(sample_rate) * 0.085) as usize)
-        .next_power_of_two()
-        .max(2)
+    ((f64::from(sample_rate) / BIN_HZ).round() as usize).max(2)
 }
 
 /// Run a Hann STFT (hop = size / 4) over frames that lie fully inside the

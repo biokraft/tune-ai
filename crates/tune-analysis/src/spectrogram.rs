@@ -367,10 +367,11 @@ pub fn compare_png(ours: (&Audio, &str, Option<&BarMap>), reference: (&Audio, &s
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spectral::BIN_HZ;
 
     fn bin_centred_sine(sr: u32, channels: usize) -> Audio {
         let n = stft_size(sr);
-        assert_eq!(n, 4096);
+        assert_eq!(f64::from(sr) / n as f64, BIN_HZ, "sr {sr}: size {n}");
         let k = 100.0;
         let hz = k * f64::from(sr) / n as f64;
         let x: Vec<f32> = (0..sr as usize)
@@ -379,6 +380,19 @@ mod tests {
         Audio {
             sample_rate: sr,
             channels: vec![x; channels],
+        }
+    }
+
+    #[test]
+    fn stft_bins_are_9_375_hz_at_every_common_rate() {
+        for (sr, n) in [
+            (44_100, 4704),
+            (48_000, 5120),
+            (88_200, 9408),
+            (96_000, 10_240),
+        ] {
+            assert_eq!(stft_size(sr), n, "sr {sr}");
+            assert_eq!(n % 4, 0, "sr {sr}: the quarter hop must be exact");
         }
     }
 
