@@ -10,13 +10,6 @@ body,
   min-height: 100%;
 }
 
-/* Focus rings are 2px silkscreen at a 2px offset. tailwind-merge (v3, Tailwind 4 rules) drops
-   `focus-visible:outline` beside `outline-2` in cn(), which would leave the browser's `auto`
-   style; pin the style here so every ring is solid. */
-:focus-visible {
-  outline-style: solid;
-}
-
 body {
   background: hsl(var(--chassis));
   color: hsl(var(--silkscreen));
