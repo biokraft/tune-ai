@@ -7,6 +7,8 @@ export type ChangeNoticeProps = {
   notice: ExternalChange | null;
   /** The studio's offered edits (state.offered): the source of truth once it arrives. */
   offered: Change[];
+  /** Whether Undo still reverts this change (no local edit has landed on top of it). */
+  canUndo: boolean;
   song: SongView | null;
   onUndo(): void;
   onResolve(reapply: boolean): void;
@@ -30,6 +32,7 @@ export function hasChangeNotice(notice: ExternalChange | null, offered: Change[]
 export function ChangeNotice({
   notice,
   offered,
+  canUndo,
   song,
   onUndo,
   onResolve,
@@ -69,7 +72,11 @@ export function ChangeNotice({
     const who = notice.source === "claude" ? "Claude" : "The song file";
     text = `${who} changed ${plural(notice.changes.length, "thing")}: ${describeChanges(notice.changes, song)}`;
     if (pending > 0) offer = `It overrode ${plural(pending, "unsaved edit")}. Re-apply?`;
-    actions = [button("Undo", onUndo), ...(pending > 0 ? resolve : []), dismiss];
+    actions = [
+      ...(canUndo ? [button("Undo", onUndo)] : []),
+      ...(pending > 0 ? resolve : []),
+      dismiss,
+    ];
   } else {
     text = `A change on disk overrode ${plural(pending, "unsaved edit")}. Re-apply ${pending === 1 ? "it" : "them"}?`;
     actions = resolve;

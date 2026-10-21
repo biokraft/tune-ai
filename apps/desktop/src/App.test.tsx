@@ -179,6 +179,28 @@ describe("App", () => {
     expect(client.calls.map((c) => c.cmd)).toEqual(["undo", "redo"]);
   });
 
+  it("undo from the transport or keyboard clears Claude's notice", () => {
+    const { client } = setup();
+    const claude = () =>
+      act(() =>
+        client.emit({
+          ...structuredClone(goldenExternal),
+          offered: [],
+          changes: [{ path: "tracks.acid.acid303.resonance", old: 70, new: 90 }],
+        }),
+      );
+    const notice = () => screen.queryByText(/^Claude changed/);
+    claude();
+    expect(notice()).toBeInTheDocument();
+    press({ key: "z", metaKey: true });
+    expect(notice()).toBeNull();
+    claude();
+    // The transport's ↶ comes first; the notice's own Undo second.
+    fireEvent.click(screen.getAllByRole("button", { name: "Undo" })[0]!);
+    expect(notice()).toBeNull();
+    expect(client.named("undo")).toHaveLength(2);
+  });
+
   it("L loops the selected section, and again clears the loop", () => {
     const { client } = setup(stateEvent((s) => (s.loop_bars = null)));
     press({ key: "l" });

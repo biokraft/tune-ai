@@ -35,6 +35,7 @@ const noStore: StudioStore = {
     playhead: null,
     highlights: new Map(),
     notice: null,
+    noticeUndoable: false,
     selectedSection: null,
     connection: "open",
     message: null,

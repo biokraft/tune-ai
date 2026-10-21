@@ -40,7 +40,7 @@ const sameRange = (a: [number, number] | null, b: [number, number] | null) =>
  * beside the mixer, and the drum grid at the bottom.
  */
 export function StudioScreen({ view, store }: StudioScreenProps) {
-  const { state, highlights, notice } = view;
+  const { state, highlights, notice, noticeUndoable } = view;
   const song = state.song;
   const fire = useCallback((cmd: Command) => void store.send(cmd).catch(() => {}), [store]);
 
@@ -59,11 +59,21 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
     }
   };
 
+  // A deliberate undo or redo moves the history under Claude's notice, so the notice goes.
+  const undo = () => {
+    store.dismissNotice();
+    fire({ cmd: "undo" });
+  };
+  const redo = () => {
+    store.dismissNotice();
+    fire({ cmd: "redo" });
+  };
+
   useStudioKeys({
     playStop: () =>
       fire(state.playing ? { cmd: "stop" } : { cmd: "play", args: { from_bar: null } }),
-    undo: () => fire({ cmd: "undo" }),
-    redo: () => fire({ cmd: "redo" }),
+    undo,
+    redo,
     loop: toggleLoop,
   });
 
@@ -121,6 +131,7 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
               <ChangeNotice
                 notice={notice}
                 offered={state.offered}
+                canUndo={noticeUndoable}
                 song={song}
                 onUndo={() => {
                   store.dismissNotice();
@@ -137,8 +148,8 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
           onPlay={() => fire({ cmd: "play", args: { from_bar: null } })}
           onStop={() => fire({ cmd: "stop" })}
           onToggleLoop={toggleLoop}
-          onUndo={() => fire({ cmd: "undo" })}
-          onRedo={() => fire({ cmd: "redo" })}
+          onUndo={undo}
+          onRedo={redo}
         />
       </header>
 

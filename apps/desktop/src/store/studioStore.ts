@@ -17,6 +17,11 @@ export type StudioView = {
   highlights: Map<string, HighlightKind>;
   /** The last change on disk, until dismissed. */
   notice: ExternalChange | null;
+  /**
+   * Whether one undo still reverts the notice's change: true until a local edit, undo, redo or
+   * re-apply (an `applied` event from a human) lands on top of it.
+   */
+  noticeUndoable: boolean;
   selectedSection: number | null;
   connection: "open" | "lost";
   /** The last failure (a rejected call or an `error` event), until dismissed. */
@@ -49,6 +54,7 @@ export function createStudioStore(client: StudioClient): StudioStore {
     playhead: null,
     highlights: new Map(),
     notice: null,
+    noticeUndoable: false,
     selectedSection: null,
     connection: "open",
     message: null,
@@ -107,6 +113,9 @@ export function createStudioStore(client: StudioClient): StudioStore {
             e.changes.flatMap((c) => highlightKeys(c.path, c.old, c.new)),
             e.source,
           );
+        } else if (view.noticeUndoable) {
+          // The undo stack now has this edit on top, so Undo would revert it instead.
+          set({ noticeUndoable: false });
         }
         break;
       case "external_change": {
@@ -119,7 +128,7 @@ export function createStudioStore(client: StudioClient): StudioStore {
           kind,
         );
         const worth = change.changes.length > 0 || change.offered.length > 0 || change.replaced;
-        if (worth) set({ notice: change });
+        if (worth) set({ notice: change, noticeUndoable: true });
         break;
       }
       case "error":
@@ -150,7 +159,7 @@ export function createStudioStore(client: StudioClient): StudioStore {
       set({ selectedSection: view.state ? clampSelection(view.state, i) : i });
     },
     dismissNotice() {
-      if (view.notice) set({ notice: null });
+      if (view.notice) set({ notice: null, noticeUndoable: false });
     },
     dismissMessage() {
       if (view.message) set({ message: null });
