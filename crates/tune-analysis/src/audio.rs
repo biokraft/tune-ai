@@ -3,7 +3,7 @@ use std::ops::Range;
 use std::path::Path;
 
 use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
+use symphonia::core::codecs::{CODEC_TYPE_NULL, DecoderOptions};
 use symphonia::core::errors::Error as SymError;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
@@ -171,7 +171,10 @@ fn decode_symphonia(path: &Path) -> Result<Audio, AnalysisError> {
         .map_err(|e| decode_err(path, e))?;
     let mut format = probed.format;
     let track = format
-        .default_track()
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .or_else(|| format.default_track())
         .ok_or_else(|| decode_err(path, "no audio track"))?;
     let track_id = track.id;
     let mut decoder = symphonia::default::get_codecs()
