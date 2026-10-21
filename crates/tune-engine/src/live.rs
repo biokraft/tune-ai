@@ -53,8 +53,9 @@ pub struct SongUpdate {
     /// Empty with room for one runtime per new track; becomes the engine's
     /// runtime list. After the swap it holds the old list.
     pub(crate) spare: Vec<TrackRuntime>,
-    /// A fresh mix runtime for the new song; after the swap, the one the
-    /// engine did not keep (this one, or the old song's).
+    /// A fresh mix runtime for the new song; after the swap, it holds each
+    /// unit (bus or limiter) the engine did not keep: this one's, or the
+    /// old song's it replaced.
     pub(crate) mix: MixRuntime,
     /// Assigned by the controller, one higher per swap it sends; the
     /// engine plays this generation once the update lands.
