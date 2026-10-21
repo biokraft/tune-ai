@@ -310,9 +310,14 @@ impl Engine {
             }
             apply_lanes(song, section, self.pos, &mut self.tracks);
             let step = self.step;
-            let next_section = section_of(song, step + 1);
+            // Across the loop wrap the next cell is the loop start's.
+            let next_step = match self.looping {
+                Some((start, end)) if step + 1 == end => start,
+                _ => step + 1,
+            };
+            let next_section = section_of(song, next_step);
             for (t, (rt, track)) in self.tracks.iter_mut().zip(&song.tracks).enumerate() {
-                let next = cell_at(song, next_section, t, step + 1);
+                let next = cell_at(song, next_section, t, next_step);
                 let ctx = StepCtx {
                     step,
                     next_has_gate: matches!(next, Cell::Note(n) if n.note.is_some()),
