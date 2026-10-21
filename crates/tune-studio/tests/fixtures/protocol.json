@@ -857,7 +857,7 @@
               "max": -0.1,
               "curve": "linear",
               "default": -1.5,
-              "help": "The limiter never lets the true peak above this.",
+              "help": "The loudest the limiter lets a peak get. Sample peaks stay at or under it; a true-peak meter reads at most about 0.3 dB over it.",
               "value": -1.5,
               "explicit": false
             },

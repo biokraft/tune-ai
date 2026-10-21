@@ -45,7 +45,7 @@
 - **Ducking** is trigger-based: every hit of the duck source in the arrangement (mute and solo ignored) restarts each ducking track's envelope: 2 ms linear attack, then a raised-cosine recovery over `duck.release`. Source = `[mix] duck_source`, else the first `kick` track.
 - **Buses run only when a track sends to them** (an explicit `send.*` param, or a lane on it). Bus params without sends are kept but inactive.
 - **Delay:** stereo, `delay.width` blends mono (0) to ping-pong (100); time in 16ths (1–8, default 3 = dotted eighth); high-pass and low-pass inside the feedback loop. **Reverb:** the Freeverb network (a public-domain design), with pre-delay and an input low cut.
-- **Limiter:** 1.5 ms lookahead, 4× windowed-sinc true-peak detector, min-hold + boxcar attack, exponential release, default ceiling −1.5 dBTP (margin for detector differences against BS.1770). Its latency (84 frames at 48 kHz) is not compensated: limit-mode renders start 1.75 ms late.
+- **Limiter:** 1.5 ms lookahead, 4× true-peak detector (a 24-tap windowed sinc and the BS.1770 meter's 12-tap interpolator, the larger reading wins), min-hold + boxcar attack, exponential release, default ceiling −1.5 dBTP (margin for detector differences against BS.1770). Its latency (84 frames at 48 kHz) is not compensated: limit-mode renders start 1.75 ms late.
 - **Ride** = `HatKind::Ride` on the hat's metal-bank voice (new constants and param table, `ride.*`).
 - **Stems** carry each dry track (eq and ducking included, no bus returns).
 - **UI:** no new commands. Send/duck knobs on every strip and an FX/master panel; master mode, duck source and per-track EQ are shown read-only or left to TOML/`tune set`.
@@ -258,7 +258,7 @@ Test helpers each new `tune-dsp` test file uses (add only `sine`, `rms_db`, `gai
       pub fn reset(&mut self);
   }
   ```
-- `MASTER_PARAMS`: `master.gain` "Master gain" dB −12–24 Lin default 0 ("Drives the whole mix into the master stage. With the limiter, this is the loudness knob."); `master.ceiling` "Ceiling" dB −6 to −0.1 Lin default −1.5 ("The limiter never lets the true peak above this."); `master.release` "Release" ms 10–500 Exp default 100 ("How fast the limiter lets go. Short is louder but pumps; long is smoother.").
+- `MASTER_PARAMS`: `master.gain` "Master gain" dB −12–24 Lin default 0 ("Drives the whole mix into the master stage. With the limiter, this is the loudness knob."); `master.ceiling` "Ceiling" dB −6 to −0.1 Lin default −1.5 ("The loudest the limiter lets a peak get. Sample peaks stay at or under it; a true-peak meter reads at most about 0.3 dB over it."); `master.release` "Release" ms 10–500 Exp default 100 ("How fast the limiter lets go. Short is louder but pumps; long is smoother.").
 - Algorithm (pin it; the tests do not determine it):
   1. Detector: per channel a 4× interpolator. For the new frame `n`, the points at fractional time `t = n − 6 + j/4`, `j = 1, 2, 3`, are `Σ_{i=0}^{11} c_j[i]·x[n−i]` with `d = 6 − i − j/4`, `c_j[i] = sinc(d)·(0.42 + 0.5·cos(π·d/6) + 0.08·cos(2π·d/6))`, each phase normalised to sum 1 (computed in `new`). The peak estimate for frame `n − 6` is the max of `|x[n−6]|` and the three points, over both channels.
   2. Target gain `g_t = c / p` when `p > c` (c = `db2amp(ceiling)`), else exactly `1.0`. `new` and `reset` fill the gain rings with `1.0` and the audio rings with `0.0`.

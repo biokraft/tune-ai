@@ -8,12 +8,17 @@ use std::sync::Arc;
 use common::{MINI, MIXED, bits, compile_song, compiled, drop_lane, run, song, variant_of};
 use tune_analysis::{Audio, measure_loudness};
 use tune_dsp::acid303::ACID303_PARAMS;
-use tune_dsp::{MASTER_GAIN, STRIP_SEND_DELAY, db2amp};
+use tune_dsp::{MASTER_CEILING, MASTER_GAIN, STRIP_SEND_DELAY, db2amp};
 use tune_engine::{
     CLIP_KNEE, CompiledSong, Engine, MIX_TRACK, ParamTarget, RenderOptions, Rendered, pan_gains,
     render,
 };
 use tune_song::{MasterMode, MixUnit, Song};
+
+/// `songs/first-acid` as first mixed (limit mode, `master.gain` 8.5,
+/// `master.ceiling` -1.5, release 70 ms), frozen so the limiter test keeps
+/// the exact material that once read 0.46 dB over the ceiling.
+const FIRST_ACID_MIXED: &str = include_str!("../../tune-song/tests/fixtures/first-acid-mixed.toml");
 
 /// Frames of the duck attack at 48 kHz (2 ms).
 const ATTACK: u64 = 96;
@@ -379,6 +384,31 @@ fn limit_mode_meets_ceiling() {
     let audio = Audio::from_interleaved(r.sample_rate, 2, &r.mix).unwrap();
     let tp = measure_loudness(&audio).unwrap().0.true_peak_dbtp;
     assert!(tp <= -1.2, "true peak {tp} dBTP");
+}
+
+/// Real material, judged by the meter `tune analyze` reports (BS.1770 true
+/// peak): at most 0.3 dB over the ceiling, the margin the limiter promises.
+#[test]
+fn limiter_meets_ceiling_on_first_acid() {
+    let song = compiled(FIRST_ACID_MIXED);
+    let ceiling = song.mix.master_params[MASTER_CEILING];
+    assert_eq!(ceiling, -1.5);
+    // Bars 1-96, intro to the end of the drop: the over sat in the drop
+    // (bar 85) and depends on the state built up since bar 1.
+    let opts = RenderOptions {
+        start_bar: 0,
+        end_bar: 96,
+        stems: false,
+    };
+    let r = render(song, &opts).unwrap();
+    assert!(r.meter.max_reduction_db > 6.0, "{:?}", r.meter);
+    let audio = Audio::from_interleaved(r.sample_rate, 2, &r.mix).unwrap();
+    let tp = measure_loudness(&audio).unwrap().0.true_peak_dbtp;
+    eprintln!("first-acid bars 1-96: {tp:.3} dBTP at ceiling {ceiling} dB");
+    assert!(
+        tp <= ceiling + 0.3,
+        "true peak {tp} dBTP, ceiling {ceiling} dB"
+    );
 }
 
 #[test]
