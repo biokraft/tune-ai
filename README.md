@@ -8,6 +8,7 @@ Open303 TB-303 emulation, rendered to WAV through the `tune` command line tool.
 - macOS on Apple Silicon
 - Rust (stable, edition 2024) and cargo
 - [go-task](https://taskfile.dev) (`task`)
+- Node.js and pnpm 9 (for the studio app)
 
 ## Usage
 
@@ -35,6 +36,39 @@ cargo run --release -p tune-cli -- play path/to/song.toml --loop 1..4
 change is heard at the next step without stopping. A file with errors prints
 them and the previous version keeps playing. `--device null` runs without
 sound. Every command takes `--json`.
+
+## Open the studio
+
+The studio is the song on screen: play it, twist the 303's knobs, edit steps
+and drum hits, and rearrange sections. Every edit is written back to
+`song.toml` (comments kept) 150 ms after you stop moving, so Claude and the
+studio always work on the same file. When Claude edits the song, what it
+changed lights up in cyan, with an Undo.
+
+```sh
+task install                                  # once: JS dependencies
+task studio SONG=songs/first-acid/song.toml   # the desktop window
+```
+
+Or in a browser: run `task serve SONG=songs/first-acid/song.toml` and open
+http://127.0.0.1:4580/.
+
+| Key | Does |
+| --- | --- |
+| Space | Play / stop |
+| Cmd+Z / Shift+Cmd+Z | Undo / redo |
+| L | Loop the selected section (again to clear) |
+| Knob: drag up or down | Turn it (Shift: 10x finer) |
+| Knob: arrows, Page Up/Down, Home/End | Nudge (Shift: finer), big step, min/max |
+| 303 step: Up/Down | Note up or down a semitone (Shift: an octave) |
+| 303 step: Left/Right | Previous / next step |
+| 303 step: A, S, R | Toggle accent, slide, rest |
+| Arrangement: Cmd+D | Duplicate the selected section |
+| Arrangement: Delete | Delete the selected section |
+| Arrangement: Alt+Left/Right | Move the selected section |
+
+Each edit is logged to `edits.jsonl` next to the song (local, gitignored);
+`tune changes <song>` lists it.
 
 ## Hear the 303
 
