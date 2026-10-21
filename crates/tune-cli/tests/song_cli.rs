@@ -14,6 +14,15 @@ fn json_of(out: &[u8]) -> Value {
     serde_json::from_slice(out).expect("stdout is JSON")
 }
 
+fn is_empty(dir: &Path) -> bool {
+    std::fs::read_dir(dir).unwrap().next().is_none()
+}
+
+fn wav_spec(path: &Path) -> (u16, u16, u32) {
+    let r = hound::WavReader::open(path).unwrap();
+    (r.spec().channels, r.spec().bits_per_sample, r.duration())
+}
+
 #[test]
 fn validate_json_reports_shape() {
     let out = tune()
@@ -145,4 +154,155 @@ fn params_text_mentions_ids() {
     let out = tune().arg("params").assert().success();
     let s = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     assert!(s.contains("kick.tune") && s.contains("dist.drive"));
+}
+
+#[test]
+fn render_whole_song() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("x.wav");
+    let a = tune()
+        .arg("render")
+        .arg(mini())
+        .arg("--out")
+        .arg(&out)
+        .arg("--json")
+        .assert()
+        .success();
+    let v = json_of(&a.get_output().stdout);
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["frames"], 384_000);
+    assert!(v["peak_dbfs"].as_f64().unwrap() <= -1.0);
+    assert!(v["pre_clip_peak_dbfs"].is_number());
+    assert!(v["knee_samples"].is_number());
+    assert_eq!(v["files"].as_array().unwrap().len(), 1);
+    assert_eq!(wav_spec(&out), (2, 24, 384_000));
+}
+
+#[test]
+fn render_text_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("x.wav");
+    let a = tune()
+        .arg("render")
+        .arg(mini())
+        .arg("--out")
+        .arg(&out)
+        .assert()
+        .success();
+    let s = String::from_utf8(a.get_output().stdout.clone()).unwrap();
+    assert!(s.starts_with("rendered bars 1..4 (0:08.0) to "), "{s}");
+    assert!(s.contains("dBFS, pre-clip peak"), "{s}");
+}
+
+#[test]
+fn render_bar_range() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("x.wav");
+    let a = tune()
+        .arg("render")
+        .arg(mini())
+        .args(["--bars", "2..3", "--json", "--out"])
+        .arg(&out)
+        .assert()
+        .success();
+    assert_eq!(json_of(&a.get_output().stdout)["frames"], 192_000);
+    assert_eq!(wav_spec(&out).2, 192_000);
+}
+
+#[test]
+fn render_stems() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("stems");
+    let a = tune()
+        .arg("render")
+        .arg(mini())
+        .args(["--stems", "--json", "--out"])
+        .arg(&out)
+        .assert()
+        .success();
+    let v = json_of(&a.get_output().stdout);
+    assert_eq!(v["files"].as_array().unwrap().len(), 4);
+    assert_eq!(std::fs::read_dir(&out).unwrap().count(), 4);
+}
+
+#[test]
+fn render_is_deterministic() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a.wav"), dir.path().join("b.wav"));
+    for p in [&a, &b] {
+        tune()
+            .arg("render")
+            .arg(mini())
+            .arg("--out")
+            .arg(p)
+            .assert()
+            .success();
+    }
+    assert_eq!(std::fs::read(a).unwrap(), std::fs::read(b).unwrap());
+}
+
+fn render_fails(extra: &[&str], out_name: &str, needle: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join(out_name);
+    let a = tune()
+        .arg("render")
+        .arg(mini())
+        .args(extra)
+        .arg("--out")
+        .arg(&out)
+        .assert()
+        .code(2);
+    let err = String::from_utf8(a.get_output().stderr.clone()).unwrap();
+    assert!(err.contains(needle), "{err}");
+    let a = tune()
+        .arg("render")
+        .arg(mini())
+        .args(extra)
+        .arg("--json")
+        .arg("--out")
+        .arg(&out)
+        .assert()
+        .code(2);
+    let v = json_of(&a.get_output().stdout);
+    assert_eq!(v["ok"], false);
+    assert!(v["errors"][0]["message"].as_str().unwrap().contains(needle));
+    assert!(is_empty(dir.path()));
+}
+
+#[test]
+fn render_bad_args_exit_2_and_write_nothing() {
+    render_fails(&["--bars", "0..2"], "x.wav", "bars start at 1");
+    render_fails(&["--bars", "3..9"], "x.wav", "past the end (4 bars)");
+    render_fails(&["--bars", "3..2"], "x.wav", "B < A");
+    render_fails(&["--stems"], "x.wav", "--stems writes a directory");
+    render_fails(&[], "x.flac", ".wav");
+}
+
+#[test]
+fn render_missing_song_exits_2() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = tune()
+        .args(["render", "nope.toml", "--json", "--out"])
+        .arg(dir.path().join("x.wav"))
+        .assert()
+        .code(2);
+    let v = json_of(&a.get_output().stdout);
+    assert_eq!(v["ok"], false);
+    assert!(is_empty(dir.path()));
+}
+
+#[test]
+fn render_303_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("d.wav");
+    let a = tune()
+        .args(["render-303", "--demo", "--json", "--out"])
+        .arg(&out)
+        .assert()
+        .success();
+    let v = json_of(&a.get_output().stdout);
+    assert_eq!(v["ok"], true);
+    assert!(v["file"].as_str().unwrap().ends_with("d.wav"));
+    assert!(v["seconds"].is_number() && v["peak_dbfs"].is_number());
+    assert_eq!(v["clipped_samples"], 0);
 }
