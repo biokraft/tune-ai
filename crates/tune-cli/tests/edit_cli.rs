@@ -129,3 +129,57 @@ fn set_unknown_path() {
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("does not exist in this song"));
 }
+
+fn write_log(dir: &Path) {
+    let lines = [
+        r#"{"ts":"2026-10-21T10:00:01.000Z","source":"human","path":"song.bpm","old":120,"new":121}"#,
+        r#"{"ts":"2026-10-21T10:00:02.000Z","source":"claude","path":"song.bpm","old":121,"new":122,"file_hash":"abc"}"#,
+        r#"{"ts":"2026-10-21T10:00:03.000Z","source":"human","path":"song.bpm","old":122,"new":123}"#,
+    ];
+    fs::write(dir.join("edits.jsonl"), lines.join("\n") + "\n").unwrap();
+}
+
+#[test]
+fn changes_since() {
+    let (dir, song) = fixture();
+    write_log(dir.path());
+    let s = song.to_str().unwrap();
+    let v = json_out(tune().args(["changes", s, "--since", "2026-10-21T10:00:01Z", "--json"]));
+    assert_eq!(v["changes"].as_array().unwrap().len(), 2);
+    assert_eq!(v["until"], "2026-10-21T10:00:03.000Z");
+    let v = json_out(tune().args([
+        "changes",
+        s,
+        "--since",
+        "2026-10-21T10:00:01Z",
+        "--source",
+        "human",
+        "--json",
+    ]));
+    assert_eq!(v["changes"].as_array().unwrap().len(), 1);
+    let v = json_out(tune().args(["changes", s, "--json"]));
+    assert_eq!(v["changes"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn changes_text_line() {
+    let (dir, song) = fixture();
+    write_log(dir.path());
+    let out = tune()
+        .args(["changes", song.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    let first = text.lines().next().unwrap();
+    // HH:MM:SS local time, then source, path and the change.
+    assert!(first.ends_with(" human song.bpm 120 -> 121"), "{first}");
+    assert_eq!(first.split(' ').next().unwrap().len(), 8);
+}
+
+#[test]
+fn changes_missing_log() {
+    let (_d, song) = fixture();
+    let v = json_out(tune().args(["changes", song.to_str().unwrap(), "--json"]));
+    assert_eq!(v["changes"], serde_json::json!([]));
+    assert_eq!(v["until"], Value::Null);
+}
