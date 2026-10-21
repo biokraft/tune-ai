@@ -6,6 +6,16 @@
 //! before and after, so undo restores the file byte for byte, comments
 //! included. Every write, undo and redo appends `human` entries to the edit
 //! log, one per changed path.
+//!
+//! The file also changes from outside: Claude through `tune set` or by
+//! editing it, an editor, git. [`StudioCore::on_disk_text`] takes each new
+//! text: the studio's own writes are ignored, Claude's are recognised by the
+//! hash `tune set` logged, and anything else is logged as `external`. Every
+//! external change is one undo step. Pending edits are merged onto the new
+//! text by path; an edit to a path the external change also touched keeps
+//! the external value and is offered back for re-apply, so the producer's
+//! edits are never silently lost. While the file does not parse, the last
+//! good song and the pending edits are kept and nothing is written.
 
 use std::collections::VecDeque;
 use std::fs;
@@ -20,7 +30,7 @@ use tune_dsp::acid303::{AcidPattern, AcidStep};
 use tune_song::{PatternSteps, Song};
 
 use crate::command::Command;
-use crate::diff::{Change, diff_songs};
+use crate::diff::{Change, diff_songs, is_whole_replace};
 use crate::doc::{EditError, SongDoc};
 use crate::error::{ErrorView, StudioError};
 use crate::log::{EditEntry, EditLog, Source, text_hash};
@@ -57,6 +67,40 @@ pub struct PendingEdit {
     pub changes: Vec<Change>,
 }
 
+/// What a change on disk did to the open song.
+#[derive(Clone, Debug, Serialize)]
+pub struct ExternalChange {
+    /// `claude` when the edit log holds a `claude` entry with the file's
+    /// hash, otherwise `external`.
+    pub source: Source,
+    /// The differences from the last text on disk.
+    pub changes: Vec<Change>,
+    /// The file was replaced by a different song, so every pending edit
+    /// was offered instead of merged.
+    pub replaced: bool,
+    /// Pending edits applied again onto the new text, and written.
+    pub merged: Vec<Change>,
+    /// Pending edits the change overrode or made impossible, offered for
+    /// re-apply (see [`StudioCore::resolve_offered`]).
+    pub offered: Vec<Change>,
+    /// Why the new text does not parse; empty when it does. When set, the
+    /// other fields are empty and the last good song stays open.
+    pub errors: Vec<ErrorView>,
+}
+
+impl ExternalChange {
+    fn new(source: Source) -> Self {
+        Self {
+            source,
+            changes: Vec::new(),
+            replaced: false,
+            merged: Vec::new(),
+            offered: Vec::new(),
+            errors: Vec::new(),
+        }
+    }
+}
+
 /// The open song file and its edit history.
 #[derive(Debug)]
 pub struct StudioCore {
@@ -74,6 +118,12 @@ pub struct StudioCore {
     own_writes: VecDeque<String>,
     undo: VecDeque<UndoEntry>,
     redo: Vec<UndoEntry>,
+    /// Local edits an external change overrode, kept for re-apply, and
+    /// their changes for display.
+    offered: Vec<PendingEdit>,
+    offered_changes: Vec<Change>,
+    /// Why the text on disk does not parse; empty when it does.
+    file_errors: Vec<ErrorView>,
 }
 
 impl StudioCore {
@@ -94,6 +144,9 @@ impl StudioCore {
             own_writes: VecDeque::with_capacity(OWN_WRITE_RING),
             undo: VecDeque::new(),
             redo: Vec::new(),
+            offered: Vec::new(),
+            offered_changes: Vec::new(),
+            file_errors: Vec::new(),
         })
     }
 
@@ -101,8 +154,12 @@ impl StudioCore {
     /// file is written later, by [`flush`](Self::flush). An edit that
     /// changes nothing is not recorded. Commands that are not edits
     /// (transport, song choice, undo, a live knob drag) give
-    /// [`StudioError::NotAnEdit`].
+    /// [`StudioError::NotAnEdit`]; while the file on disk does not parse,
+    /// every edit gives [`StudioError::FileInvalid`].
     pub fn apply_edit(&mut self, cmd: &Command, now: Instant) -> Result<Vec<Change>, StudioError> {
+        if !self.file_errors.is_empty() {
+            return Err(StudioError::FileInvalid);
+        }
         let mut doc = self.doc.clone();
         apply_command(&mut doc, cmd)?;
         if doc.text() == self.doc.text() {
@@ -131,7 +188,27 @@ impl StudioCore {
     /// Writes the pending edits as one atomic write and one undo step, and
     /// logs one `human` entry per changed path (first old value, last new
     /// value). Returns the burst's changes; nothing pending gives none.
+    ///
+    /// It first reads the file, and a text not seen yet goes through
+    /// [`on_disk_text`](Self::on_disk_text), so an external change the
+    /// watcher has not reported is merged, never overwritten. While the
+    /// file does not parse, nothing is written.
     pub fn flush(&mut self) -> Result<Vec<Change>, StudioError> {
+        let mut written = Vec::new();
+        if let Ok(text) = fs::read_to_string(&self.path)
+            && let Some(ext) = self.on_disk_text(text)
+        {
+            written = ext.merged;
+        }
+        if !self.file_errors.is_empty() {
+            return Ok(Vec::new());
+        }
+        written.extend(self.write_pending()?);
+        Ok(written)
+    }
+
+    /// [`flush`](Self::flush) without reading the file first.
+    fn write_pending(&mut self) -> Result<Vec<Change>, StudioError> {
         if self.pending.is_empty() {
             return Ok(Vec::new());
         }
@@ -156,11 +233,186 @@ impl StudioCore {
         Ok(changes)
     }
 
+    /// Takes a new text of the song file (from the watcher, or read by
+    /// [`flush`](Self::flush)). Gives `None` for the studio's own writes
+    /// and for the text already open.
+    ///
+    /// A text that does not parse sets [`file_errors`](Self::file_errors)
+    /// and keeps the last good song and the pending edits. Otherwise the
+    /// text becomes one undo step and is logged (unless Claude's `tune set`
+    /// logged it already). Pending edits that touch none of its paths are
+    /// applied again on top and written at once, as their own `human` undo
+    /// step; the others are offered. A text that replaces the whole song
+    /// offers every pending edit.
+    pub fn on_disk_text(&mut self, text: String) -> Option<ExternalChange> {
+        let hash = text_hash(&text);
+        if text == self.disk_text || self.is_own_write(&hash) {
+            // An invalid save put back as it was: report the errors gone.
+            if self.file_errors.is_empty() {
+                return None;
+            }
+            self.file_errors.clear();
+            return Some(ExternalChange::new(Source::External));
+        }
+        let doc = match SongDoc::parse(&text) {
+            Ok(doc) => doc,
+            Err(errs) => {
+                self.file_errors = errs.iter().map(ErrorView::from).collect();
+                return Some(ExternalChange {
+                    errors: self.file_errors.clone(),
+                    ..ExternalChange::new(Source::External)
+                });
+            }
+        };
+        self.file_errors.clear();
+
+        let source = if self.log.has_claude_hash(&hash).unwrap_or(false) {
+            Source::Claude
+        } else {
+            Source::External
+        };
+        let changes = diff_songs(&self.disk_song, doc.song());
+        if source == Source::External {
+            // Best effort: the change is adopted even if the log is not
+            // writable, as it is already on disk.
+            let _ = self.log_changes(Source::External, &changes, &hash);
+        }
+        let replaced = is_whole_replace(&self.disk_text, &text);
+        let before = std::mem::replace(&mut self.disk_text, text.clone());
+        self.disk_song = doc.song().clone();
+        self.push_undo(UndoEntry {
+            before,
+            after: text,
+            source,
+            changes: changes.clone(),
+        });
+        self.redo.clear();
+
+        let mut ext = ExternalChange {
+            changes,
+            ..ExternalChange::new(source)
+        };
+        let pending = std::mem::take(&mut self.pending);
+        if pending.is_empty() {
+            self.doc = doc;
+        } else if replaced {
+            self.doc = doc;
+            self.last_edit = None;
+            ext.replaced = true;
+            ext.offered = self.offer(pending);
+        } else {
+            self.merge(doc, pending, &mut ext);
+        }
+        Some(ext)
+    }
+
+    /// Applies each pending edit again onto `doc`, in order, unless it
+    /// touches a path the external change (or an edit offered before it)
+    /// touched, or no longer applies; those are offered. Writes the result.
+    fn merge(&mut self, doc: SongDoc, pending: Vec<PendingEdit>, ext: &mut ExternalChange) {
+        let mut touched: Vec<SongPath> = ext.changes.iter().map(|c| c.path.clone()).collect();
+        let mut next = doc;
+        let mut offered = Vec::new();
+        for edit in pending {
+            let conflicts = edit
+                .changes
+                .iter()
+                .any(|c| touched.iter().any(|p| paths_overlap(p, &c.path)));
+            if !conflicts {
+                let mut trial = next.clone();
+                if apply_command(&mut trial, &edit.command).is_ok() {
+                    if trial.text() != next.text() {
+                        let changes = diff_songs(next.song(), trial.song());
+                        ext.merged.extend(changes.iter().cloned());
+                        self.pending.push(PendingEdit {
+                            command: edit.command,
+                            changes,
+                        });
+                        next = trial;
+                    }
+                    continue;
+                }
+            }
+            // Later edits may build on this one (a resize of a duplicated
+            // section), so its paths count as touched too.
+            touched.extend(edit.changes.iter().map(|c| c.path.clone()));
+            offered.push(edit);
+        }
+        self.doc = next;
+        ext.offered = self.offer(offered);
+        if self.pending.is_empty() {
+            self.last_edit = None;
+        } else {
+            // On a failed write the edits stay pending and the next due
+            // flush tries again.
+            let _ = self.write_pending();
+        }
+    }
+
+    /// Keeps `edits` for re-apply and returns their changes.
+    fn offer(&mut self, edits: Vec<PendingEdit>) -> Vec<Change> {
+        let changes: Vec<Change> = edits.iter().flat_map(|e| e.changes.clone()).collect();
+        self.offered_changes.extend(changes.iter().cloned());
+        self.offered.extend(edits);
+        changes
+    }
+
+    /// Re-applies the offered edits that still apply, as one `human` write
+    /// (`reapply`), or drops them all. Returns what the re-apply changed.
+    pub fn resolve_offered(&mut self, reapply: bool) -> Result<Vec<Change>, StudioError> {
+        if !reapply {
+            self.offered.clear();
+            self.offered_changes.clear();
+            return Ok(Vec::new());
+        }
+        if !self.file_errors.is_empty() {
+            return Err(StudioError::FileInvalid);
+        }
+        let offered = std::mem::take(&mut self.offered);
+        self.offered_changes.clear();
+        let start = self.doc.song().clone();
+        let mut applied = false;
+        for edit in offered {
+            let mut trial = self.doc.clone();
+            if apply_command(&mut trial, &edit.command).is_err() || trial.text() == self.doc.text()
+            {
+                continue;
+            }
+            let changes = diff_songs(self.doc.song(), trial.song());
+            self.doc = trial;
+            self.pending.push(PendingEdit {
+                command: edit.command,
+                changes,
+            });
+            applied = true;
+        }
+        if !applied {
+            return Ok(Vec::new());
+        }
+        self.redo.clear();
+        self.last_edit.get_or_insert_with(Instant::now);
+        self.flush()?;
+        Ok(diff_songs(&start, self.doc.song()))
+    }
+
+    /// The changes of the offered edits, for display.
+    pub fn offered(&self) -> &[Change] {
+        &self.offered_changes
+    }
+
+    /// Why the file on disk does not parse; empty when it does.
+    pub fn file_errors(&self) -> &[ErrorView] {
+        &self.file_errors
+    }
+
     /// Flushes pending edits, then restores the text before the last undo
     /// step and logs the reversed changes as `human`. Nothing to undo gives
     /// no changes.
     pub fn undo(&mut self) -> Result<Vec<Change>, StudioError> {
         self.flush()?;
+        if !self.file_errors.is_empty() {
+            return Err(StudioError::FileInvalid);
+        }
         let Some(entry) = self.undo.pop_back() else {
             return Ok(Vec::new());
         };
@@ -180,6 +432,9 @@ impl StudioCore {
     /// Re-applies the last undone step (see [`undo`](Self::undo)).
     pub fn redo(&mut self) -> Result<Vec<Change>, StudioError> {
         self.flush()?;
+        if !self.file_errors.is_empty() {
+            return Err(StudioError::FileInvalid);
+        }
         let Some(entry) = self.redo.pop() else {
             return Ok(Vec::new());
         };
@@ -286,12 +541,21 @@ impl StudioCore {
     }
 
     fn log_human(&self, changes: &[Change], hash: &str) -> Result<(), StudioError> {
+        self.log_changes(Source::Human, changes, hash)
+    }
+
+    fn log_changes(
+        &self,
+        source: Source,
+        changes: &[Change],
+        hash: &str,
+    ) -> Result<(), StudioError> {
         let ts = Timestamp::now();
         let entries: Vec<EditEntry> = changes
             .iter()
             .map(|c| EditEntry {
                 ts,
-                source: Source::Human,
+                source,
                 path: c.path.to_string(),
                 old: c.old.clone(),
                 new: c.new.clone(),
@@ -423,6 +687,33 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
         | Command::ResolveOffered { .. } => return Err(StudioError::NotAnEdit),
     }
     Ok(())
+}
+
+/// Whether an edit of one path can change the value at the other: the
+/// same path, or one holds the other (`sections` holds `sections[1].bars`,
+/// `tracks.acid` holds `tracks.acid.gain_db`).
+fn paths_overlap(a: &SongPath, b: &SongPath) -> bool {
+    a == b || holds(a, b) || holds(b, a)
+}
+
+fn holds(whole: &SongPath, part: &SongPath) -> bool {
+    match (whole, part) {
+        (
+            SongPath::Sections,
+            SongPath::SectionBars(_)
+            | SongPath::SectionName(_)
+            | SongPath::SectionPlay { .. }
+            | SongPath::SectionLanes(_),
+        ) => true,
+        (
+            SongPath::Track { track },
+            SongPath::TrackField { track: t, .. }
+            | SongPath::TrackParam { track: t, .. }
+            | SongPath::FxMode { track: t }
+            | SongPath::SectionPlay { track: t, .. },
+        ) => t == track,
+        _ => false,
+    }
 }
 
 fn pattern_steps<'d>(
