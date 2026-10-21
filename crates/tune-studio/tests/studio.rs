@@ -663,3 +663,52 @@ fn loop_survives_a_full_queue() {
         _ => unreachable!(),
     }
 }
+
+/// Clients name songs under the songs root only: a path that leaves it is
+/// refused even when a song file is there.
+#[test]
+fn open_song_stays_under_root() {
+    let outer = tempfile::tempdir().unwrap();
+    let root = outer.path().join("root");
+    fs::create_dir_all(root.join("songs/a")).unwrap();
+    fs::write(root.join("songs/a/song.toml"), MINI).unwrap();
+    fs::create_dir_all(outer.path().join("x")).unwrap();
+    let outside = outer.path().join("x/song.toml");
+    fs::write(&outside, MINI).unwrap();
+
+    let config = StudioConfig {
+        audio: Box::new(CaptureOut {
+            slot: Slot::default(),
+        }),
+        songs_root: root.clone(),
+    };
+    let studio = tune_studio::Studio::spawn(config, None).unwrap();
+    for path in [
+        "../x/song.toml".to_owned(),
+        "songs/../../x/song.toml".to_owned(),
+        // Missing, and outside: still "outside", so nothing can be probed.
+        "../nope/song.toml".to_owned(),
+        outside.to_str().unwrap().to_owned(),
+    ] {
+        match studio.call(Command::OpenSong { path: path.clone() }) {
+            Err(StudioError::OutsideRoot(p)) => assert_eq!(p, path),
+            other => panic!("{path}: expected OutsideRoot, got {other:?}"),
+        }
+    }
+    assert!(matches!(
+        studio.call(Command::OpenSong {
+            path: "songs/nope/song.toml".into()
+        }),
+        Err(StudioError::Io(_))
+    ));
+    // Inside the root, relative or absolute, is fine.
+    let inside = root.join("songs/a/song.toml");
+    for path in [
+        "songs/a/song.toml",
+        "songs/../songs/a/song.toml",
+        inside.to_str().unwrap(),
+    ] {
+        let open = Command::OpenSong { path: path.into() };
+        assert_eq!(studio.call(open).unwrap(), Value::Null, "{path}");
+    }
+}

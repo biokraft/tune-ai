@@ -44,6 +44,8 @@ pub enum StudioError {
     Timeout,
     #[error("the studio has shut down")]
     Closed,
+    #[error("`{0}` is not under the songs root")]
+    OutsideRoot(String),
 }
 
 fn views_summary(views: &[ErrorView]) -> String {
