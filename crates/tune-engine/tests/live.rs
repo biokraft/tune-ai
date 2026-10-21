@@ -3,12 +3,13 @@ mod common;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
-use common::{MINI, compile_song, compiled, song};
+use common::{MINI, MIXED, compile_song, compiled, run, song, variant_of};
 use tune_dsp::DistortionMode;
 use tune_engine::{
-    AudioOut, CompiledSong, LiveError, LiveProcessor, ParamTarget, RenderOptions, live, render,
+    AudioOut, CompiledSong, Engine, LiveError, LiveProcessor, ParamTarget, RenderOptions,
+    SongUpdate, live, render,
 };
-use tune_song::FxSpec;
+use tune_song::{FxSpec, MasterMode};
 
 /// One bar at 120 BPM and 48 kHz.
 const BAR: u64 = 96_000;
@@ -577,4 +578,121 @@ fn audio_out_drives_the_processor() {
     let other = Arc::new(CompiledSong::new(&song(MINI), 44_100));
     let (_ctl, p) = live(other, 0, None);
     assert!(device.start(p).is_err());
+}
+
+/// `mixed.toml` changed by `edit`.
+fn mixed_with(edit: impl FnOnce(&mut tune_song::Song)) -> Arc<CompiledSong> {
+    compile_song(&variant_of(MIXED, edit))
+}
+
+fn set_mix_param(s: &mut tune_song::Song, id: &str, plain: f64) {
+    s.mix.params.insert(id.into(), plain);
+}
+
+/// Queues `song` on `engine` and plays one step of the playing song, so the
+/// swap lands; drops the retired update. Returns what was played.
+fn swap_and_play(engine: &mut Engine, song: &Arc<CompiledSong>) -> Vec<f32> {
+    let applied = engine.swaps_applied();
+    assert!(engine.queue_swap(SongUpdate::new(song.clone())).is_none());
+    let step = engine.song().clock.samples_per_step.ceil() as u64;
+    let out = run(engine, step);
+    assert_eq!(engine.swaps_applied(), applied + 1);
+    drop(engine.take_retired_swap().expect("the swap landed"));
+    out
+}
+
+#[test]
+fn mix_live_matches_offline() {
+    let s = compiled(MIXED);
+    let expected = render_bars(&s, 0, s.total_bars);
+    let len = expected.len() as u64 / 2;
+    for block in [1usize, 61, 512, 4096] {
+        let (ctl, mut p) = live(s.clone(), 0, None);
+        let out = play(&mut p, len, block);
+        assert_eq!(ctl.position(), len, "block {block}");
+        assert_bits(&out, &expected);
+    }
+}
+
+#[test]
+fn swap_keeps_mix_when_alike() {
+    let feedback = mixed_with(|s| set_mix_param(s, "delay.feedback", 45.0));
+    let clip = mixed_with(|s| {
+        set_mix_param(s, "delay.feedback", 45.0);
+        s.mix.master = MasterMode::Clip;
+    });
+    let faster = mixed_with(|s| {
+        set_mix_param(s, "delay.feedback", 45.0);
+        s.mix.master = MasterMode::Clip;
+        s.bpm = 121.0;
+    });
+    let mut e = Engine::new(compiled(MIXED));
+    // Inside section `b`, with the delay ringing.
+    let mut out = run(&mut e, 2 * BAR + 1000);
+    out.extend(swap_and_play(&mut e, &feedback));
+    assert_eq!(e.mix_swaps_kept(), 1, "built alike: kept");
+    out.extend(swap_and_play(&mut e, &clip));
+    assert_eq!(e.mix_swaps_kept(), 1, "another master mode: replaced");
+    out.extend(swap_and_play(&mut e, &faster));
+    assert_eq!(e.mix_swaps_kept(), 1, "another bpm: replaced");
+    assert_eq!(e.swaps_applied(), 3);
+    let rest = run(&mut e, BAR);
+    assert!(!e.finished());
+    assert!(out.iter().chain(&rest).all(|x| x.is_finite()));
+    assert!(rest.iter().any(|&x| x != 0.0), "playback continues");
+}
+
+#[test]
+fn kept_mix_keeps_bus_tails() {
+    // A swap to the same song keeps every runtime, buses and limiter
+    // included, so playback goes on as if no swap had happened.
+    let a = compiled(MIXED);
+    let expected = render_bars(&a, 0, a.total_bars);
+    let mut e = Engine::new(a.clone());
+    let mut out = run(&mut e, 2 * BAR + 1000);
+    out.extend(swap_and_play(&mut e, &compiled(MIXED)));
+    assert_eq!(e.mix_swaps_kept(), 1);
+    let len = expected.len() as u64 / 2;
+    out.extend(run(&mut e, len - out.len() as u64 / 2));
+    assert_bits(&out, &expected);
+}
+
+#[test]
+fn swap_builds_missing_units() {
+    // From the clip mode to the limiter: the swap brings one.
+    let clip = mixed_with(|s| s.mix.master = MasterMode::Clip);
+    let mut e = Engine::new(clip);
+    run(&mut e, 2 * BAR + 1000);
+    swap_and_play(&mut e, &compiled(MIXED));
+    assert_eq!(e.mix_swaps_kept(), 0);
+    e.reset_meter();
+    run(&mut e, BAR / 2);
+    assert!(
+        e.meter().max_reduction_db > 0.0,
+        "the limiter runs after the swap"
+    );
+
+    // From no delay bus to one: the delay's params are then heard.
+    let dry = mixed_with(|s| {
+        s.tracks
+            .get_mut("acid")
+            .unwrap()
+            .params
+            .shift_remove("send.delay");
+        for section in &mut s.sections {
+            section
+                .automation
+                .retain(|l| !(l.track == "acid" && l.param == "send.delay"));
+        }
+    });
+    let echo = |feedback: f64| {
+        let mut e = Engine::new(dry.clone());
+        run(&mut e, 2 * BAR + 1000);
+        swap_and_play(
+            &mut e,
+            &mixed_with(|s| set_mix_param(s, "delay.feedback", feedback)),
+        );
+        run(&mut e, BAR)
+    };
+    assert_ne!(echo(10.0), echo(80.0), "the swap built the delay bus");
 }

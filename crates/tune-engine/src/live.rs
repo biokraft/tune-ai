@@ -36,6 +36,7 @@ use rtrb::{Consumer, Producer, RingBuffer};
 
 use crate::compile::{CompiledSong, ParamTarget};
 use crate::engine::{Engine, TrackRuntime};
+use crate::mixer::MixRuntime;
 
 /// Capacity of each queue.
 const QUEUE: usize = 16;
@@ -52,6 +53,9 @@ pub struct SongUpdate {
     /// Empty with room for one runtime per new track; becomes the engine's
     /// runtime list. After the swap it holds the old list.
     pub(crate) spare: Vec<TrackRuntime>,
+    /// A fresh mix runtime for the new song; after the swap, the one the
+    /// engine did not keep (this one, or the old song's).
+    pub(crate) mix: MixRuntime,
     /// Assigned by the controller, one higher per swap it sends; the
     /// engine plays this generation once the update lands.
     pub(crate) generation: u64,
@@ -60,8 +64,8 @@ pub struct SongUpdate {
 }
 
 impl SongUpdate {
-    /// Builds fresh runtimes for every track of `song`. Allocates: call it off
-    /// the audio thread.
+    /// Builds fresh runtimes for every track of `song` and for its mix
+    /// (buses sized for its bpm). Allocates: call it off the audio thread.
     pub fn new(song: Arc<CompiledSong>) -> Box<Self> {
         let sample_rate = f64::from(song.clock.sample_rate);
         let tracks = song
@@ -70,10 +74,12 @@ impl SongUpdate {
             .map(|t| Some(TrackRuntime::build(t, sample_rate)))
             .collect();
         let spare = Vec::with_capacity(song.tracks.len());
+        let mix = MixRuntime::build(&song);
         Box::new(Self {
             song,
             tracks,
             spare,
+            mix,
             generation: 0,
             clear_overrides: false,
         })
