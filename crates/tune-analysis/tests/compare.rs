@@ -187,7 +187,7 @@ fn mono_reference_width_not_compared() {
     assert_eq!(c.deltas.side_to_mid_db, None);
     assert!(
         c.verdicts
-            .contains(&"width: one side is mono, not compared".to_string()),
+            .contains(&"width: the reference is mono, not compared".to_string()),
         "{:?}",
         c.verdicts
     );
@@ -217,9 +217,84 @@ fn near_mono_reference_width_not_compared() {
     assert_eq!(c.deltas.side_to_mid_db, None);
     assert!(
         c.verdicts
-            .contains(&"width: one side is mono, not compared".to_string()),
+            .contains(&"width: the reference is mono, not compared".to_string()),
         "{:?}",
         c.verdicts
     );
     assert!(!c.verdicts.iter().any(|v| v.starts_with("side/mid")));
+}
+
+/// Stereo from a mid and a side that is `side_db` below it, exactly.
+fn width_at(side_db: f64) -> Audio {
+    let m = &six_sine(None).channels[0];
+    let k = 10f64.powf(side_db / 20.0) as f32;
+    let l = m.iter().map(|v| v + v * k).collect();
+    let r = m.iter().map(|v| v - v * k).collect();
+    common::stereo(SR, l, r)
+}
+
+#[test]
+fn mono_boundary_is_60_db_below_the_mid() {
+    let wide = analyze(&width_at(-10.0), None).unwrap();
+    let at_59 = analyze(&width_at(-59.0), None).unwrap();
+    let at_61 = analyze(&width_at(-61.0), None).unwrap();
+    assert!((at_59.spectral.stereo.side_to_mid_db + 59.0).abs() < 0.01);
+    assert!((at_61.spectral.stereo.side_to_mid_db + 61.0).abs() < 0.01);
+
+    // -59 dB is still (barely) stereo: width is compared.
+    let c = compare(&wide, &at_59);
+    let d = c.deltas.side_to_mid_db.expect("compared");
+    assert!((d - 49.0).abs() < 0.05, "{d}");
+    assert!(
+        c.verdicts.iter().any(|v| v.starts_with("side/mid +49")),
+        "{:?}",
+        c.verdicts
+    );
+
+    // -61 dB is mono: not compared, and the verdict names the mono side.
+    let c = compare(&wide, &at_61);
+    assert_eq!(c.deltas.side_to_mid_db, None);
+    assert!(
+        c.verdicts
+            .contains(&"width: the reference is mono, not compared".to_string()),
+        "{:?}",
+        c.verdicts
+    );
+    let c = compare(&at_61, &wide);
+    assert_eq!(c.deltas.side_to_mid_db, None);
+    assert!(
+        c.verdicts
+            .contains(&"width: ours is mono, not compared".to_string()),
+        "{:?}",
+        c.verdicts
+    );
+}
+
+#[test]
+fn anti_phase_is_not_called_mono() {
+    // No mid at all (R = -L) reads +200 dB: out of phase, not mono.
+    let x = six_sine(None).channels[0].clone();
+    let neg = x.iter().map(|v| -v).collect();
+    let anti = analyze(&common::stereo(SR, x, neg), None).unwrap();
+    assert_eq!(anti.spectral.stereo.side_to_mid_db, 200.0);
+    let wide = analyze(&width_at(-10.0), None).unwrap();
+    let c = compare(&anti, &wide);
+    assert_eq!(c.deltas.side_to_mid_db, None);
+    assert!(
+        c.verdicts
+            .contains(&"width: ours has no mid (fully out of phase), not compared".to_string()),
+        "{:?}",
+        c.verdicts
+    );
+    let mono = analyze(&six_sine(None), None).unwrap();
+    let c = compare(&anti, &mono);
+    assert_eq!(c.deltas.side_to_mid_db, None);
+    assert!(
+        c.verdicts.contains(
+            &"width: ours has no mid (fully out of phase) and the reference is mono, not compared"
+                .to_string()
+        ),
+        "{:?}",
+        c.verdicts
+    );
 }

@@ -13,10 +13,17 @@ const NO_CONTENT_DB: f64 = -100.0;
 /// (about -90 dB), which must not read as "wider" next to a real stereo mix.
 const MONO_SIDE_MID_DB: f64 = -60.0;
 
-/// Mono for width comparison: no side (or the -200 dB floor), a side residue
-/// at or below [`MONO_SIDE_MID_DB`], or the +200 dB ceiling (no mid at all).
-fn is_mono(side_to_mid_db: f64) -> bool {
-    side_to_mid_db <= MONO_SIDE_MID_DB || side_to_mid_db >= SIDE_MID_LIMIT_DB
+/// Why a side has no width to compare, or `None` for a stereo side: no side
+/// (the -200 dB floor) or a residue at or below [`MONO_SIDE_MID_DB`] is mono;
+/// the +200 dB ceiling means no mid at all (left and right in anti-phase).
+fn no_width(side_to_mid_db: f64) -> Option<&'static str> {
+    if side_to_mid_db <= MONO_SIDE_MID_DB {
+        Some("is mono")
+    } else if side_to_mid_db >= SIDE_MID_LIMIT_DB {
+        Some("has no mid (fully out of phase)")
+    } else {
+        None
+    }
 }
 
 /// Ours minus reference. `None` when either side lacks the quantity.
@@ -80,14 +87,13 @@ pub fn compare(ours: &Analysis, reference: &Analysis) -> Comparison {
         }
     }
     let (so, sr) = (os.stereo.side_to_mid_db, rs.stereo.side_to_mid_db);
-    let (so_mono, sr_mono) = (is_mono(so), is_mono(sr));
-    // Both mono: they agree (0). Exactly one mono: not comparable.
-    let width = if so_mono && sr_mono {
-        Some(0.0)
-    } else if so_mono || sr_mono {
-        None
-    } else {
-        Some(so - sr)
+    let (o_flat, r_flat) = (no_width(so), no_width(sr));
+    // Both stereo: the difference. Both mono (or both anti-phase): they agree
+    // (0). Otherwise there is no common width to compare.
+    let width = match (o_flat, r_flat) {
+        (None, None) => Some(so - sr),
+        (Some(a), Some(b)) if a == b => Some(0.0),
+        _ => None,
     };
     let deltas = Deltas {
         integrated_lu: diff(ol.integrated_lufs, rl.integrated_lufs),
@@ -154,8 +160,12 @@ pub fn compare(ours: &Analysis, reference: &Analysis) -> Comparison {
             "low end below 120 Hz is not mono (correlation {c:.2}): keep kick and bass centred"
         ));
     }
-    if so_mono != sr_mono {
-        v.push("width: one side is mono, not compared".to_string());
+    if width.is_none() {
+        let sides: Vec<String> = [("ours", o_flat), ("the reference", r_flat)]
+            .into_iter()
+            .filter_map(|(who, why)| why.map(|w| format!("{who} {w}")))
+            .collect();
+        v.push(format!("width: {}, not compared", sides.join(" and ")));
     } else if let Some(d) = width.filter(|d| d.abs() >= 3.0) {
         let word = if d > 0.0 { "wider" } else { "narrower" };
         v.push(format!("side/mid {d:+.1} dB vs reference: {word}"));
