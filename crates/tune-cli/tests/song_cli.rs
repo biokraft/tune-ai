@@ -306,3 +306,36 @@ fn render_303_json() {
     assert!(v["seconds"].is_number() && v["peak_dbfs"].is_number());
     assert_eq!(v["clipped_samples"], 0);
 }
+
+fn render_stderr(src: &Path) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let a = tune()
+        .arg("render")
+        .arg(src)
+        .arg("--out")
+        .arg(dir.path().join("x.wav"))
+        .assert()
+        .success();
+    String::from_utf8(a.get_output().stderr.clone()).unwrap()
+}
+
+#[test]
+fn clipper_note_for_knee_and_warning_for_limiting() {
+    let err = render_stderr(&mini());
+    assert!(err.contains("note: soft clipper shaped "), "{err}");
+    assert!(!err.contains("warning:"), "{err}");
+
+    let dir = tempfile::tempdir().unwrap();
+    let hot = dir.path().join("hot.toml");
+    let src = std::fs::read_to_string(mini()).unwrap();
+    let src = src
+        .replace("gain_db = -3", "gain_db = 12")
+        .replace("gain_db = -10", "gain_db = 12")
+        .replace(
+            "[tracks.acid]\ninstrument = \"acid303\"",
+            "[tracks.acid]\ninstrument = \"acid303\"\ngain_db = 12",
+        );
+    std::fs::write(&hot, src).unwrap();
+    let err = render_stderr(&hot);
+    assert!(err.contains("warning: master clipper engaged on "), "{err}");
+}

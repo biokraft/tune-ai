@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use serde_json::json;
-use tune_engine::{CompiledSong, RenderOptions, render_to_files};
+use tune_engine::{CLIP_CEILING, CompiledSong, RenderOptions, render_to_files};
 
 use super::{load, sample_rate};
 use crate::report::{Failure, Success, dbfs, finish, fmt_time, parse_bar_range};
@@ -54,18 +54,26 @@ fn run_inner(a: &Args) -> Result<Success, Vec<Failure>> {
         render_to_files(compiled, &opts, &a.out).map_err(|e| vec![Failure::msg(e.to_string())])?;
     let peak = dbfs(report.meter.peak);
     let pre = dbfs(report.meter.pre_clip_peak);
-    let mut text = format!(
+    let text = format!(
         "rendered bars {}..{} ({}) to {}, peak {peak:.1} dBFS, pre-clip peak {pre:.1} dBFS",
         range.start + 1,
         range.end,
         fmt_time(report.seconds),
         a.out.display()
     );
-    if report.meter.knee_samples > 0 {
-        text.push_str(&format!(
-            "\nwarning: master clipper engaged on {} samples",
-            report.meter.knee_samples
-        ));
+    if !a.json && report.meter.knee_samples > 0 {
+        // stderr: the stdout line stays one stable line.
+        if report.meter.pre_clip_peak > CLIP_CEILING {
+            eprintln!(
+                "warning: master clipper engaged on {} samples",
+                report.meter.knee_samples
+            );
+        } else {
+            eprintln!(
+                "note: soft clipper shaped {} samples",
+                report.meter.knee_samples
+            );
+        }
     }
     let files: Vec<String> = report
         .files
