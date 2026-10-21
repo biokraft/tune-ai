@@ -19,3 +19,6 @@ tauri = { version = "=2.12.4", features = [] }
 serde_json = "1"
 tune-audio = { path = "../../../crates/tune-audio" }
 tune-studio = { path = "../../../crates/tune-studio" }
+
+[dev-dependencies]
+tempfile = "3"
