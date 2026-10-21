@@ -36,9 +36,35 @@ enum Command {
     Changes(ChangesArgs),
     /// List every instrument and effect parameter.
     Params(JsonArgs),
+    /// Measure loudness, balance and brightness, and draw a spectrogram.
+    Analyze(AnalyzeArgs),
     /// Render an acid 303 pattern to a stereo 24-bit WAV.
     #[command(name = "render-303")]
     Render303(Render303),
+}
+
+#[derive(Args)]
+struct AnalyzeArgs {
+    /// Song file (TOML, rendered in memory) or audio file (WAV, MP3, FLAC, AAC).
+    input: PathBuf,
+    /// Bars to analyse, 1-based and inclusive, e.g. 33..64 (default: all).
+    #[arg(long, value_name = "A..B")]
+    bars: Option<String>,
+    /// Measure each section of the song separately.
+    #[arg(long)]
+    sections: bool,
+    /// Map an audio file onto this song's bars.
+    #[arg(long, value_name = "SONG")]
+    song: Option<PathBuf>,
+    /// With --song: the song bar the file starts at, 1-based.
+    #[arg(long, value_name = "N")]
+    from_bar: Option<u32>,
+    /// Draw a spectrogram PNG (default path scratch/<name>.png).
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
+    png: Option<String>,
+    /// Print JSON instead of text.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -356,6 +382,15 @@ fn main() -> ExitCode {
                 SourceArg::Claude => tune_studio::Source::Claude,
                 SourceArg::External => tune_studio::Source::External,
             }),
+            json: a.json,
+        }),
+        Command::Analyze(a) => cmd::analyze::run(&cmd::analyze::Args {
+            input: a.input,
+            bars: a.bars,
+            sections: a.sections,
+            song: a.song,
+            from_bar: a.from_bar,
+            png: a.png,
             json: a.json,
         }),
         Command::Params(a) => cmd::params::run(a.json),
