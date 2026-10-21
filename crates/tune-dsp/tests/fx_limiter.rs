@@ -52,6 +52,20 @@ fn sample_peak(x: &[f64]) -> f64 {
     x.iter().fold(0.0, |m, v| m.max(v.abs()))
 }
 
+/// The gain alone, before the output clamp, keeps every delayed input frame
+/// under the ceiling: `|x[n - latency]| * g[n] <= c` on both channels. The
+/// 1e-9 slack covers the snap to unity; real overshoots are an ulp or two.
+fn assert_gain_meets_ceiling(l: &[f64], r: &[f64], out: &Out, lat: usize, c: f64) {
+    let limit = c * (1.0 + 1e-9);
+    for n in lat..out.g.len() {
+        let g = out.g[n];
+        for (ch, x) in [("left", l), ("right", r)] {
+            let y = x[n - lat].abs() * g;
+            assert!(y <= limit, "{ch} frame {n}: {y} > {c} (gain {g})");
+        }
+    }
+}
+
 fn true_peak_dbtp(out: &Out) -> f64 {
     let audio = Audio {
         sample_rate: SR as u32,
@@ -95,13 +109,16 @@ fn sample_peak_never_exceeds_ceiling() {
     let mut lim = Limiter::new(SR);
     let l: Vec<f64> = noise(1, n).iter().map(|v| v * hot).collect();
     let r: Vec<f64> = noise(2, n).iter().map(|v| v * hot).collect();
+    let lat = lim.latency();
     let out = run(&mut lim, &l, &r);
+    assert_gain_meets_ceiling(&l, &r, &out, lat, c);
     assert!(sample_peak(&out.l) <= c, "{}", sample_peak(&out.l));
     assert!(sample_peak(&out.r) <= c, "{}", sample_peak(&out.r));
 
     let mut lim = Limiter::new(SR);
     let x = sine(1000.0, hot, 0.0, n);
     let out = run(&mut lim, &x, &x);
+    assert_gain_meets_ceiling(&x, &x, &out, lat, c);
     assert!(sample_peak(&out.l) <= c, "{}", sample_peak(&out.l));
     assert!(sample_peak(&out.r) <= c, "{}", sample_peak(&out.r));
 }
@@ -144,6 +161,7 @@ fn true_peak_stays_under_ceiling() {
         })
         .collect();
     let out = run(&mut Limiter::new(SR), &x, &x);
+    assert_gain_meets_ceiling(&x, &x, &out, Limiter::new(SR).latency(), db2amp(-1.5));
     let tp = true_peak_dbtp(&out);
     eprintln!("bursts + saw: {tp:.3} dBTP");
     assert!(tp <= TRUE_PEAK_MAX_DBTP, "bursts + saw: {tp} dBTP");
@@ -174,6 +192,42 @@ fn releases_back_to_unity() {
 }
 
 #[test]
+fn impulses_meet_the_ceiling_before_the_clamp() {
+    // Isolated impulses: sustained material hides an off-by-one in the hold
+    // window or a gain that lags the peak; a lone sample does not.
+    let c = db2amp(-1.5);
+    let lim = Limiter::new(SR);
+    let lat = lim.latency();
+    let w = lat - DETECTOR_DELAY;
+    let silence = |n: usize| vec![0.0; n];
+    let mut cases: Vec<(&str, Vec<f64>, Vec<f64>)> = Vec::new();
+
+    let mut x = silence(2000);
+    x[500] = 2.0;
+    cases.push(("one impulse at 2.0", x.clone(), x));
+    let mut l = silence(2000);
+    l[500] = -3.0;
+    cases.push(("one impulse at -3.0, left only", l, silence(2000)));
+    for gap in [w, w + 1] {
+        let mut x = silence(2000);
+        x[500] = 2.0;
+        x[500 + gap] = 1.5;
+        cases.push(("two impulses", x.clone(), x));
+        let mut x = silence(2000);
+        x[500] = 1.5;
+        x[500 + gap] = 2.0;
+        cases.push(("two impulses, louder second", x.clone(), x));
+    }
+
+    for (name, l, r) in cases {
+        let mut lim = Limiter::new(SR);
+        let out = run(&mut lim, &l, &r);
+        assert!(out.g.iter().any(|&g| g < 1.0), "{name}: never limited");
+        assert_gain_meets_ceiling(&l, &r, &out, lat, c);
+    }
+}
+
+#[test]
 fn extreme_gain_stays_finite() {
     let c = db2amp(-1.5);
     let gain = db2amp(24.0);
@@ -181,6 +235,7 @@ fn extreme_gain_stays_finite() {
     let l: Vec<f64> = noise(5, n).iter().map(|v| (v + 0.5) * gain).collect();
     let r: Vec<f64> = noise(6, n).iter().map(|v| (v + 0.5) * gain).collect();
     let out = run(&mut Limiter::new(SR), &l, &r);
+    assert_gain_meets_ceiling(&l, &r, &out, Limiter::new(SR).latency(), c);
     assert!(
         out.l
             .iter()
