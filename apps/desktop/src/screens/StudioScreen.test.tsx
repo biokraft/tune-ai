@@ -40,6 +40,24 @@ describe("StudioScreen mixer strips", () => {
     ]);
   });
 
+  it("offers no duck knob on the duck source's own strip", () => {
+    setup();
+    const duck = (track: string) => within(strip(track)).queryByRole("slider", { name: "Duck" });
+    expect(duck("kick")).toBeNull();
+    expect(within(strip("kick")).getByText("Duck source")).toBeInTheDocument();
+    expect(duck("acid")).toBeInTheDocument();
+  });
+
+  it("offers no duck knob anywhere without a duck source", () => {
+    const client = new FakeClient();
+    render(<App store={createStudioStore(client)} />);
+    act(() => client.emit(stateEvent((s) => (s.song!.mix.duck_source = null))));
+    for (const t of ["kick", "acid"]) {
+      expect(within(strip(t)).queryByRole("slider", { name: "Duck" })).toBeNull();
+      expect(within(strip(t)).getByText("No kick")).toBeInTheDocument();
+    }
+  });
+
   it("rings the send knob of the track Claude changed, and no other", () => {
     const client = setup();
     act(() =>
