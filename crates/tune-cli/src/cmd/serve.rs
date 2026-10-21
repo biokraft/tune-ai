@@ -25,6 +25,7 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde_json::{Value, json};
+use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::mpsc;
 use tower_http::services::{ServeDir, ServeFile};
 use tune_audio::output;
@@ -89,7 +90,7 @@ pub fn run(a: &Args) -> ExitCode {
     }
 }
 
-/// Listens until Ctrl-C.
+/// Listens until Ctrl-C or SIGTERM (`kill`).
 fn serve(a: &Args, handle: &StudioHandle) -> Result<(), String> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -106,6 +107,10 @@ fn serve(a: &Args, handle: &StudioHandle) -> Result<(), String> {
             .port();
         let url = format!("http://127.0.0.1:{port}/");
         let app = router(handle.clone(), &a.ui, port);
+        // Registered before "serving" goes out, so a `kill` from then on
+        // also stops cleanly and the pending edits get written.
+        let mut terminate = signal(SignalKind::terminate())
+            .map_err(|e| format!("cannot listen for SIGTERM: {e}"))?;
         if a.json {
             println!("{}", json!({ "event": "serving", "url": url }));
         } else {
@@ -115,6 +120,7 @@ fn serve(a: &Args, handle: &StudioHandle) -> Result<(), String> {
         tokio::select! {
             r = axum::serve(listener, app) => r.map_err(|e| format!("server failed: {e}")),
             _ = tokio::signal::ctrl_c() => Ok(()),
+            _ = terminate.recv() => Ok(()),
         }
     });
     rt.shutdown_timeout(Duration::from_secs(1));
