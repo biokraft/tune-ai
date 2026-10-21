@@ -278,7 +278,7 @@ fn bpm_swap_rebuilds_mix_without_alloc() {
     // Two steps of the acid into the delay, then a bpm swap while it rings.
     e.seek(2);
     under_flag(&mut out, 2 * step + 1000, 4096, |o| e.process(o));
-    e.queue_swap(SongUpdate::new(slow));
+    assert!(e.queue_swap(SongUpdate::new(slow)).is_none());
     under_flag(&mut out, step, 4096, |o| e.process(o));
     assert_eq!(e.swaps_applied(), 1);
     assert_eq!(e.mix_swaps_kept(), 0, "a new bpm rebuilds the mix");
