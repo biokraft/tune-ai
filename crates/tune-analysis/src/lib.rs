@@ -2,10 +2,12 @@
 #![forbid(unsafe_code)]
 
 mod audio;
+mod canvas;
 mod loudness;
 mod report;
 mod sections;
 mod spectral;
+pub mod spectrogram;
 
 pub use audio::{Audio, decode_file};
 pub use loudness::{Loudness, measure_loudness};
