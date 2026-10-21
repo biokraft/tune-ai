@@ -10,6 +10,7 @@ pub mod engine;
 pub mod instrument;
 pub mod mixer;
 pub mod tracks;
+pub mod wav;
 
 pub use clock::{Clock, hit_seed, track_seed};
 pub use compile::{
@@ -19,3 +20,4 @@ pub use engine::{Engine, TrackRuntime};
 pub use instrument::{Cell, Effect, Instrument, StepCtx};
 pub use mixer::{CLIP_CEILING, CLIP_KNEE, Meter, pan_gains, soft_clip};
 pub use tracks::{AcidTrack, make_effect, make_instrument};
+pub use wav::{WavError, WavFormat, WavWriter, write_wav};

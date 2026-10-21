@@ -8,6 +8,10 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+hound = "3.5"
 thiserror = "2"
 tune-dsp = { path = "../tune-dsp" }
 tune-song = { path = "../tune-song" }
+
+[dev-dependencies]
+tempfile = "3"
