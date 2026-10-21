@@ -197,7 +197,7 @@ function TrackPanel({
                   if (r && typeof r === "object" && "automated" in r && r.automated) {
                     dropLive(p.id, v);
                     showNote(
-                      `${spec.label} is automated where the playhead is, so the change was not saved. Edit its lane in song.toml.`,
+                      `${spec.label} follows its automation here — you heard your change, but it wasn't saved. Ask Claude to change the automation.`,
                     );
                   } else {
                     setTimeout(() => dropLive(p.id, v), SETTLE_MS);
