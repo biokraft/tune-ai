@@ -42,3 +42,15 @@ pub fn max_abs_diff(a: &[f64], b: &[f64]) -> f64 {
         .map(|(x, y)| (x - y).abs())
         .fold(0.0, f64::max)
 }
+
+/// `n` samples of a unit sine at `freq` Hz.
+pub fn tone(freq: f64, sample_rate: f64, n: usize) -> Vec<f64> {
+    (0..n)
+        .map(|i| (2.0 * std::f64::consts::PI * freq * i as f64 / sample_rate).sin())
+        .collect()
+}
+
+/// RMS of a signal.
+pub fn rms(x: &[f64]) -> f64 {
+    (x.iter().map(|v| v * v).sum::<f64>() / x.len() as f64).sqrt()
+}
