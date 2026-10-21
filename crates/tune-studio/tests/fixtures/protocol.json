@@ -4,6 +4,9 @@
       "cmd": "list_songs"
     },
     {
+      "cmd": "get_state"
+    },
+    {
       "cmd": "open_song",
       "args": {
         "path": "songs/mini/song.toml"

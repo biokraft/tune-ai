@@ -235,6 +235,27 @@ fn subscribe_starts_with_state() {
 }
 
 #[test]
+fn get_state_returns_current_state_and_changes_nothing() {
+    let f = fixture(MINI);
+    f.call(Command::SeekBar { bar: 1 });
+    f.call(Command::SetLoop { bars: Some([0, 2]) });
+    let shown = f.state("loop state", |s| s.loop_bars == Some([0, 2]));
+    let before = f.disk();
+    let got = f.call(Command::GetState);
+    assert_eq!(got, serde_json::to_value(&shown).expect("state to JSON"));
+    assert_eq!(got["cursor_bar"], json!(1));
+    assert_eq!(got["song"]["name"], json!("mini"));
+    // Nothing goes out and nothing is written.
+    f.quiet(Duration::from_millis(300), "event", |_| true);
+    assert_eq!(f.disk(), before);
+    assert!(
+        !f.studio.call(Command::GetState).unwrap()["can_undo"]
+            .as_bool()
+            .unwrap()
+    );
+}
+
+#[test]
 fn play_emits_playhead() {
     let f = fixture(MINI);
     assert_eq!(f.call(play(Some(0))), Value::Null);

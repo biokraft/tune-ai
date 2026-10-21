@@ -158,7 +158,7 @@ impl Drop for Inner {
 
 impl StudioHandle {
     /// Runs `cmd` and returns its result: `null` for most commands, the
-    /// song list for `list_songs`, the changes for `undo`/`redo`, and
+    /// song list for `list_songs`, the state for `get_state`, the changes for `undo`/`redo`, and
     /// `{"automated": true}` for a knob released on an automated param.
     /// Blocks for at most 5 s.
     pub fn call(&self, cmd: Command) -> Result<Value, StudioError> {
@@ -327,7 +327,9 @@ impl Actor {
                     // A drag changes nothing shown; skip building the state.
                     let shown = !matches!(
                         cmd,
-                        Command::SetParam { commit: false, .. } | Command::ListSongs
+                        Command::SetParam { commit: false, .. }
+                            | Command::ListSongs
+                            | Command::GetState
                     );
                     let result = self.handle(cmd);
                     if shown {
@@ -362,6 +364,7 @@ impl Actor {
     fn handle(&mut self, cmd: Command) -> Result<Value, StudioError> {
         match cmd {
             Command::ListSongs => self.list_songs(),
+            Command::GetState => Ok(serde_json::to_value(self.state()).unwrap_or(Value::Null)),
             Command::OpenSong { path } => {
                 let path = self.under_root(&path)?;
                 self.open(&path)?;
