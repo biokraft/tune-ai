@@ -16,8 +16,11 @@ and lock-free live playback) driven through the `tune` CLI.
   (`SongPath`, comments kept), the edit log, undo, external-change merge, and
   the `Studio` actor the app talks to. Headless.
 - `crates/tune-cli` - the `tune` binary: `validate`, `info`, `params`,
-  `render`, `play`, `render-303`, `set`, `changes`, `serve`. `ctrlc`, `tokio`
-  and `axum` live only here (and in the Tauri host).
+  `render`, `play`, `render-303`, `set`, `changes`, `serve`, `analyze`,
+  `compare`, `refs`. `ctrlc`, `tokio` and `axum` live only here (and in the
+  Tauri host).
+- `crates/tune-analysis` - Claude's ears: decode, loudness (EBU R128), spectrum,
+  spectrogram PNG, comparison against a reference. Headless, no unsafe.
 - `crates/tune-audio` - audio outputs for the engine's `AudioOut`: `CpalOut`
   (default device) and `NullOut`. `cpal` lives only here.
 - `apps/desktop` - the studio app (React + Vite in `src/`, Tauri host in
@@ -60,6 +63,61 @@ Every command takes `--json`; exit code 2 means failure. `tune play` is for the
 producer: it plays through the speakers and reloads the file when it changes.
 Claude may run `tune play <song> --device null --json` to check a reload (no
 sound), never the default device. Never commit renders or any audio.
+
+### Listening (Claude cannot hear)
+
+`tune analyze` and `tune compare` turn a render into numbers and a picture.
+They are hints about the mix, not verdicts on the music: the producer's ears
+are the final judge.
+
+1. `tune info <song> --json` for the section map (bars are 1-based).
+2. `tune analyze <song> --sections --png --json` for the whole song, or
+   `--bars A..B` for a passage. Put INPUT before `--png` (or write
+   `--png=PATH`): a bare `--png` takes an optional value and would swallow a
+   following path. Bare `--png` writes `scratch/<name>[-bars-A-B].png`.
+3. Read the PNG with the image tool (1600x856). Bright = loud. x is time, with
+   1-based bar numbers in the ruler and white section lines. y is 30 Hz to
+   16 kHz, log scale. The strip below shows each band's share of the total
+   over time.
+4. Read the JSON. Per-section `integrated_lufs` and `delta_lu` are the energy
+   curve: a drop should be louder and brighter than its breakdown. A
+   `nothing changes here` entry in a section's `notes` is a problem.
+5. `tune compare <song> --bars <drop> --ref <name> [--ref-seconds A..B] --png --json`.
+   Find the reference's drop first with `tune analyze <ref path> --png`, then
+   compare our drop with it. Give exactly one of `--ref <name>` or a
+   reference path (`tune compare <song> <path>`). The compare PNG is 1600x1712:
+   ours on top, the reference below, same frequency axis and colour scale.
+6. Change the song (`tune set`), re-render, repeat.
+
+Input is a song file (rendered in memory) or audio (WAV, MP3, FLAC, AAC; at
+most 2 channels). `--song <song> --from-bar N` maps an audio file onto a song's
+bars. Failures exit 2 with a message.
+
+| Key | Meaning |
+| --- | --- |
+| `loudness.integrated_lufs` | whole-passage loudness; acid target -8 to -6 |
+| `loudness.true_peak_dbtp` | at most -1; above risks distortion after encoding |
+| `loudness.lra_lu` | loudness range; `null` on passages under about 3 s |
+| `loudness.crest_db`, `plr_db` | peak vs RMS / vs loudness; lower = more squashed |
+| `targets` | the acid targets and whether `integrated` / `true_peak` meet them |
+| `bands.{sub,low,low_mid,mid,high,air}` | dB vs the total; independent of loudness |
+| `low_end` | `kick_region_db` (20-90 Hz) vs `bass_region_db` (90-250 Hz), `ratio_db` = kick - bass |
+| `stereo.low_correlation` | L/R correlation below 120 Hz; 0.9 or more = mono low end |
+| `stereo.side_to_mid_db` | stereo width |
+| `brightness.*` | spectral centroid: `median_hz`, `p10_hz`, `p90_hz`, `profile_hz`; `range_oct` = how far the filter moves |
+| `series` | 1 s grid: `short_term_lufs`, `centroid_hz` |
+| `sections[]` | `integrated_lufs`, `short_term_max_lufs`, `delta_lu`, `bands`, `centroid_median_hz`, `notes` |
+| `deltas`, `verdicts` (compare) | ours minus reference, plus one plain-language line each |
+
+A quantity that does not exist (silence, too short, mono width) is `null`.
+In `compare`, band and width deltas are `null` with a "not compared" verdict
+when one side lacks content or is mono.
+
+References live outside git. Put `[refs]` `<name> = "~/path/file.mp3"` in
+`tune.local.toml` at the repo root (gitignored) or drop files into `refs/`
+(name = file stem); `tune refs --json` checks that each resolves. Never read
+or print `tune.local.toml` itself. Never commit references, PNGs or the local
+config.
 
 ### Working with the studio open
 
