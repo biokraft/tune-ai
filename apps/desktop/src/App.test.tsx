@@ -135,6 +135,29 @@ describe("App", () => {
     expect(within(banner).getByText("30:1 unknown pattern `a9`")).toBeInTheDocument();
   });
 
+  it("shows file errors instead of the song list when the open song does not parse", () => {
+    const client = new FakeClient();
+    client.results.list_songs = ["songs/mini/song.toml"];
+    render(<App store={createStudioStore(client)} />);
+    act(() =>
+      client.emit(
+        stateEvent((s) => {
+          s.song = null;
+          s.file_errors = [
+            { line: 12, column: 5, message: "expected a value" },
+            { line: null, column: null, message: "no sections" },
+          ];
+        }),
+      ),
+    );
+    const banner = screen.getByRole("alert");
+    expect(banner).toHaveTextContent("song.toml has 2 errors, so it cannot be opened.");
+    expect(within(banner).getByText("12:5 expected a value")).toBeInTheDocument();
+    expect(within(banner).getByText("no sections")).toBeInTheDocument();
+    expect(screen.queryByText("Open a song")).toBeNull();
+    expect(client.named("list_songs")).toHaveLength(0);
+  });
+
   it("tells the producer to restart tune serve when the connection is lost", () => {
     const { client } = setup(stateEvent((s) => (s.file_errors = [])));
     act(() => client.loseConnection());
