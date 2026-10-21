@@ -234,12 +234,24 @@ describe("App", () => {
     pop.remove();
   });
 
+  it("opens the 303 sequencer on the first section the 303 plays in", () => {
+    // Stopped at bar 1, nothing selected: section `a` has no 303, section `b` plays a1.
+    setup();
+    const seq = screen.getByRole("group", { name: "303 step sequencer" });
+    expect(within(seq).getByRole("button", { name: "Step 1 note" })).toHaveTextContent("C2");
+    expect(screen.getByText("Pattern a1 in b")).toBeInTheDocument();
+  });
+
+  it("while playing, the 303 sequencer follows the playhead into a section without the 303", () => {
+    const { client } = setup(stateEvent((s) => (s.playing = true)));
+    act(() => client.emit({ event: "playhead", step: 4, bar: 0, beat: 1, playing: true }));
+    expect(screen.getByText("The 303 rests in this section.")).toBeInTheDocument();
+  });
+
   it("shows the selected section's acid pattern, or says it plays none", () => {
     setup();
     fireEvent.click(screen.getByTestId("section-0"));
-    expect(
-      screen.getByText("This section plays no 303 pattern. Pick one in the arrangement."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("The 303 rests in this section.")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("section-1"));
     const seq = screen.getByRole("group", { name: "303 step sequencer" });
     expect(within(seq).getByRole("button", { name: "Step 1 note" })).toHaveTextContent("C2");
