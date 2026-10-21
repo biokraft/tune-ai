@@ -22,6 +22,8 @@ enum Command {
     Validate(SongArgs),
     /// Show a song's sections and tracks.
     Info(SongArgs),
+    /// Render a song (or a bar range) to WAV.
+    Render(RenderArgs),
     /// List every instrument and effect parameter.
     Params(JsonArgs),
     /// Render an acid 303 pattern to a stereo 24-bit WAV.
@@ -31,6 +33,24 @@ enum Command {
 
 #[derive(Args)]
 struct JsonArgs {
+    /// Print JSON instead of text.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct RenderArgs {
+    /// Song file (TOML).
+    song: PathBuf,
+    /// Bars to render, 1-based and inclusive, e.g. 33..64 (default: all).
+    #[arg(long, value_name = "A..B")]
+    bars: Option<String>,
+    /// Write one WAV per track plus the mix into the --out directory.
+    #[arg(long)]
+    stems: bool,
+    /// Output .wav file, or a directory with --stems.
+    #[arg(long)]
+    out: PathBuf,
     /// Print JSON instead of text.
     #[arg(long)]
     json: bool,
@@ -214,6 +234,13 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Validate(a) => cmd::validate::run(&a.song, a.json),
         Command::Info(a) => cmd::info::run(&a.song, a.json),
+        Command::Render(a) => cmd::render::run(&cmd::render::Args {
+            song: a.song,
+            bars: a.bars,
+            stems: a.stems,
+            out: a.out,
+            json: a.json,
+        }),
         Command::Params(a) => cmd::params::run(a.json),
         Command::Render303(a) => finish(a.json, run(&a)),
     }
