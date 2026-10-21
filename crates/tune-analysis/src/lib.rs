@@ -3,10 +3,14 @@
 
 mod audio;
 mod loudness;
+mod report;
+mod sections;
 mod spectral;
 
 pub use audio::{Audio, decode_file};
 pub use loudness::{Loudness, measure_loudness};
+pub use report::{ACID_LUFS, Analysis, TRUE_PEAK_MAX_DBTP, Targets, analyze, classify_targets};
+pub use sections::{BarMap, SectionReport, SectionSpan, analyze_sections};
 pub use spectral::{BANDS, Band, Brightness, LowEnd, Spectral, Stereo, measure_spectral};
 
 /// Everything that can go wrong while reading or measuring audio.

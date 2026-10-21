@@ -4572,6 +4572,7 @@ dependencies = [
  "ebur128",
  "hound",
  "realfft",
+ "serde_json",
  "symphonia",
  "tempfile",
  "thiserror 2.0.21",
