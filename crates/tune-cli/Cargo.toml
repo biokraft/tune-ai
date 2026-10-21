@@ -20,6 +20,7 @@ clap = { version = "4", features = ["derive"] }
 hound = "3.5"
 thiserror = "2"
 tune-dsp = { path = "../tune-dsp" }
+tune-engine = { path = "../tune-engine" }
 
 [dev-dependencies]
 assert_cmd = "2"

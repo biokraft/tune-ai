@@ -481,6 +481,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tune-dsp",
+ "tune-engine",
 ]
 
 [[package]]
@@ -495,6 +496,8 @@ dependencies = [
 name = "tune-engine"
 version = "0.1.0"
 dependencies = [
+ "hound",
+ "tempfile",
  "thiserror",
  "tune-dsp",
  "tune-song",

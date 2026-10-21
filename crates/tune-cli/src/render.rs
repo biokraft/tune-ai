@@ -1,6 +1,5 @@
 //! Deterministic offline rendering of an acid 303 pattern to samples and WAV.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use tune_dsp::acid303::{ACID303_PARAMS, Acid303, AcidPattern, AcidPlayer};
@@ -174,51 +173,20 @@ pub fn render_acid(spec: &RenderSpec) -> Result<Vec<f32>, RenderError> {
 
 /// Writes dual-mono 24-bit PCM. Goes through `<path>.tmp`; on error nothing is left behind.
 pub fn write_wav(path: &Path, mono: &[f32], sample_rate: u32) -> Result<(), RenderError> {
-    let mut tmp_name = path.as_os_str().to_owned();
-    tmp_name.push(".tmp");
-    let tmp = PathBuf::from(tmp_name);
-    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        fs::create_dir_all(parent).map_err(|source| RenderError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    }
-    let result = write_inner(&tmp, mono, sample_rate).and_then(|()| {
-        fs::rename(&tmp, path).map_err(|source| RenderError::Io {
-            path: path.to_path_buf(),
-            source,
-        })
-    });
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    result.map_err(|e| match e {
-        RenderError::Wav { source, .. } => RenderError::Wav {
-            path: path.to_path_buf(),
-            source,
-        },
-        other => other,
-    })
-}
-
-fn write_inner(tmp: &Path, mono: &[f32], sample_rate: u32) -> Result<(), RenderError> {
-    let wav_spec = hound::WavSpec {
-        channels: 2,
-        sample_rate,
-        bits_per_sample: 24,
-        sample_format: hound::SampleFormat::Int,
-    };
-    let wav = |source| RenderError::Wav {
-        path: tmp.to_path_buf(),
-        source,
-    };
-    let mut w = hound::WavWriter::create(tmp, wav_spec).map_err(wav)?;
+    let mut stereo = Vec::with_capacity(mono.len() * 2);
     for &x in mono {
-        let q = (f64::from(x) * 8_388_607.0)
-            .round()
-            .clamp(-8_388_608.0, 8_388_607.0) as i32;
-        w.write_sample(q).map_err(wav)?;
-        w.write_sample(q).map_err(wav)?;
+        stereo.push(x);
+        stereo.push(x);
     }
-    w.finalize().map_err(wav)
+    tune_engine::wav::write_wav(
+        path,
+        &stereo,
+        2,
+        sample_rate,
+        tune_engine::wav::WavFormat::Pcm24,
+    )
+    .map_err(|e| match e {
+        tune_engine::wav::WavError::Io { path, source } => RenderError::Io { path, source },
+        tune_engine::wav::WavError::Wav { path, source } => RenderError::Wav { path, source },
+    })
 }
