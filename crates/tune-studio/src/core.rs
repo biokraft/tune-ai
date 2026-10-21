@@ -124,6 +124,9 @@ pub struct StudioCore {
     offered_changes: Vec<Change>,
     /// Why the text on disk does not parse; empty when it does.
     file_errors: Vec<ErrorView>,
+    /// An external change that [`flush`](Self::flush) took in before the
+    /// watcher reported it, waiting to be announced.
+    unreported: Option<ExternalChange>,
 }
 
 impl StudioCore {
@@ -147,6 +150,7 @@ impl StudioCore {
             offered: Vec::new(),
             offered_changes: Vec::new(),
             file_errors: Vec::new(),
+            unreported: None,
         })
     }
 
@@ -191,14 +195,16 @@ impl StudioCore {
     ///
     /// It first reads the file, and a text not seen yet goes through
     /// [`on_disk_text`](Self::on_disk_text), so an external change the
-    /// watcher has not reported is merged, never overwritten. While the
-    /// file does not parse, nothing is written.
+    /// watcher has not reported is merged, never overwritten, and kept for
+    /// [`take_unreported_external`](Self::take_unreported_external). While
+    /// the file does not parse, nothing is written.
     pub fn flush(&mut self) -> Result<Vec<Change>, StudioError> {
         let mut written = Vec::new();
         if let Ok(text) = fs::read_to_string(&self.path)
             && let Some(ext) = self.on_disk_text(text)
         {
-            written = ext.merged;
+            written.clone_from(&ext.merged);
+            self.hold_unreported(ext);
         }
         if !self.file_errors.is_empty() {
             return Ok(Vec::new());
@@ -347,6 +353,30 @@ impl StudioCore {
             // flush tries again.
             let _ = self.write_pending();
         }
+    }
+
+    /// The external change [`flush`](Self::flush) (and so
+    /// [`undo`](Self::undo), [`redo`](Self::redo) and
+    /// [`resolve_offered`](Self::resolve_offered)) found on disk before the
+    /// watcher reported it, if any; taken once. The watcher's own report of
+    /// that text comes too late to tell (the file then holds the studio's
+    /// write), so the caller announces this one instead.
+    pub fn take_unreported_external(&mut self) -> Option<ExternalChange> {
+        self.unreported.take()
+    }
+
+    /// Adds `ext` to the change waiting to be announced.
+    fn hold_unreported(&mut self, ext: ExternalChange) {
+        let Some(held) = &mut self.unreported else {
+            self.unreported = Some(ext);
+            return;
+        };
+        held.source = ext.source;
+        held.changes.extend(ext.changes);
+        held.replaced |= ext.replaced;
+        held.merged.extend(ext.merged);
+        held.offered.extend(ext.offered);
+        held.errors = ext.errors;
     }
 
     /// Keeps `edits` for re-apply and returns their changes.

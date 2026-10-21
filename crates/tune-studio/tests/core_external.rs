@@ -352,3 +352,38 @@ fn flush_detects_unseen_external() {
     let sources: Vec<Source> = log(&s).iter().map(|e| e.source).collect();
     assert_eq!(sources, [Source::External, Source::Human]);
 }
+
+/// An external change that flush (or undo/redo) merged before the watcher
+/// reported it is kept for the caller to announce, once.
+#[test]
+fn flush_keeps_unseen_external_for_report() {
+    let s = song();
+    let mut core = open(&s);
+    assert!(core.take_unreported_external().is_none());
+    core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
+    fs::write(&s.path, bpm_121(FIXTURE)).unwrap();
+    core.flush().unwrap();
+
+    let ext = core.take_unreported_external().expect("the merged change");
+    assert_eq!(ext.source, Source::External);
+    assert_eq!(ext.changes.len(), 1);
+    assert_eq!(ext.changes[0].path, SongPath::Bpm);
+    assert_eq!(ext.merged.len(), 1);
+    assert_eq!(ext.merged[0].path, cutoff_path());
+    assert!(core.take_unreported_external().is_none(), "taken once");
+
+    // The watcher's later report of the merged text is an own write.
+    assert!(core.on_disk_text(disk(&s)).is_none());
+
+    // Undo flushes first, so it can find one too.
+    fs::write(&s.path, FIXTURE.replace("bpm = 120", "bpm = 122")).unwrap();
+    core.undo().unwrap();
+    let ext = core.take_unreported_external().expect("found by undo");
+    assert_eq!(ext.changes[0].path, SongPath::Bpm);
+    assert_eq!(ext.changes[0].new, json!(122));
+
+    // A change the watcher reports itself is never held back.
+    fs::write(&s.path, FIXTURE.replace("bpm = 120", "bpm = 123")).unwrap();
+    assert!(core.on_disk_text(disk(&s)).is_some());
+    assert!(core.take_unreported_external().is_none());
+}
