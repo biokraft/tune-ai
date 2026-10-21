@@ -17,6 +17,24 @@ task verify   # format check, clippy, tests, privacy check
 task demo     # render and play the demo 303 line
 ```
 
+## Songs
+
+A song is one TOML file: tracks, patterns and an arrangement of sections with
+parameter automation. See `crates/tune-song/tests/fixtures/mini.toml` for a
+small one.
+
+```sh
+cargo run --release -p tune-cli -- validate path/to/song.toml
+cargo run --release -p tune-cli -- info path/to/song.toml
+cargo run --release -p tune-cli -- render path/to/song.toml --bars 1..4 --out scratch/part.wav
+cargo run --release -p tune-cli -- play path/to/song.toml --loop 1..4
+```
+
+`play` uses the default audio device and hot-reloads: save the file and the
+change is heard at the next step without stopping. A file with errors prints
+them and the previous version keeps playing. `--device null` runs without
+sound. Every command takes `--json`.
+
 ## Hear the 303
 
 ```sh
