@@ -159,10 +159,19 @@ describe("Arrangement", () => {
   it("lane curves stay visible above compact cells", () => {
     setup([sec("a", 0, 16)]);
     const cell = screen.getByRole("button", { name: "acid in section 1" });
-    expect(parseFloat(cell.style.width)).toBeLessThan(16 * 12);
+    expect(parseFloat(cell.style.maxWidth)).toBeLessThan(16 * 12);
     const overlay = screen.getByTestId("lane-overlay");
     expect(overlay).toHaveClass("pointer-events-none");
     expect(overlay).toHaveClass("z-10");
+  });
+
+  it("pattern cells fit the whole pattern name, up to the section width", () => {
+    setup([sec("a", 0, 16, { play: { acid: "acid_main" } })]);
+    const cell = screen.getByRole("button", { name: "acid in section 1" });
+    expect(cell).toHaveTextContent("acid_main");
+    expect(cell).toHaveAttribute("title", "acid_main");
+    expect(cell.style.width).toBe("");
+    expect(cell.style.maxWidth).toBe(`${16 * 12 - 4}px`);
   });
 
   it("labels each row with the track id and instrument", () => {
