@@ -12,7 +12,9 @@ STAGED=0
 [ "${1:-}" = "--staged" ] && STAGED=1
 
 ALLOWLIST="scripts/privacy-allowlist.txt"
-AUDIO_RE='\.(wav|mp3|flac|aif|aiff|ogg|m4a)(\.tmp)?$'
+AUDIO_RE='\.(wav|mp3|flac|aif|aiff|ogg|m4a|aac)(\.tmp)?$'
+IMAGE_RE='\.(png|jpe?g|gif|webp)$'
+ICONS_DIR='apps/desktop/src-tauri/icons/'
 # Home-directory prefixes, assembled so this file never holds them literally.
 HOME_RE='(/Us''ers/|/ho''me/)[A-Za-z0-9._-]+'
 EMAIL_RE='[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
@@ -50,6 +52,16 @@ while IFS= read -r -d '' f; do
 
   if printf '%s' "$f" | grep -qiE "$AUDIO_RE"; then
     report "$f" "audio file"
+    continue
+  fi
+
+  case "$f" in
+    *.local.toml) report "$f" "local config"; continue ;;
+    refs/*) report "$f" "reference folder"; continue ;;
+  esac
+
+  if printf '%s' "$f" | grep -qiE "$IMAGE_RE" && [ "${f#"$ICONS_DIR"}" = "$f" ]; then
+    report "$f" "image file"
     continue
   fi
 

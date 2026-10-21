@@ -16,6 +16,7 @@ samples/user/
 *.aiff
 *.ogg
 *.m4a
+*.aac
 
 # Local settings and secrets
 .env
