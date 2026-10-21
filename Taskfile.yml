@@ -53,6 +53,21 @@ tasks:
       - task: test
       - task: privacy
 
+  studio:
+    desc: "Open the studio in a native window (needs SONG=songs/<name>/song.toml)"
+    requires:
+      vars: [SONG]
+    cmds:
+      - cd apps/desktop && TUNE_ROOT={{.ROOT_DIR}} TUNE_SONG={{.ROOT_DIR}}/{{.SONG}} pnpm tauri dev
+
+  serve:
+    desc: "Serve the studio to a browser (needs SONG=songs/<name>/song.toml)"
+    requires:
+      vars: [SONG]
+    cmds:
+      - task: ui:build
+      - cargo run --release -p tune-cli -- serve {{.SONG}}
+
   demo:
     desc: Render the demo 303 line and play it
     cmds:

@@ -1,0 +1,21 @@
+[package]
+name = "tune-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "tune_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.3", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.4", features = [] }
+serde_json = "1"
+tune-audio = { path = "../../../crates/tune-audio" }
+tune-studio = { path = "../../../crates/tune-studio" }

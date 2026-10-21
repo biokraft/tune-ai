@@ -29,3 +29,6 @@ samples/user/
 
 # Per-song edit log (who changed what, when): local, never committed
 songs/*/edits.jsonl
+
+# Tauri generated schemas
+apps/desktop/src-tauri/gen/
