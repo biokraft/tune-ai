@@ -59,15 +59,20 @@ fn run_inner(a: &Args) -> Result<Success, Vec<Failure>> {
         render_to_files(compiled, &opts, &a.out).map_err(|e| vec![Failure::msg(e.to_string())])?;
     let peak = dbfs(report.meter.peak);
     let pre = dbfs(report.meter.pre_clip_peak);
+    let limit = compiled_master == MasterMode::Limit;
+    let reduction = report.meter.max_reduction_db;
+    let tail = if limit {
+        format!("limiter reduced peaks by {reduction:.1} dB")
+    } else {
+        format!("pre-clip peak {pre:.1} dBFS")
+    };
     let text = format!(
-        "rendered bars {}..{} ({}) to {}, peak {peak:.1} dBFS, pre-clip peak {pre:.1} dBFS",
+        "rendered bars {}..{} ({}) to {}, peak {peak:.1} dBFS, {tail}",
         range.start + 1,
         range.end,
         fmt_time(report.seconds),
         a.out.display()
     );
-    let limit = compiled_master == MasterMode::Limit;
-    let reduction = report.meter.max_reduction_db;
     if !a.json {
         // stderr: the stdout line stays one stable line.
         if limit {

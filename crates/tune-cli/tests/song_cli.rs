@@ -397,7 +397,7 @@ fn params_lists_mix_and_strip() {
 fn render_reports_limiter() {
     let v = render_json(&mixed());
     assert_eq!(v["master"], "limit");
-    assert!(v["max_reduction_db"].as_f64().unwrap() >= 0.0);
+    assert!(v["max_reduction_db"].as_f64().unwrap() > 0.0);
     assert!(v["peak_dbfs"].as_f64().unwrap() <= -1.5 + 1e-9, "{v}");
 }
 
@@ -423,4 +423,67 @@ fn render_mini_reports_clip() {
 fn limit_mode_does_not_print_clipper_lines() {
     let err = render_stderr(&mixed());
     assert!(!err.contains("clipper"), "{err}");
+}
+
+fn render_text(src: &Path) -> (String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let a = tune()
+        .arg("render")
+        .arg(src)
+        .arg("--out")
+        .arg(dir.path().join("x.wav"))
+        .assert()
+        .success();
+    let o = a.get_output();
+    (
+        String::from_utf8(o.stdout.clone()).unwrap(),
+        String::from_utf8(o.stderr.clone()).unwrap(),
+    )
+}
+
+fn mixed_with_gain(db: &str) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let song = dir.path().join("hot.toml");
+    std::fs::copy(mixed(), &song).unwrap();
+    tune()
+        .args([
+            "set",
+            song.to_str().unwrap(),
+            &format!("mix.master.gain={db}"),
+        ])
+        .assert()
+        .success();
+    (dir, song)
+}
+
+#[test]
+fn limiter_note_in_text_mode() {
+    let (out, err) = render_text(&mixed());
+    assert!(
+        err.starts_with("note: limiter reduced peaks by up to "),
+        "{err}"
+    );
+    assert!(err.trim_end().ends_with(" dB"), "{err}");
+    assert!(!err.contains("warning:"), "{err}");
+    assert!(out.contains("limiter reduced peaks by "), "{out}");
+}
+
+#[test]
+fn limiter_warning_in_text_mode() {
+    let (_d, song) = mixed_with_gain("12");
+    let (_out, err) = render_text(&song);
+    assert!(
+        err.starts_with("warning: limiter reduced peaks by "),
+        "{err}"
+    );
+    assert!(err.contains(" dB: lower mix.master.gain"), "{err}");
+    assert!(!err.contains("note:"), "{err}");
+}
+
+#[test]
+fn limit_text_line_leads_with_reduction() {
+    let (out, _) = render_text(&mixed());
+    assert!(out.starts_with("rendered bars 1.."), "{out}");
+    assert!(out.contains("dBFS, limiter reduced peaks by "), "{out}");
+    assert!(!out.contains("pre-clip"), "{out}");
 }
