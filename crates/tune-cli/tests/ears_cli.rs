@@ -407,3 +407,25 @@ fn compare_errors() {
     let neither = compare_out(dir.path(), &[ms]);
     assert_eq!(neither.status.code(), Some(2));
 }
+
+#[test]
+fn compare_usage_puts_ours_first() {
+    // `ours` is the first positional; a usage line that lists the reference
+    // first would lead a reader to swap the two files.
+    let dir = tempfile::tempdir().unwrap();
+    let out = tune(dir.path())
+        .args(["compare", "--help"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let help = String::from_utf8(out.stdout).unwrap();
+    let usage = help
+        .lines()
+        .find(|l| l.starts_with("Usage:"))
+        .expect("usage line");
+    let (ours, reference) = (usage.find("<OURS>"), usage.find("<REFERENCE"));
+    assert!(
+        matches!((ours, reference), (Some(o), Some(r)) if o < r),
+        "{usage}"
+    );
+}
