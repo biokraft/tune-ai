@@ -626,3 +626,40 @@ fn comment_only_undo_publishes_state() {
     f.state("redoable state", |s| s.can_redo);
     assert_eq!(f.disk(), MINI);
 }
+
+/// Fills the engine's command queue (capacity 16) while no frames are
+/// pulled, so the next swap or loop cannot be sent at once.
+fn flood_queue(f: &Fixture) {
+    for i in 0..20 {
+        f.call(knob("acid303.cutoff", 1000.0 + f64::from(i), false));
+    }
+}
+
+/// A loop and a song change refused by a full queue are sent once the
+/// queue drains, the loop after the swap.
+#[test]
+fn loop_survives_a_full_queue() {
+    let f = fixture(MINI);
+    f.call(play(Some(0)));
+    flood_queue(&f);
+    f.call(Command::SetTrackMix {
+        track: "hat".into(),
+        gain_db: Some(-12.0),
+        pan: None,
+        mute: None,
+        solo: None,
+    });
+    assert_eq!(f.call(Command::SetLoop { bars: Some([0, 1]) }), Value::Null);
+    f.pull(BLOCK);
+    // Ticks send the swap, then the loop.
+    sleep(Duration::from_millis(150));
+    // Past the end of bar 0: the loop brings the playhead back.
+    f.pull(96_000 + 54_000);
+    match f.wait(
+        "playhead past step 8",
+        |e| matches!(e, Event::Playhead { step, .. } if *step >= 8),
+    ) {
+        Event::Playhead { bar, step, .. } => assert_eq!(bar, 0, "step {step}"),
+        _ => unreachable!(),
+    }
+}
