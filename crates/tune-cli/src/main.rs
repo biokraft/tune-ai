@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -24,6 +26,8 @@ enum Command {
     Info(SongArgs),
     /// Render a song (or a bar range) to WAV.
     Render(RenderArgs),
+    /// Play a song through the audio device, reloading it when the file changes.
+    Play(PlayArgs),
     /// List every instrument and effect parameter.
     Params(JsonArgs),
     /// Render an acid 303 pattern to a stereo 24-bit WAV.
@@ -54,6 +58,30 @@ struct RenderArgs {
     /// Print JSON instead of text.
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Args)]
+struct PlayArgs {
+    /// Song file (TOML).
+    song: PathBuf,
+    /// First bar to play, 1-based.
+    #[arg(long, value_name = "N", default_value_t = 1)]
+    from_bar: u32,
+    /// Loop these bars, 1-based and inclusive, e.g. 1..4.
+    #[arg(long = "loop", value_name = "A..B")]
+    looping: Option<String>,
+    /// Output device: the default one, or `null` (no sound, for tests).
+    #[arg(long, value_enum, default_value_t = DeviceArg::Default)]
+    device: DeviceArg,
+    /// Print JSON events instead of text.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum DeviceArg {
+    Default,
+    Null,
 }
 
 #[derive(Args)]
@@ -239,6 +267,16 @@ fn main() -> ExitCode {
             bars: a.bars,
             stems: a.stems,
             out: a.out,
+            json: a.json,
+        }),
+        Command::Play(a) => cmd::play::run(&cmd::play::Args {
+            song: a.song,
+            from_bar: a.from_bar,
+            looping: a.looping,
+            device: match a.device {
+                DeviceArg::Default => cmd::play::Device::Default,
+                DeviceArg::Null => cmd::play::Device::Null,
+            },
             json: a.json,
         }),
         Command::Params(a) => cmd::params::run(a.json),
