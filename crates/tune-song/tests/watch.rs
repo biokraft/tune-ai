@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread::sleep;
 use std::time::Duration;
 
-use tune_song::{Reload, SongWatcher};
+use tune_song::{RawReload, Reload, SongWatcher};
 
 const MINI: &str = include_str!("fixtures/mini.toml");
 const WAIT: Duration = Duration::from_secs(5);
@@ -126,4 +126,30 @@ fn drop_stops_the_watcher_thread() {
         rx.recv_timeout(WAIT),
         Err(mpsc::RecvTimeoutError::Disconnected)
     ));
+}
+
+#[test]
+fn raw_reports_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.toml");
+    fs::write(&path, MINI).unwrap();
+    let (tx, rx) = mpsc::channel();
+    let _watcher = SongWatcher::start_raw(&path, tx).unwrap();
+    sleep(Duration::from_millis(300));
+
+    // Raw reports do not parse: invalid text comes through as it is.
+    fs::write(&path, "[song\n").unwrap();
+    match rx.recv_timeout(WAIT) {
+        Ok(RawReload::Changed(text)) => assert_eq!(text, "[song\n"),
+        other => panic!("expected Changed, got {other:?}"),
+    }
+    let text = with_bpm(121);
+    fs::write(&path, &text).unwrap();
+    match rx.recv_timeout(WAIT) {
+        Ok(RawReload::Changed(got)) => assert_eq!(got, text),
+        other => panic!("expected Changed, got {other:?}"),
+    }
+    // The same bytes again report nothing.
+    fs::write(&path, &text).unwrap();
+    assert!(rx.recv_timeout(Duration::from_secs(1)).is_err());
 }
