@@ -9,10 +9,14 @@
 
 mod diff;
 mod doc;
+mod error;
 mod log;
 mod path;
+mod set;
 
 pub use diff::{Change, diff_songs, is_whole_replace};
 pub use doc::{EditError, SongDoc, effective_value};
+pub use error::{ErrorView, StudioError};
 pub use log::{EditEntry, EditLog, Source, text_hash};
 pub use path::{SongPath, TrackField};
+pub use set::{SetOutcome, parse_assignment, set_paths, write_atomic};

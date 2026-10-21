@@ -478,6 +478,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
+ "windows-link",
 ]
 
 [[package]]
@@ -1232,6 +1233,7 @@ dependencies = [
  "clap",
  "ctrlc",
  "hound",
+ "jiff",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
@@ -1239,6 +1241,7 @@ dependencies = [
  "tune-dsp",
  "tune-engine",
  "tune-song",
+ "tune-studio",
 ]
 
 [[package]]

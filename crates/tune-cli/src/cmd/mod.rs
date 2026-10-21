@@ -10,6 +10,7 @@ pub mod info;
 pub mod params;
 pub mod play;
 pub mod render;
+pub mod set;
 pub mod validate;
 
 /// Loads a song, mapping failures to reportable ones.
