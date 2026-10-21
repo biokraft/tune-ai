@@ -5,7 +5,7 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{MINI, compile_song, compiled, run, song};
+use common::{MINI, MIXED, bits, compile_song, compiled, drop_lane, run, song, variant_of};
 use tune_analysis::{Audio, measure_loudness};
 use tune_dsp::acid303::ACID303_PARAMS;
 use tune_dsp::{MASTER_GAIN, STRIP_SEND_DELAY, db2amp};
@@ -13,9 +13,7 @@ use tune_engine::{
     CLIP_KNEE, CompiledSong, Engine, MIX_TRACK, ParamTarget, RenderOptions, Rendered, pan_gains,
     render,
 };
-use tune_song::{MasterMode, MixUnit, Song, parse_song};
-
-const MIXED: &str = include_str!("../../tune-song/tests/fixtures/mixed.toml");
+use tune_song::{MasterMode, MixUnit, Song};
 
 /// Frames of the duck attack at 48 kHz (2 ms).
 const ATTACK: u64 = 96;
@@ -24,9 +22,7 @@ const RELEASE: u64 = 3840;
 
 /// `mixed.toml` changed by `edit`, checked by a write and re-parse.
 fn variant(edit: impl FnOnce(&mut Song)) -> Song {
-    let mut s = song(MIXED);
-    edit(&mut s);
-    parse_song(&s.to_toml()).unwrap_or_else(|e| panic!("variant does not validate: {e:?}"))
+    variant_of(MIXED, edit)
 }
 
 /// The clip variant: `mixed.toml` with `master = "clip"`, then `edit`.
@@ -35,15 +31,6 @@ fn clip_variant(edit: impl FnOnce(&mut Song)) -> Song {
         s.mix.master = MasterMode::Clip;
         edit(s);
     })
-}
-
-/// Removes the lane on `track`'s `param` from every section.
-fn drop_lane(s: &mut Song, track: &str, param: &str) {
-    for section in &mut s.sections {
-        section
-            .automation
-            .retain(|l| !(l.track == track && l.param == param));
-    }
 }
 
 fn set_param(s: &mut Song, track: &str, id: &str, plain: f64) {
@@ -72,10 +59,6 @@ fn render_all(s: &Song) -> (Arc<CompiledSong>, Rendered) {
 
 fn stem<'a>(r: &'a Rendered, id: &str) -> &'a [f32] {
     &r.stems.iter().find(|(t, _)| t == id).unwrap().1
-}
-
-fn bits(x: &[f32]) -> Vec<u32> {
-    x.iter().map(|v| v.to_bits()).collect()
 }
 
 /// Frame `f` of interleaved stereo `x`.

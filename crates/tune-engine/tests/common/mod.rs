@@ -35,6 +35,20 @@ pub fn variant_of(src: &str, edit: impl FnOnce(&mut Song)) -> Song {
     parse_song(&s.to_toml()).unwrap_or_else(|e| panic!("variant does not validate: {e:?}"))
 }
 
+/// Removes the lane on `track`'s `param` from every section.
+pub fn drop_lane(s: &mut Song, track: &str, param: &str) {
+    for section in &mut s.sections {
+        section
+            .automation
+            .retain(|l| !(l.track == track && l.param == param));
+    }
+}
+
+/// The bit patterns of `x`, for bitwise comparisons.
+pub fn bits(x: &[f32]) -> Vec<u32> {
+    x.iter().map(|v| v.to_bits()).collect()
+}
+
 /// One recorded call on a probe, in call order. `sample` is the number of
 /// `process` calls the probe saw before the call.
 #[derive(Clone, Debug, PartialEq)]
