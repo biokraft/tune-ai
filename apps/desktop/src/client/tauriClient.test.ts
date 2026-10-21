@@ -40,6 +40,39 @@ describe("createTauriClient", () => {
     expect(invokeMock).toHaveBeenCalledWith("studio", { command: { cmd: "get_state" } });
   });
 
+  it("calls run one at a time, in order", async () => {
+    const first = deferred<unknown>();
+    invokeMock.mockReturnValueOnce(first.promise).mockResolvedValue(null);
+    const client = createTauriClient();
+    const drag = client.call({
+      cmd: "set_param",
+      args: { track: "acid", param: "acid303.cutoff", value: 900, commit: false },
+    });
+    const release = client.call({
+      cmd: "set_param",
+      args: { track: "acid", param: "acid303.cutoff", value: 900, commit: true },
+    });
+    await settle();
+    // The release waits for the live value, so it can never overtake it.
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    first.resolve(null);
+    await expect(release).resolves.toBeNull();
+    await expect(drag).resolves.toBeNull();
+    const commits = invokeMock.mock.calls.map(
+      (c) => (c[1] as { command: { args: { commit: boolean } } }).command.args.commit,
+    );
+    expect(commits).toEqual([false, true]);
+  });
+
+  it("a failed call does not hold up the next", async () => {
+    invokeMock.mockRejectedValueOnce("nothing to undo").mockResolvedValue(null);
+    const client = createTauriClient();
+    const undo = client.call({ cmd: "undo" });
+    const stop = client.call({ cmd: "stop" });
+    await expect(undo).rejects.toThrow("nothing to undo");
+    await expect(stop).resolves.toBeNull();
+  });
+
   it("a failed listen does not block calls", async () => {
     listenMock.mockRejectedValue(new Error("no event plugin"));
     invokeMock.mockResolvedValue(null);
