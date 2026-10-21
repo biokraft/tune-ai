@@ -1,11 +1,12 @@
 # tune-ai
 
-Rust music workstation. First milestone: a faithful Rust port of the Open303
-TB-303 emulation, rendered through the `tune` CLI.
+Rust music workstation: TOML song files, 909-style drums, a faithful Rust port
+of the Open303 TB-303 emulation, and a sample-accurate engine (offline render
+and lock-free live playback) driven through the `tune` CLI.
 
 ## Layout
 
-- `crates/tune-dsp` - DSP library (`param`, `acid303/*`, `fx/*`). No Tauri, UI,
+- `crates/tune-dsp` - DSP library (`param`, `acid303/*`, `drums/*`, `fx/*`). No Tauri, UI,
   MCP, `cc` or `open303-ref` dependencies (`open303-ref` only as a dev-dependency).
 - `crates/tune-song` - song file model: parse, validate (positional errors),
   canonical write, file watcher. Headless.

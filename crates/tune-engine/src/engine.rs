@@ -208,6 +208,10 @@ impl Engine {
 
     /// Jumps to the start of 0-based `bar` (clamped to the song's end) and
     /// resets every instrument and effect. The loop and meter are kept.
+    ///
+    /// Audio after a seek starts from reset instrument state (silent filters,
+    /// envelopes and delay lines), so only the param values match play-through,
+    /// not the samples.
     pub fn seek(&mut self, bar: u32) {
         let bar = bar.min(self.song.total_bars);
         for rt in &mut self.tracks {
