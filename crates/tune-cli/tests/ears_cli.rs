@@ -248,3 +248,162 @@ fn analyze_text_mentions_target() {
         assert!(s.lines().any(|l| l.starts_with(key)), "{key}: {s}");
     }
 }
+
+// ---- tune compare ----
+
+fn write_six(path: &Path, extra_500_dbfs: Option<f64>) {
+    let sr = 48_000u32;
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: sr,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(path, spec).unwrap();
+    let tone = |hz: f64, db: f64, i: u32| {
+        10f64.powf(db / 20.0)
+            * (2.0 * std::f64::consts::PI * hz * f64::from(i) / f64::from(sr)).sin()
+    };
+    for i in 0..sr * 5 {
+        let mut x = 0.0;
+        for hz in [40.0, 150.0, 500.0, 2000.0, 6000.0, 14000.0] {
+            x += tone(hz, -20.0, i);
+        }
+        if let Some(db) = extra_500_dbfs {
+            x += tone(500.0, db, i);
+        }
+        w.write_sample((x * 32767.0) as i16).unwrap();
+    }
+    w.finalize().unwrap();
+}
+
+fn compare_out(dir: &Path, args: &[&str]) -> std::process::Output {
+    tune(dir)
+        .env("HOME", dir)
+        .arg("compare")
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+fn compare_json(dir: &Path, args: &[&str]) -> Value {
+    let mut a = args.to_vec();
+    a.push("--json");
+    let out = compare_out(dir, &a);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    json_of(&out.stdout)
+}
+
+fn ref_dir() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    write_sine(&dir.path().join("ref.wav"), 48_000, 2, 10, -14.0);
+    std::fs::write(
+        dir.path().join("tune.local.toml"),
+        "[refs]\nr = \"ref.wav\"\n",
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn compare_wav_to_wav() {
+    let dir = tempfile::tempdir().unwrap();
+    write_six(&dir.path().join("ref.wav"), None);
+    write_six(&dir.path().join("ours.wav"), Some(-14.0));
+    let v = compare_json(dir.path(), &["ours.wav", "ref.wav"]);
+    assert_eq!(v["ok"], true);
+    assert!(v["deltas"]["bands"]["low_mid"].as_f64().unwrap() > 3.0);
+    let verdicts = v["verdicts"].as_array().unwrap();
+    assert!(
+        verdicts
+            .iter()
+            .any(|s| s.as_str().unwrap().ends_with("muddier")),
+        "{verdicts:?}"
+    );
+    assert_eq!(v["reference"]["source"]["ref_name"], Value::Null);
+    assert_eq!(v["reference"]["source"]["seconds_range"], Value::Null);
+    assert_eq!(v["ours"]["source"]["kind"], "file");
+    let text = String::from_utf8(compare_out(dir.path(), &["ours.wav", "ref.wav"]).stdout).unwrap();
+    assert!(text.starts_with("ours ours"), "{text}");
+    assert!(text.contains("\nref  ref"), "{text}");
+    assert!(text.lines().any(|l| l.starts_with("- low-mid +")), "{text}");
+    assert!(text.lines().last().unwrap().starts_with("png "), "{text}");
+}
+
+#[test]
+fn compare_song_by_ref_name() {
+    let dir = ref_dir();
+    let m = mini();
+    let v = compare_json(
+        dir.path(),
+        &[m.to_str().unwrap(), "--ref", "r", "--bars", "3..4"],
+    );
+    assert_eq!(v["reference"]["source"]["ref_name"], "r");
+    assert_eq!(v["ours"]["source"]["bars"], serde_json::json!([3, 4]));
+}
+
+#[test]
+fn compare_png_default_path() {
+    let dir = ref_dir();
+    let m = mini();
+    let v = compare_json(
+        dir.path(),
+        &[m.to_str().unwrap(), "--ref", "r", "--bars", "3..4", "--png"],
+    );
+    assert_eq!(v["png"], "scratch/compare-mini-bars-3-4-vs-r.png");
+    let bytes = std::fs::read(dir.path().join("scratch/compare-mini-bars-3-4-vs-r.png")).unwrap();
+    // PNG IHDR: width and height are big-endian u32 at bytes 16 and 20.
+    assert_eq!(u32::from_be_bytes(bytes[16..20].try_into().unwrap()), 1600);
+    assert_eq!(u32::from_be_bytes(bytes[20..24].try_into().unwrap()), 1712);
+}
+
+#[test]
+fn compare_ref_seconds() {
+    let dir = ref_dir();
+    let m = mini();
+    let v = compare_json(
+        dir.path(),
+        &[m.to_str().unwrap(), "--ref", "r", "--ref-seconds", "2..4"],
+    );
+    assert_eq!(v["reference"]["source"]["seconds"], 2.0);
+    assert_eq!(
+        v["reference"]["source"]["seconds_range"],
+        serde_json::json!([2.0, 4.0])
+    );
+}
+
+#[test]
+fn compare_errors() {
+    let dir = ref_dir();
+    let m = mini();
+    let ms = m.to_str().unwrap();
+    std::fs::write(
+        dir.path().join("tune.local.toml"),
+        "[refs]\nr = \"ref.wav\"\ngone = \"nope.wav\"\n",
+    )
+    .unwrap();
+    let msg = |args: &[&str]| {
+        let mut a = args.to_vec();
+        a.push("--json");
+        let out = compare_out(dir.path(), &a);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        let v = json_of(&out.stdout);
+        assert_eq!(v["ok"], false);
+        v["errors"][0]["message"].as_str().unwrap().to_string()
+    };
+    assert!(msg(&[ms, "--ref", "x"]).contains("no reference named `x`"));
+    assert!(msg(&[ms, "--ref", "gone"]).contains("which does not exist"));
+    assert!(
+        msg(&[ms, "--ref", "r", "--ref-seconds", "5..50"]).contains("the reference is 10.0 s long")
+    );
+    assert!(msg(&[ms, "--ref", "r", "--ref-seconds", "x"]).contains("bad --ref-seconds `x`"));
+    // Both forms together, or neither: clap rejects.
+    let both = compare_out(dir.path(), &[ms, "ref.wav", "--ref", "r"]);
+    assert_eq!(both.status.code(), Some(2));
+    let neither = compare_out(dir.path(), &[ms]);
+    assert_eq!(neither.status.code(), Some(2));
+}

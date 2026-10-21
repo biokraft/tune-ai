@@ -38,6 +38,8 @@ enum Command {
     Params(JsonArgs),
     /// Measure loudness, balance and brightness, and draw a spectrogram.
     Analyze(AnalyzeArgs),
+    /// Compare a render or song against a reference track.
+    Compare(CompareArgs),
     /// List the reference tracks configured outside git.
     Refs(JsonArgs),
     /// Render an acid 303 pattern to a stereo 24-bit WAV.
@@ -62,6 +64,37 @@ struct AnalyzeArgs {
     #[arg(long, value_name = "N")]
     from_bar: Option<u32>,
     /// Draw a spectrogram PNG (default path scratch/<name>.png).
+    #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
+    png: Option<String>,
+    /// Print JSON instead of text.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+#[command(group(
+    clap::ArgGroup::new("reference_source")
+        .required(true)
+        .multiple(false)
+        .args(["reference", "ref_name"])
+))]
+struct CompareArgs {
+    /// Our song file (TOML, rendered in memory) or audio file.
+    ours: PathBuf,
+    /// Reference audio file (WAV, MP3, FLAC, AAC).
+    reference: Option<PathBuf>,
+    /// A reference by name, from `tune refs`.
+    #[arg(long = "ref", value_name = "NAME")]
+    ref_name: Option<String>,
+    /// Bars of ours to compare, 1-based and inclusive, e.g. 33..64 (default: all).
+    #[arg(long, value_name = "A..B")]
+    bars: Option<String>,
+    /// Part of the reference to compare, in seconds, e.g. 90..150.5 (default: all).
+    #[arg(long, value_name = "A..B")]
+    ref_seconds: Option<String>,
+    /// Draw the stacked compare PNG (default path
+    /// scratch/compare-<ours>-vs-<ref>.png). Write `--png=PATH` for a path,
+    /// so the flag cannot swallow a positional argument.
     #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
     png: Option<String>,
     /// Print JSON instead of text.
@@ -392,6 +425,15 @@ fn main() -> ExitCode {
             sections: a.sections,
             song: a.song,
             from_bar: a.from_bar,
+            png: a.png,
+            json: a.json,
+        }),
+        Command::Compare(a) => cmd::compare::run(&cmd::compare::Args {
+            ours: a.ours,
+            reference: a.reference,
+            ref_name: a.ref_name,
+            bars: a.bars,
+            ref_seconds: a.ref_seconds,
             png: a.png,
             json: a.json,
         }),
