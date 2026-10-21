@@ -33,9 +33,15 @@ async fn studio(
         .map_err(|e| e.to_string())
 }
 
+/// Writes pending edits and stops playback and the file watcher. Runs once,
+/// when the app exits: Tauri ends the process without dropping managed state.
+pub fn on_exit(handle: &StudioHandle) {
+    handle.shutdown();
+}
+
 /// Opens the window with the studio behind it.
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .setup(|app| {
             let songs_root = match std::env::var_os("TUNE_ROOT") {
                 Some(root) => PathBuf::from(root),
@@ -65,16 +71,52 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![studio])
-        .run(tauri::generate_context!())
-        .expect("error while running tune");
+        .build(tauri::generate_context!())
+        .expect("error while building tune");
+    app.run(|app, event| {
+        if let tauri::RunEvent::Exit = event
+            && let Some(handle) = app.try_state::<StudioHandle>()
+        {
+            on_exit(&handle);
+        }
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const MINI: &str = include_str!("../../../../crates/tune-song/tests/fixtures/mini.toml");
+
     fn args(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn on_exit_flushes_pending_edit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("song.toml");
+        std::fs::write(&path, MINI).expect("write song");
+        let handle = Studio::spawn(
+            StudioConfig {
+                audio: Box::new(tune_audio::NullOut::new()),
+                songs_root: dir.path().to_owned(),
+            },
+            Some(path.clone()),
+        )
+        .expect("spawns");
+        handle
+            .call(Command::SetParam {
+                track: "acid".into(),
+                param: "acid303.cutoff".into(),
+                value: 823.456,
+                commit: true,
+            })
+            .expect("commit");
+        // The 150 ms debounce has not fired yet.
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("823.5"));
+        on_exit(&handle);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("823.5"));
     }
 
     #[test]
