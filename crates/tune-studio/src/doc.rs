@@ -25,7 +25,7 @@ pub enum EditError {
     NoSuchTarget(String),
     #[error("bad value for `{path}`: {message}")]
     BadValue { path: String, message: String },
-    #[error("section index {index} is out of bounds (the song has {len} sections)")]
+    #[error("index {index} is out of bounds (there are {len})")]
     OutOfBounds { index: usize, len: usize },
     #[error("a song needs at least one section")]
     LastSection,
