@@ -72,7 +72,7 @@ gain_db = -2
 #   accents close together stack into a rising squelch.
 params = { "acid303.cutoff" = 350, "acid303.resonance" = 85, "acid303.env_mod" = 60, "acid303.decay" = 400, "acid303.accent" = 55 }
 # Soft distortion after the 303 adds grit and sustain, the harder 90s sound
-# (Hardfloor ran their 303s through pedals). Drive 12 dB is "warm", not "fuzz".
+# (acid records often push the 303 through distortion). Drive 12 dB is "warm", not "fuzz".
 fx = [{ type = "distortion", mode = "soft", params = { "dist.drive" = 12 } }]
 
 # -------------------------------------------------------------- patterns ----
@@ -102,7 +102,7 @@ steps = "....x.......x..."
 
 [patterns.acid_main]
 track = "acid"
-# The main 303 line (the Plan 1 demo line), in C minor. One token per 16th:
+# The main 303 line (the demo line from `task demo`), in C minor. One token per 16th:
 # `!` accent, `~` slide into the next step, `.` rest.
 # - It keeps coming back to C2, the root, so the ear always knows "home".
 # - C3~ after an accented C2: an octave jump with a slide is the signature
@@ -118,7 +118,7 @@ track = "acid"
 # gaps on steps 5 and 9, F2~ at the end) but many notes jump up an octave.
 # Two slides go from high to low (D#3~ D#2, A#2~ A#1): long falling bends
 # that sound like the 303 is talking. The last gap (step 15) is filled with
-# an accented C3 that kicks into the final slide, so there are 4 accents
+# an accented C3 (not a slide; the slide is the F2~ on step 16), so there are 4 accents
 # instead of 3 for more bite. Keeping the skeleton means the crowd hears
 # "the same tune, but it went off".
 steps = "C2 C3! C2~ C3 . D#3~ D#2 G2! . C2 C3! C2~ A#2~ A#1 C3! F2~"
@@ -237,7 +237,7 @@ name = "outro_drums"
 bars = 16
 play = { kick = "kick4", hat_closed = "hats8" }
 
-# Levels: the full render (bars 1-144, 11 440 552 frames) measures
+# Levels: measured at commit time on the full render (bars 1-144, 11 440 552 frames):
 # peak_dbfs = -2.57 and pre_clip_peak_dbfs = -2.10 with the starting gains
 # above (kick -3, clap -9, hat_closed -12, hat_open -11, acid -2), so no gain
 # change was needed. "Pre-clip" is the level before the master safety
