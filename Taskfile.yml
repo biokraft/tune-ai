@@ -41,3 +41,10 @@ tasks:
       - mkdir -p scratch
       - cargo run --release -p tune-cli -- render-303 --demo --out scratch/demo.wav
       - afplay scratch/demo.wav
+
+  first-acid:
+    desc: Render the first acid track and play it
+    cmds:
+      - mkdir -p scratch
+      - cargo run --release -p tune-cli -- render songs/first-acid/song.toml --out scratch/first-acid.wav
+      - afplay scratch/first-acid.wav

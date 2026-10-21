@@ -21,7 +21,8 @@ task demo     # render and play the demo 303 line
 
 A song is one TOML file: tracks, patterns and an arrangement of sections with
 parameter automation. See `crates/tune-song/tests/fixtures/mini.toml` for a
-small one.
+small one, and `songs/first-acid/song.toml` (`task first-acid`) for a full
+4-minute acid track with notes on each musical choice.
 
 ```sh
 cargo run --release -p tune-cli -- validate path/to/song.toml
