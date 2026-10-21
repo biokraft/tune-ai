@@ -14,6 +14,6 @@ pub use drums::{
 };
 pub use fx::{
     Biquad, BiquadKind, DELAY_MAX_STEPS, DELAY_PARAMS, DIST_PARAMS, Delay, Distortion,
-    DistortionMode, EQ_PARAMS, Equalizer,
+    DistortionMode, EQ_PARAMS, Equalizer, REVERB_PARAMS, Reverb,
 };
 pub use param::{Curve, ParamError, ParamSpec, find_spec};
