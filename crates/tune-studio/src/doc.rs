@@ -17,8 +17,14 @@ use crate::path::{SongPath, TrackField};
 /// Why an edit was refused. The document is unchanged after any of these.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EditError {
-    #[error("unknown path `{0}`")]
-    UnknownPath(String),
+    #[error(
+        "`{param}` is not a parameter of track `{track}` ({instrument}); see `tune params --json`"
+    )]
+    UnknownParam {
+        track: String,
+        instrument: &'static str,
+        param: String,
+    },
     #[error("`{0}` cannot be set directly")]
     ReadOnly(String),
     #[error("`{0}` does not exist in this song")]
@@ -386,7 +392,13 @@ fn apply(
             let home = match locate_param(t, param) {
                 Some(home) => home,
                 None if is_known_param(param) => return Err(missing()),
-                None => return Err(EditError::UnknownPath(path.to_string())),
+                None => {
+                    return Err(EditError::UnknownParam {
+                        track: track.clone(),
+                        instrument: t.instrument.name(),
+                        param: param.clone(),
+                    });
+                }
             };
             let v = toml_number(number()?);
             let owner = match home {
