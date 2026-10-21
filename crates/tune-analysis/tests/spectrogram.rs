@@ -79,18 +79,8 @@ fn louder_is_brighter() {
     let loud = decode(&spectrogram_png(&tone(-10.0), "a", None)).2;
     let quiet = decode(&spectrogram_png(&tone(-40.0), "a", None)).2;
     let y = freq_to_y(1000.0);
-    let best = |img: &[u8]| {
-        (y - 3..=y + 3)
-            .map(|r| luma(px(img, 800, r)))
-            .max()
-            .unwrap()
-    };
-    assert!(
-        best(&loud) > best(&quiet),
-        "{} vs {}",
-        best(&loud),
-        best(&quiet)
-    );
+    let (l, q) = (luma(px(&loud, 800, y)), luma(px(&quiet, 800, y)));
+    assert!(l > q, "{l} vs {q}");
 }
 
 #[test]
