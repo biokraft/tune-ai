@@ -1,0 +1,22 @@
+//! Headless audio analysis: the ears of tune-ai.
+#![forbid(unsafe_code)]
+
+mod audio;
+
+pub use audio::{Audio, decode_file};
+
+/// Everything that can go wrong while reading or measuring audio.
+#[derive(Debug, thiserror::Error)]
+pub enum AnalysisError {
+    #[error("cannot open `{path}`: {message}")]
+    Open { path: String, message: String },
+    #[error("cannot decode `{path}`: {message}")]
+    Decode { path: String, message: String },
+    #[error("only mono or stereo audio is supported (file has {0} channels)")]
+    Channels(u16),
+    /// Empty audio, unequal channel lengths, sample rate 0.
+    #[error("{0}")]
+    Invalid(String),
+    #[error("loudness meter: {0}")]
+    Meter(String),
+}
