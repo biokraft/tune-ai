@@ -147,3 +147,52 @@ fn silence_has_no_balance() {
     assert_eq!(s.stereo.correlation, None);
     assert_eq!(s.low_end.ratio_db, None);
 }
+
+/// Tones at and near the low band edges (20, 60, 90, 250 Hz) plus a 1 kHz
+/// partner: every band, the kick/bass split and the centroid must read the
+/// same at 44.1 and 48 kHz, so a delta reflects the mix and not the rate.
+#[test]
+fn edge_tones_read_the_same_at_44k1_and_48k() {
+    let make = |sr: u32, hz: f64| {
+        let mut x = sine(sr, hz, -12.0, 4.0, 0.0);
+        for (o, v) in x.iter_mut().zip(sine(sr, 1000.0, -12.0, 4.0, 0.0)) {
+            *o += v;
+        }
+        measure_spectral(&mono(sr, x))
+    };
+    let close = |what: &str, hz: f64, a: Option<f64>, b: Option<f64>| {
+        let (a, b) = (a.expect("present"), b.expect("present"));
+        // Below -80 dB both sides are leakage and float noise, not content.
+        if a < -80.0 && b < -80.0 {
+            return;
+        }
+        assert!((a - b).abs() < 0.01, "{hz} Hz {what}: {a} vs {b}");
+    };
+    for hz in [20.0, 25.0, 55.0, 60.0, 65.0, 85.0, 90.0, 95.0, 250.0] {
+        let (a, b) = (make(44_100, hz), make(48_000, hz));
+        for (i, band) in BANDS.iter().enumerate() {
+            close(band.key, hz, a.bands[i], b.bands[i]);
+        }
+        close(
+            "kick",
+            hz,
+            a.low_end.kick_region_db,
+            b.low_end.kick_region_db,
+        );
+        close(
+            "bass",
+            hz,
+            a.low_end.bass_region_db,
+            b.low_end.bass_region_db,
+        );
+        close("ratio", hz, a.low_end.ratio_db, b.low_end.ratio_db);
+        let (ma, mb) = (
+            a.brightness.median_hz.unwrap(),
+            b.brightness.median_hz.unwrap(),
+        );
+        assert!(
+            (ma / mb - 1.0).abs() < 0.001,
+            "{hz} Hz centroid: {ma} vs {mb}"
+        );
+    }
+}
