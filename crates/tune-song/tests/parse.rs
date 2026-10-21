@@ -313,6 +313,7 @@ fn validation_rules() {
             swap("[patterns.k4]", "[patterns.k-4]"),
             "may only contain a-z, 0-9 and _",
         ),
+        (swap("[tracks.hat]", "[tracks.mix]"), "`mix` is reserved"),
         (swap("bars = 2", "bars = 1024"), "longer than 30 minutes"),
         (no_sections, "at least one section"),
     ];
