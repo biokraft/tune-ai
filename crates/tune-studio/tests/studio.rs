@@ -421,6 +421,44 @@ fn external_edit_during_drag_keeps_gesture() {
     );
 }
 
+/// Tauri runs calls concurrently, so a throttled live value can land after
+/// the release. It must not re-arm the drag: the override would stick.
+#[test]
+fn live_value_after_release_is_dropped() {
+    let song = acid_in_a();
+    let f = fixture(&song);
+    f.call(play(Some(0)));
+    f.pull(4800);
+
+    f.call(knob("acid303.cutoff", 2000.0, false));
+    f.call(knob("acid303.cutoff", 2000.0, true));
+    // The stale live value from the same gesture, arriving late.
+    assert_eq!(f.call(knob("acid303.cutoff", 300.0, false)), Value::Null);
+    let text = f.disk_until(WAIT, "held 2000", |t| {
+        parse_song(t).is_ok_and(|s| s.tracks["acid"].params["acid303.cutoff"] == 2000.0)
+    });
+
+    // Let the release's swap land, then compare a fresh bar with the file.
+    f.pull(12_000);
+    sleep(Duration::from_millis(150));
+    f.call(Command::SeekBar { bar: 0 });
+    assert!(
+        f.pull(9600) == render_bars(&text, 0, 1)[..19_200],
+        "the file plays, not the stale live value"
+    );
+
+    // A new gesture after the guard is heard again.
+    sleep(Duration::from_millis(250));
+    f.call(knob("acid303.cutoff", 300.0, false));
+    f.pull(4800);
+    sleep(Duration::from_millis(100));
+    f.call(Command::SeekBar { bar: 0 });
+    assert!(
+        f.pull(9600) != render_bars(&text, 0, 1)[..19_200],
+        "a later drag is heard"
+    );
+}
+
 /// A drag sent while a reload is on its way names the old song's tracks, so
 /// the engine drops it; the studio sends it again once the reload lands.
 #[test]
