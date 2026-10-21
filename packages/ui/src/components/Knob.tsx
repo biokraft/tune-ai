@@ -47,7 +47,7 @@ function arc(fromDeg: number, toDeg: number, r: number): string {
   return `M ${a.x.toFixed(3)} ${a.y.toFixed(3)} A ${r} ${r} 0 ${large} 1 ${b.x.toFixed(3)} ${b.y.toFixed(3)}`;
 }
 
-type Drag = { startY: number; startNorm: number; shift: boolean; norm: number };
+type Drag = { startY: number; startNorm: number; shift: boolean; norm: number; moved: boolean };
 
 export function Knob({
   spec,
@@ -71,7 +71,7 @@ export function Knob({
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
-    drag.current = { startY: e.clientY, startNorm: norm, shift: e.shiftKey, norm };
+    drag.current = { startY: e.clientY, startNorm: norm, shift: e.shiftKey, norm, moved: false };
     // jsdom (and a stale pointer id) can lack or reject capture; dragging still works.
     try {
       e.currentTarget.setPointerCapture?.(e.pointerId);
@@ -92,6 +92,7 @@ export function Knob({
     }
     const scale = d.shift ? FINE : 1;
     d.norm = Math.min(1, Math.max(0, d.startNorm + ((d.startY - e.clientY) / DRAG_PX) * scale));
+    d.moved = true;
     onChange(toPlain(spec, d.norm));
   };
 
@@ -104,7 +105,8 @@ export function Knob({
     } catch {
       /* ignore */
     }
-    onCommit(toPlain(spec, d.norm));
+    // A click without movement touched nothing; committing would add a write and an undo step.
+    if (d.moved) onCommit(toPlain(spec, d.norm));
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
