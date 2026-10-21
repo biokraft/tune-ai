@@ -8,6 +8,17 @@ use crate::spectral::{BANDS, SIDE_MID_LIMIT_DB};
 /// A band level at or below this is treated as "no content" and not compared.
 const NO_CONTENT_DB: f64 = -100.0;
 
+/// A side channel this far or further below the mid is mono to the ear. A
+/// mono master decoded from a lossy stereo file keeps a faint side residue
+/// (about -90 dB), which must not read as "wider" next to a real stereo mix.
+const MONO_SIDE_MID_DB: f64 = -60.0;
+
+/// Mono for width comparison: no side (or the -200 dB floor), a side residue
+/// at or below [`MONO_SIDE_MID_DB`], or the +200 dB ceiling (no mid at all).
+fn is_mono(side_to_mid_db: f64) -> bool {
+    side_to_mid_db <= MONO_SIDE_MID_DB || side_to_mid_db >= SIDE_MID_LIMIT_DB
+}
+
 /// Ours minus reference. `None` when either side lacks the quantity.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Deltas {
@@ -69,7 +80,7 @@ pub fn compare(ours: &Analysis, reference: &Analysis) -> Comparison {
         }
     }
     let (so, sr) = (os.stereo.side_to_mid_db, rs.stereo.side_to_mid_db);
-    let (so_mono, sr_mono) = (so.abs() >= SIDE_MID_LIMIT_DB, sr.abs() >= SIDE_MID_LIMIT_DB);
+    let (so_mono, sr_mono) = (is_mono(so), is_mono(sr));
     // Both mono: they agree (0). Exactly one mono: not comparable.
     let width = if so_mono && sr_mono {
         Some(0.0)
