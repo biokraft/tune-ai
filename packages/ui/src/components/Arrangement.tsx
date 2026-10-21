@@ -30,7 +30,8 @@ const ROW_H = 30;
 const HANDLE_W = 6;
 /** Sticky track-name column width. */
 const LABEL_W = 96;
-/** Pattern cells are compact chips so the lane curves stay visible across the section. */
+/** Pattern cells are chips sized to their name (at least this wide, at most the section), so
+ * names stay readable and the lane curves stay visible across the rest of the section. */
 const CHIP_W = 44;
 /** Pointer travel (px) below which a press is a click, not a drag. */
 const DRAG_SLOP = 4;
@@ -325,6 +326,7 @@ export function Arrangement(p: ArrangementProps) {
                     <button
                       type="button"
                       aria-label={`${t.id} in section ${i + 1}`}
+                      title={current ?? undefined}
                       className={cn(
                         "absolute truncate rounded-sm border border-border bg-faceplate px-1",
                         "font-value text-xs text-silkscreen",
@@ -334,7 +336,8 @@ export function Arrangement(p: ArrangementProps) {
                       style={{
                         left: x + 2,
                         top: RULER_H + BLOCK_H + r * ROW_H + 3,
-                        width: Math.min(CHIP_W, widthOf(i, s) - 4),
+                        minWidth: Math.min(CHIP_W, widthOf(i, s) - 4),
+                        maxWidth: widthOf(i, s) - 4,
                         height: ROW_H - 6,
                       }}
                     >
