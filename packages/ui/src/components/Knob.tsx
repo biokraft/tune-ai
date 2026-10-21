@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type PointerEvent } from "react";
+import { useId, useRef, type KeyboardEvent, type PointerEvent } from "react";
 import { cn } from "../lib/utils";
 import { formatValue, toNormalized, toPlain, type ParamSpecView } from "../lib/param";
 
@@ -61,6 +61,7 @@ export function Knob({
 }: KnobProps) {
   const norm = toNormalized(spec, value);
   const drag = useRef<Drag | null>(null);
+  const gradientId = `knob-body-${useId().replace(/:/g, "")}`;
   const valueText = formatValue(spec, value);
 
   const angle = START + norm * SWEEP;
@@ -163,7 +164,7 @@ export function Knob({
       >
         <svg viewBox="0 0 100 100" width={px} height={px} aria-hidden="true">
           <defs>
-            <radialGradient id={`knob-body-${spec.id}`} cx="40%" cy="32%" r="75%">
+            <radialGradient id={gradientId} cx="40%" cy="32%" r="75%">
               <stop offset="0%" stopColor="hsl(215 9% 34%)" />
               <stop offset="60%" stopColor="hsl(216 10% 19%)" />
               <stop offset="100%" stopColor="hsl(210 8% 9%)" />
@@ -202,7 +203,7 @@ export function Knob({
             cx={CX}
             cy={CY}
             r={33}
-            fill={`url(#knob-body-${spec.id})`}
+            fill={`url(#${gradientId})`}
             stroke="hsl(210 8% 6%)"
             strokeWidth={1.5}
           />
