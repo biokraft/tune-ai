@@ -9,6 +9,7 @@ refs/
 samples/user/
 **/renders/
 *.wav
+*.wav.tmp
 *.mp3
 *.flac
 *.aif

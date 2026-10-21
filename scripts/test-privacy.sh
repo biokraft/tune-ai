@@ -45,6 +45,13 @@ for ext in wav mp3 flac aif aiff ogg m4a WAV Mp3; do
   run_case "audio .$ext" 1 "x.$ext: audio file"
 done
 
+for name in x.wav.tmp x.flac.tmp; do
+  new_repo
+  : > "$T/$name"
+  git -C "$T" add -f "$name"
+  run_case "audio temp $name" 1 "$name: audio file"
+done
+
 new_repo
 echo "see ${U1}someone/file" > "$T/a.txt"; git -C "$T" add a.txt
 run_case "users home path" 1 "a.txt: home path"
