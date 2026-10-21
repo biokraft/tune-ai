@@ -29,7 +29,8 @@ fn fail(message: impl Into<String>) -> Vec<Failure> {
     vec![Failure::msg(message)]
 }
 
-fn is_song(path: &Path) -> bool {
+/// A `.toml` input is a song; anything else is audio.
+pub fn is_song(path: &Path) -> bool {
     path.extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("toml"))
 }

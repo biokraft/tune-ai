@@ -447,6 +447,17 @@ fn compare_errors() {
         msg(&[ms, "--ref", "r", "--ref-seconds", "5..50"]).contains("the reference is 10.0 s long")
     );
     assert!(msg(&[ms, "--ref", "r", "--ref-seconds", "x"]).contains("bad --ref-seconds `x`"));
+    for empty in ["5..2", "2..2"] {
+        assert_eq!(
+            msg(&[ms, "--ref", "r", "--ref-seconds", empty]),
+            format!("bad --ref-seconds `{empty}`: A must be less than B")
+        );
+    }
+    // compare has no --song, so a WAV as ours cannot take --bars.
+    assert_eq!(
+        msg(&["ref.wav", "--ref", "r", "--bars", "1..2"]),
+        "--bars needs a song file as OURS: compare cannot map a WAV onto bars"
+    );
     // Both forms together, or neither: clap rejects.
     let both = compare_out(dir.path(), &[ms, "ref.wav", "--ref", "r"]);
     assert_eq!(both.status.code(), Some(2));
