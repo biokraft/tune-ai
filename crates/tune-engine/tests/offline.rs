@@ -224,3 +224,16 @@ fn no_tmp_on_error() {
         assert!(!name.ends_with(".tmp"), "{name}");
     }
 }
+
+#[test]
+fn no_tmp_when_rename_fails() {
+    use tune_engine::wav::{WavFormat, write_wav};
+    let dir = tempfile::tempdir().unwrap();
+    // A directory at the target makes the final rename fail.
+    let target = dir.path().join("out.wav");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(target.join("keep"), b"x").unwrap();
+    let r = write_wav(&target, &[0.0; 8], 2, 48_000, WavFormat::Pcm24);
+    assert!(r.is_err());
+    assert!(!dir.path().join("out.wav.tmp").exists());
+}
