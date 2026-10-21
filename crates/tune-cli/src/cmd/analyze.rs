@@ -8,11 +8,13 @@ use serde_json::{Value, json};
 use tune_analysis::spectrogram::spectrogram_png;
 use tune_analysis::{Analysis, BANDS, analyze};
 
-use crate::ears::{Input, load_input, png_path, title, write_png};
+use crate::ears::{Input, is_song, load_input, load_named_ref, png_path, title, write_png};
 use crate::report::{Failure, Success, finish, fmt_time};
 
 pub struct Args {
-    pub input: PathBuf,
+    /// Exactly one of `input` and `ref_name` is set.
+    pub input: Option<PathBuf>,
+    pub ref_name: Option<String>,
     pub bars: Option<String>,
     pub sections: bool,
     pub song: Option<PathBuf>,
@@ -120,17 +122,23 @@ fn text(input: &Input, a: &Analysis, png: Option<&str>) -> String {
 }
 
 fn run_inner(a: &Args) -> Result<Success, Vec<Failure>> {
-    if a.sections
-        && a.song.is_none()
-        && a.input
-            .extension()
-            .is_none_or(|e| !e.eq_ignore_ascii_case("toml"))
-    {
-        return Err(vec![Failure::msg(
-            "--sections needs a bar map: analyse the song, or pass --song with the WAV",
-        )]);
-    }
-    let input = load_input(&a.input, a.bars.as_deref(), a.song.as_deref(), a.from_bar)?;
+    let mut input = match (&a.input, &a.ref_name) {
+        (Some(path), None) => {
+            if a.sections && a.song.is_none() && !is_song(path) {
+                return Err(vec![Failure::msg(
+                    "--sections needs a bar map: analyse the song, or pass --song with the WAV",
+                )]);
+            }
+            load_input(path, a.bars.as_deref(), a.song.as_deref(), a.from_bar)?
+        }
+        (None, Some(name)) => load_named_ref(name)?,
+        _ => {
+            return Err(vec![Failure::msg(
+                "give an input file or --ref NAME, not both",
+            )]);
+        }
+    };
+    input.source["ref_name"] = a.ref_name.clone().map_or(Value::Null, Value::String);
     let map = if a.sections { input.map.as_ref() } else { None };
     let analysis = analyze(&input.audio, map).map_err(|e| vec![Failure::msg(e.to_string())])?;
     let png = match &a.png {

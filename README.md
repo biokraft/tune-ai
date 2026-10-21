@@ -86,7 +86,8 @@ tune compare songs/first-acid/song.toml ~/Music/reference.mp3 --bars 33..64 --re
 Put INPUT before `--png` (or write `--png=PATH`). To refer to a reference by
 name, add `[refs]` `name = "~/Music/reference.mp3"` to `tune.local.toml` in the
 repo root (gitignored), or drop files into `refs/`, then
-`tune compare songs/first-acid/song.toml --ref name`. `tune refs` lists what is
+`tune compare songs/first-acid/song.toml --ref name` (or
+`tune analyze --ref name --png`). `tune refs` lists what is
 configured. The numbers are hints; trust your ears. Reference tracks, PNGs and
 the local config never go into git.
 
