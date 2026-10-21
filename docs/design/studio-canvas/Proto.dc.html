@@ -1,0 +1,1321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>tune-ai clickable prototype</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#07040D}
+a{color:#3FDCEB}a:hover{color:#9FF3FA}
+.app{--bg:#0A0612;--ink:#EEE9F8;--ink2:#B5ADCB;--ink3:#9790AE;--line:rgba(255,255,255,.085);--line2:rgba(255,255,255,.16);--glass:rgba(23,16,39,.56);--glass2:rgba(10,6,18,.45);--blur:22px;--r:16px;--rs:9px;--row:46px;--blobop:.55;--kick:#FF5470;--clap:#FFB547;--hat:#5E8CFF;--ohat:#A3C0FF;--ride:#B79CFF;--acid:#A8F04C;--agent:#3FDCEB;--play:#F7F2FF;position:relative;width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.35}
+.app *{box-sizing:border-box}
+.look-b{--glass:rgba(16,12,27,.86);--glass2:rgba(6,4,12,.6);--blur:8px;--r:10px;--rs:6px;--row:40px;--blobop:.2;--line:rgba(255,255,255,.07)}
+.look-c{--glass:rgba(44,30,78,.32);--glass2:rgba(20,12,36,.35);--blur:40px;--r:22px;--rs:13px;--row:48px;--blobop:.9;--line:rgba(255,255,255,.15)}
+.blob{position:absolute;border-radius:50%;filter:blur(110px);opacity:var(--blobop);pointer-events:none}
+.glass{background:var(--glass);backdrop-filter:blur(var(--blur)) saturate(150%);-webkit-backdrop-filter:blur(var(--blur)) saturate(150%);border:1px solid var(--line);border-radius:var(--r);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 60px rgba(0,0,0,.35)}
+.look-c .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),inset 0 0 0 1px rgba(255,255,255,.04),0 30px 80px rgba(0,0,0,.45)}
+.look-b .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+.muted{color:var(--ink2)}
+.ib{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;min-width:32px;padding:0 9px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);font:600 12px Manrope,system-ui,sans-serif;cursor:pointer;white-space:nowrap}
+.ib:hover{background:rgba(255,255,255,.09)}
+.ib:focus-visible{outline:2px solid var(--play);outline-offset:2px}
+.ib.on{background:rgba(255,255,255,.13);border-color:var(--line2)}
+.ib svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ib.sm{height:26px;min-width:26px;padding:0 6px;font-size:11px}
+.ib.sm svg{width:14px;height:14px}
+.kbd{font:600 10px 'JetBrains Mono',monospace;color:var(--ink3);border:1px solid var(--line2);border-radius:4px;padding:0 4px;line-height:15px}
+.sep{width:1px;height:28px;background:var(--line);flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.transport{position:absolute;left:12px;top:12px;right:12px;height:56px;display:flex;align-items:center;gap:12px;padding:0 12px}
+.play{width:40px;height:40px;border-radius:50%;border:none;background:var(--play);color:#120A1F;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 0 0 4px rgba(247,242,255,.12),0 0 24px rgba(220,200,255,.55);cursor:pointer}
+.play svg{width:18px;height:18px;fill:currentColor}
+.readout{display:flex;flex-direction:column;gap:1px}
+.big{font-size:20px;font-weight:600;line-height:22px}
+.lufs{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);cursor:pointer;font-family:Manrope,system-ui,sans-serif}
+.lufs:hover{background:rgba(255,255,255,.09)}
+.lmeter{position:relative;width:96px;height:6px;border-radius:3px;background:rgba(255,255,255,.1)}
+
+.tl{position:absolute;left:12px;top:80px;width:1064px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .tl{width:1348px}
+.tlbar{height:46px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line)}
+.grid{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
+.row{display:flex;height:var(--row);flex:none;border-bottom:1px solid rgba(255,255,255,.045);padding-right:10px}
+.hdr{width:168px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 0 0;border-right:1px solid var(--line)}
+.hdr .cbar{width:3px;align-self:stretch;margin:6px 4px 6px 0;border-radius:2px}
+.hdr .nm{flex:1;min-width:0;font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ms{width:22px;height:20px;border-radius:5px;border:1px solid var(--line);background:transparent;color:var(--ink2);font:700 10px Manrope,sans-serif;cursor:pointer;padding:0}
+.ms:hover{color:var(--ink);background:rgba(255,255,255,.08)}
+.hmeter{width:4px;height:26px;border-radius:2px;background:rgba(255,255,255,.08);position:relative;overflow:hidden}
+.hmeter i{position:absolute;left:0;right:0;bottom:0;border-radius:2px}
+.lanes{flex:1;display:flex;position:relative;min-width:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.035) 0 1px,transparent 1px 100%);background-size:calc(100% / 18) 100%}
+.cell{min-width:0;padding:5px 1px;display:flex}
+.blk{position:relative;flex:1;min-width:0;border:1px solid;border-radius:7px;padding:4px 6px 4px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;cursor:pointer}
+.look-b .blk{border-radius:4px}
+.look-c .blk{border-radius:11px}
+.blk .bn{font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:22px}
+.glyph{display:flex;align-items:flex-end;gap:1.5px;height:14px}
+.glyph i{flex:1;border-radius:1px;min-width:1px}
+.badge{position:absolute;right:4px;top:3px;font:600 9.5px 'JetBrains Mono',monospace;padding:0 4px;border-radius:4px;background:rgba(0,0,0,.35);color:var(--ink2);line-height:14px}
+.ruler{height:24px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.ruler .lanes{background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.22) 0 1px,transparent 1px 100%);background-size:calc(100% / 36) 5px;background-repeat:repeat-x;background-position:0 100%}
+.rc{min-width:0;font:500 10px 'JetBrains Mono',monospace;color:var(--ink3);padding:4px 0 0 4px;border-left:1px solid rgba(255,255,255,.18)}
+.secrow{height:32px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.sec{min-width:0;display:flex;align-items:center;gap:6px;padding:0 4px 0 7px;margin:4px 1px;border-radius:7px;font-size:11px;font-weight:700;color:var(--ink2);white-space:nowrap;overflow:hidden;background:rgba(255,255,255,.035);cursor:pointer}
+.sec.on{background:rgba(255,255,255,.14);color:var(--ink);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),0 0 18px rgba(220,200,255,.18)}
+.livedot{width:6px;height:6px;border-radius:50%;background:var(--play);box-shadow:0 0 8px var(--play);flex:none}
+.ov{position:absolute;left:168px;right:10px;top:0;bottom:0;pointer-events:none}
+.ph{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--play);box-shadow:0 0 8px rgba(247,242,255,.9),0 0 22px rgba(200,170,255,.55)}
+.ph::before{content:"";position:absolute;top:0;left:-5px;border:6px solid transparent;border-top:8px solid var(--play)}
+.loop{position:absolute;top:0;bottom:0;background:rgba(255,255,255,.035);border-left:1px solid rgba(255,255,255,.4);border-right:1px solid rgba(255,255,255,.4)}
+.loop::before{content:"";position:absolute;left:0;right:0;top:0;height:5px;background:rgba(255,255,255,.55);border-radius:0 0 2px 2px}
+.lane{height:72px}
+.lane .hdr{padding-left:15px;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px}
+.lane svg{position:absolute;inset:6px 0;width:100%;height:calc(100% - 12px);overflow:visible}
+.bp{position:absolute;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#0A0612;border:1.5px solid var(--acid)}
+.bp.ag{border-color:var(--agent);box-shadow:0 0 8px var(--agent)}
+.drop{flex:1;display:flex;padding:10px 10px 10px 178px}
+.dropzone{flex:1;border:1.5px dashed rgba(255,255,255,.12);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--ink3);font-size:12.5px}
+.help{height:36px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-top:1px solid var(--line);font-size:12px;color:var(--ink2)}
+.help b{color:var(--ink);font-weight:700}
+.agent-soft{box-shadow:inset 3px 0 0 var(--agent)}
+
+.chat{position:absolute;left:1088px;top:80px;width:340px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .chat{display:none}
+.rail{display:none;position:absolute;left:1372px;top:80px;width:56px;height:808px;flex-direction:column;align-items:center;gap:6px;padding:10px 0}
+.chat-rail .rail{display:flex}
+.rail .ib{width:40px;height:40px;padding:0;position:relative}
+.pip{position:absolute;top:4px;right:4px;min-width:15px;height:15px;border-radius:8px;background:var(--agent);color:#04161A;font:700 9.5px Manrope,sans-serif;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.chead{height:50px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px 0 14px;border-bottom:1px solid var(--line)}
+.tab{height:28px;padding:0 9px;border-radius:7px;border:none;background:transparent;color:var(--ink2);font:700 12px Manrope,sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.tab.on{background:rgba(255,255,255,.1);color:var(--ink)}
+.tab .n{min-width:16px;height:16px;border-radius:8px;background:var(--agent);color:#04161A;font-size:9.5px;display:inline-flex;align-items:center;justify-content:center}
+.msgs{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:12px;padding:14px}
+.me{align-self:flex-end;max-width:86%;background:rgba(255,255,255,.09);border:1px solid var(--line);border-radius:14px 14px 4px 14px;padding:8px 11px}
+.who{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--agent);margin-bottom:4px}
+.card{border-radius:12px;background:var(--glass2);border:1px solid rgba(63,220,235,.3);overflow:hidden}
+.card-h{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:11.5px;font-weight:700}
+.cl{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 10px;font-size:12px;cursor:pointer}
+.cl:hover{background:rgba(255,255,255,.05)}
+.cl .t{flex:1;min-width:0}
+.cl .v{font-size:10.5px;color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.card-f{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--line)}
+.agentbtn{border-color:rgba(63,220,235,.45);color:#BDF6FB}
+.xb{width:26px;height:26px;border-radius:6px;border:none;background:transparent;color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.xb:hover{background:rgba(255,255,255,.08);color:var(--ink)}
+.xb svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cfoot{flex:none;padding:10px 12px 12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:9px}
+.sw{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;cursor:pointer}
+.sw input{position:absolute;opacity:0;width:1px;height:1px}
+.sw .trk{width:30px;height:17px;border-radius:9px;background:rgba(255,255,255,.14);position:relative;flex:none}
+.sw .trk::after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:var(--ink2)}
+.sw input:checked + .trk{background:var(--agent)}
+.sw input:checked + .trk::after{left:15px;background:#04161A}
+.sw input:focus-visible + .trk{outline:2px solid var(--play);outline-offset:2px}
+.composer{display:flex;align-items:flex-end;gap:8px;border-radius:12px;border:1px solid var(--line2);background:rgba(0,0,0,.25);padding:8px 8px 8px 12px}
+.composer textarea{flex:1;resize:none;border:none;background:transparent;color:var(--ink);font:500 13px Manrope,sans-serif;height:38px;outline:none}
+.composer textarea::placeholder{color:var(--ink3)}
+.send{width:32px;height:32px;border-radius:9px;border:none;background:var(--agent);color:#04161A;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.send svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+.knob{display:flex;flex-direction:column;align-items:center;gap:3px;width:62px;border:none;background:transparent;color:var(--ink);padding:0;cursor:ns-resize;font-family:Manrope,sans-serif}.knob .dial{position:relative;width:46px;height:46px;border-radius:50%}.knob svg{position:absolute;inset:0;width:46px;height:46px;transform:rotate(135deg);overflow:visible}.knob .trk{fill:none;stroke:rgba(255,255,255,.1);stroke-width:4;stroke-linecap:round;stroke-dasharray:75 100}.knob .arc{fill:none;stroke-width:4;stroke-linecap:round;transition:stroke-dasharray .6s cubic-bezier(.22,1,.36,1)}.knob .cap{position:absolute;inset:9px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#3B2F57,#140E1F 72%);box-shadow:0 2px 6px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.14);transition:transform .6s cubic-bezier(.22,1,.36,1)}.knob .ptr{position:absolute;left:50%;top:2px;width:2px;height:8px;margin-left:-1px;border-radius:1px;background:var(--ink)}.knob .kv{font:500 11px 'JetBrains Mono',monospace;color:var(--ink)}.knob .kl{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);font-weight:700}.look-b .knob .cap{background:transparent;box-shadow:none;border:1px solid var(--line)}.look-c .knob .arc{filter:drop-shadow(0 0 4px currentColor)}.knob.agent .dial{box-shadow:0 0 0 2px #3FDCEB,0 0 16px rgba(63,220,235,.6)}.knob.auto .dial::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1px dashed rgba(255,255,255,.35)}
+
+button.blk{font:inherit;text-align:left;width:100%}
+.blk:focus-visible{outline:2px solid var(--play);outline-offset:1px}
+.row.fresh{animation:fadein .8s cubic-bezier(.22,1,.36,1)}
+@keyframes fadein{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.sec.cur{background:rgba(255,255,255,.09);color:var(--ink)}
+.sec.ghost{background:repeating-linear-gradient(135deg,rgba(63,220,235,.2) 0 6px,rgba(63,220,235,.05) 6px 12px);color:#BDF6FB;box-shadow:inset 0 0 0 1px rgba(63,220,235,.6)}
+.hdr.agent-hot{box-shadow:inset 3px 0 0 var(--agent),inset 0 0 26px rgba(63,220,235,.28)}
+.tl,.dock,.browser,.listen{transition:left .22s cubic-bezier(.22,1,.36,1),width .22s cubic-bezier(.22,1,.36,1),height .22s cubic-bezier(.22,1,.36,1)}
+.dock-on .tl{height:496px}
+.dock-on .drop{padding-top:4px;padding-bottom:4px}
+.browser-on .tl{left:324px;width:752px}
+.tl.over .dropzone{border-color:#B79CFF;color:#E4DAFF;background:rgba(183,156,255,.1)}
+.dock{position:absolute;display:flex;flex-direction:column;z-index:20}
+.dock.docked{top:588px;width:1064px;height:300px}
+.dock.floating{width:900px;height:290px;z-index:45;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 30px 90px rgba(0,0,0,.6)}
+.dock-h{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 10px 0 14px;border-bottom:1px solid var(--line);touch-action:none}
+.floating .dock-h{cursor:grab}
+.dock-b{display:flex;gap:10px;padding:12px;align-items:flex-start}
+.mod{background:var(--glass2);border:1px solid var(--line);border-radius:12px;padding:8px 12px 10px}
+.mod-t{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;margin-bottom:6px;letter-spacing:.02em}
+.kg{display:grid;gap:4px 8px}
+.kw{position:relative;border-radius:14px;padding:2px}
+.kw.spot{z-index:3;background:rgba(63,220,235,.08);box-shadow:0 0 0 2px #3FDCEB,0 0 0 4000px rgba(4,2,9,.76)}
+.lesson-on .dock{z-index:50}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{height:24px;padding:0 8px;border:none;background:transparent;color:var(--ink2);font:700 10.5px Manrope,sans-serif;cursor:pointer}
+.seg button.on{background:rgba(255,255,255,.14);color:var(--ink)}
+.bubble{position:absolute;bottom:calc(100% + 14px);left:-10px;width:300px;padding:12px 14px;border-radius:14px;background:rgba(10,36,42,.95);border:1px solid rgba(63,220,235,.6);box-shadow:0 0 30px rgba(63,220,235,.3),0 20px 40px rgba(0,0,0,.5);color:var(--ink);font-size:12.5px;text-align:left;z-index:5;cursor:default}
+.bubble.r{left:auto;right:-10px}
+.bubble::after{content:"";position:absolute;top:100%;left:30px;border:8px solid transparent;border-top-color:rgba(63,220,235,.6)}
+.bubble.r::after{left:auto;right:30px}
+.lbar{position:absolute;top:92px;left:544px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:6px;padding:7px 8px;border-color:rgba(63,220,235,.45)}
+.browser{position:absolute;left:12px;top:80px;width:300px;height:808px;z-index:30;display:flex;flex-direction:column;overflow:hidden}
+.search{margin:10px 12px;height:32px;border-radius:9px;border:1px solid var(--line2);background:rgba(0,0,0,.25);color:var(--ink);font:500 12.5px Manrope,sans-serif;padding:0 10px;outline:none}
+.bitem{display:flex;align-items:center;gap:9px;padding:7px 8px 7px 10px;margin:0 6px;border-radius:10px;border:1px solid transparent;cursor:grab}
+.bitem:hover{background:rgba(255,255,255,.05);border-color:var(--line)}
+.pv{display:inline-flex;align-items:flex-end;gap:2px;height:12px}
+.pv i{width:3px;background:currentColor;border-radius:1px;animation:eq .5s ease-in-out infinite alternate}
+.pv i:nth-child(2){animation-delay:.15s}.pv i:nth-child(3){animation-delay:.3s}
+@keyframes eq{from{height:3px}to{height:12px}}
+.listen{position:absolute;left:12px;top:80px;width:1064px;height:808px;z-index:35;display:flex;flex-direction:column;overflow:hidden}
+.lgrid{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:12px;padding:14px}
+.lcard{background:var(--glass2);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-height:0}
+.ebars{display:flex;align-items:flex-end;gap:6px;height:170px}
+.ebar{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%}
+.ebar i{width:100%;border-radius:5px 5px 2px 2px;background:linear-gradient(180deg,rgba(247,242,255,.7),rgba(247,242,255,.18))}
+.ebar.hot i{background:linear-gradient(180deg,#F7F2FF,rgba(200,170,255,.45));box-shadow:0 0 16px rgba(220,200,255,.4)}
+.ebar span{font-size:9.5px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.bandrow{display:flex;align-items:center;gap:10px;font-size:11.5px}
+.bandrow .bt{flex:1;height:8px;border-radius:4px;background:rgba(255,255,255,.07);position:relative}
+.bandrow .bt i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:linear-gradient(90deg,rgba(94,140,255,.5),#A3C0FF)}
+.verdict{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-radius:9px;background:rgba(255,255,255,.04);font-size:12.5px}
+.thinking i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--agent);margin-right:3px;animation:eq2 .9s infinite alternate}
+.thinking i:nth-child(2){animation-delay:.2s}.thinking i:nth-child(3){animation-delay:.4s}
+@keyframes eq2{from{opacity:.25}to{opacity:1}}
+.chip{height:26px;padding:0 10px;border-radius:13px;border:1px solid rgba(63,220,235,.45);background:rgba(63,220,235,.08);color:#BDF6FB;font:600 11.5px Manrope,sans-serif;cursor:pointer;align-self:flex-start}
+.chip:hover{background:rgba(63,220,235,.16)}
+.msgs.scroll{overflow-y:auto;flex-direction:column-reverse;justify-content:flex-start}
+.pend{border-radius:12px;background:var(--glass2);border:1px solid rgba(255,181,71,.45);overflow:hidden}
+.pend .card-h{color:#FFD08A}
+.primary{background:var(--agent);color:#04161A;border-color:var(--agent)}
+.primary:hover{background:#7AEAF3}
+.log{display:flex;gap:8px;align-items:center;font-size:12px;padding:6px 2px;border-bottom:1px solid var(--line)}
+</style>
+</helmet>
+<div class="{{rootCls}}">
+  <div class="blob" style="left: -160px; top: 420px; width: 620px; height: 520px; background: #B4237E"></div>
+  <div class="blob" style="left: 520px; top: -220px; width: 720px; height: 460px; background: #3A2BC2"></div>
+  <div class="blob" style="left: 1080px; top: 560px; width: 560px; height: 460px; background: #5B1E9E"></div>
+
+  <header class="transport glass">
+    <div style="display: flex; align-items: center; gap: 8px; padding-right: 4px">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" style="fill: none; stroke: #A8F04C; stroke-width: 2.2; stroke-linecap: round"><path d="M3 12h2l2-6 3 12 3-9 2 5 2-2h4"></path></svg>
+      <div style="display: flex; flex-direction: column">
+        <span style="font-weight: 800; font-size: 13px; letter-spacing: .02em">first-acid</span>
+        <span class="muted" style="font-size: 10.5px">saved · 145 BPM · 144 bars</span>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <button class="{{tp.loopCls}}" aria-label="Loop (L)" aria-pressed="{{tp.loop}}" onClick="{{tp.toggleLoop}}"><svg viewBox="0 0 24 24"><path d="M17 2l3 3-3 3"></path><path d="M4 11V9a4 4 0 014-4h12"></path><path d="M7 22l-3-3 3-3"></path><path d="M20 13v2a4 4 0 01-4 4H4"></path></svg></button>
+    <button class="ib" aria-label="Stop" onClick="{{tp.stop}}"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+    <button class="play" aria-label="{{tp.playLabel}}" onClick="{{tp.togglePlay}}">
+      <sc-if value="{{tp.playing}}" hint-placeholder-val="{{false}}"><svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></sc-if>
+      <sc-if value="{{tp.stopped}}" hint-placeholder-val="{{true}}"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"></path></svg></sc-if>
+    </button>
+    <div class="readout" style="margin-left: 4px; min-width: 76px">
+      <span class="lbl">Bar · beat</span>
+      <span class="mono big">{{tp.pos}}</span>
+    </div>
+    <div class="readout" style="min-width: 64px">
+      <span class="lbl">Time</span>
+      <span class="mono" style="font-size: 14px; color: var(--ink2); line-height: 22px">{{tp.time}}</span>
+    </div>
+    <div class="readout" style="min-width: 54px">
+      <span class="lbl">BPM</span>
+      <span class="mono big">145</span>
+    </div>
+    <div class="sep"></div>
+    <button class="ib" aria-label="Loop range" style="height: 40px; gap: 8px" onClick="{{tp.toggleLoop}}">
+      <span class="lbl" style="color: var(--ink2)">Loop</span>
+      <span class="mono" style="font-size: 13px">{{tp.loopText}}</span>
+      <span style="font-size: 11px; color: var(--ink2)">{{tp.loopName}}</span>
+    </button>
+    <div style="flex: 1"></div>
+    <button class="{{tp.browserCls}}" aria-label="Browser (B)" aria-pressed="{{tp.browser}}" onClick="{{tp.toggleBrowser}}"><svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>Browser <span class="kbd">B</span></button>
+    <div class="sep"></div>
+    <button class="lufs" aria-label="Loudness minus 7.6 LUFS, true peak minus 1.6 dBTP. Open listening view" onClick="{{tp.openListen}}">
+      <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px">
+        <div style="display: flex; align-items: baseline; gap: 5px"><span class="mono" style="font-size: 17px; font-weight: 600">−7.6</span><span class="lbl">LUFS</span></div>
+        <div class="lmeter">
+          <div style="position: absolute; left: 60%; width: 10%; top: -2px; bottom: -2px; border-radius: 2px; background: rgba(168,240,76,.28); box-shadow: inset 0 0 0 1px rgba(168,240,76,.55)"></div>
+          <div style="position: absolute; left: 0; width: 62%; top: 0; bottom: 0; border-radius: 3px; background: linear-gradient(90deg, rgba(247,242,255,.25), rgba(247,242,255,.85))"></div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 2px">
+        <span class="lbl">True peak</span>
+        <span class="mono" style="font-size: 12px">−1.6 dB</span>
+      </div>
+    </button>
+    <button class="ib" aria-label="Reset to base view" onClick="{{tp.reset}}"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M15 9v12"></path></svg></button>
+  </header>
+
+  <section class="{{tlCls}}" aria-label="Arrangement" onDragOver="{{dnd.over}}" onDragLeave="{{dnd.leave}}" onDrop="{{dnd.drop}}">
+    <div class="tlbar">
+      <span style="font-weight: 800; font-size: 13px">Arrangement</span>
+      <span class="muted" style="font-size: 12px">{{tlInfo}}</span>
+      <div style="flex: 1"></div>
+      <button class="ib sm on" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path></svg>Fit song</button>
+      <button class="ib sm on" aria-pressed="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg>Follow</button>
+      <div class="sep" style="height: 20px"></div>
+      <button class="ib sm" onClick="{{tp.toggleBrowser}}"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>Track</button>
+    </div>
+    <div class="grid">
+      <div class="ruler">
+        <div class="hdr" style="padding-left: 12px"><span class="lbl">Bar</span></div>
+        <div class="lanes" style="background-color: transparent">
+          <sc-for list="{{sections}}" as="s" hint-placeholder-count="8">
+            <div class="rc" style="flex: {{s.bars}} 1 0">{{s.start}}</div>
+          </sc-for>
+        </div>
+      </div>
+      <div class="secrow">
+        <div class="hdr" style="padding-left: 12px"><span class="lbl">Sections</span></div>
+        <div class="lanes" style="background-image: none">
+          <sc-for list="{{sections}}" as="s" hint-placeholder-count="8">
+            <button class="{{s.cls}}" style="flex: {{s.bars}} 1 0; border: none; font-family: Manrope, sans-serif" onClick="{{s.jump}}" aria-label="Jump to {{s.name}}">
+              <sc-if value="{{s.on}}" hint-placeholder-val="{{false}}"><span class="livedot"></span></sc-if>
+              {{s.label}}
+            </button>
+          </sc-for>
+        </div>
+      </div>
+      <sc-for list="{{tracks}}" as="t" hint-placeholder-count="5">
+        <div class="{{t.rowCls}}">
+          <div class="{{t.hdrCls}}">
+            <span class="cbar" style="box-sizing: border-box; {{t.bar}}"></span>
+            <span class="nm">{{t.name}}</span>
+            <sc-if value="{{t.agentDot}}" hint-placeholder-val="{{false}}">
+              <span title="Changed by the agent" style="width: 7px; height: 7px; border-radius: 50%; background: #3FDCEB; box-shadow: 0 0 8px #3FDCEB"></span>
+            </sc-if>
+            <button class="ms" aria-label="Mute {{t.name}}">M</button>
+            <button class="ms" aria-label="Solo {{t.name}}">S</button>
+            <span class="hmeter"><i style="box-sizing: border-box; {{t.meter}}"></i></span>
+          </div>
+          <div class="lanes">
+            <sc-for list="{{t.cells}}" as="c" hint-placeholder-count="8">
+              <div class="cell" style="box-sizing: border-box; {{c.grow}}">
+                <sc-if value="{{c.has}}" hint-placeholder-val="{{true}}">
+                  <button class="blk" style="box-sizing: border-box; {{c.st}}" onClick="{{c.open}}" aria-label="{{c.aria}}">
+                    <span class="bn">{{c.label}}</span>
+                    <sc-if value="{{c.badge}}" hint-placeholder-val="{{false}}"><span class="badge">{{c.badge}}</span></sc-if>
+                    <span class="glyph" aria-hidden="true">
+                      <sc-for list="{{c.steps}}" as="g" hint-placeholder-count="16"><i style="box-sizing: border-box; {{g.s}}"></i></sc-for>
+                    </span>
+                  </button>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+      <div class="row lane">
+        <div class="hdr">
+          <span class="lbl" style="color: var(--acid)">↳ Cutoff</span>
+          <span class="mono muted" style="font-size: 11px">{{lane.read}}</span>
+        </div>
+        <div class="lanes">
+          <svg viewBox="0 0 1440 100" preserveAspectRatio="none" aria-hidden="true">
+            <polygon points="{{lane.area}}" style="fill: rgba(168,240,76,.10)"></polygon>
+            <polyline points="{{lane.line}}" style="fill: none; stroke: #A8F04C; stroke-width: 1.6; vector-effect: non-scaling-stroke"></polyline>
+            <polyline points="{{lane.old}}" style="fill: none; stroke: rgba(238,233,248,.45); stroke-width: 1.2; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke"></polyline>
+            <polyline points="{{lane.agent}}" style="fill: none; stroke: #3FDCEB; stroke-width: 2.2; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 4px #3FDCEB)"></polyline>
+          </svg>
+          <sc-for list="{{lane.dots}}" as="d" hint-placeholder-count="12"><span class="{{d.cls}}" style="box-sizing: border-box; {{d.s}}"></span></sc-for>
+        </div>
+      </div>
+      <div class="drop">
+        <div class="dropzone">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round"><path d="M12 5v14M5 12h14"></path></svg>
+          {{dropText}}
+        </div>
+      </div>
+      <div class="ov" aria-hidden="true">
+        <sc-if value="{{tp.loop}}" hint-placeholder-val="{{true}}"><div class="loop" style="box-sizing: border-box; {{ov.loop}}"></div></sc-if>
+        <div class="ph" style="box-sizing: border-box; {{ov.ph}}"></div>
+      </div>
+    </div>
+    <div class="help">
+      <span class="kbd">?</span>
+      <span><b>acid · cutoff</b> — where the filter sits. Low is dark and round, high is bright and squelchy. The lane under the acid row moves it over the song.</span>
+    </div>
+  </section>
+
+  <sc-if value="{{br.open}}" hint-placeholder-val="{{false}}">
+    <aside class="browser glass" aria-label="Browser">
+      <div class="chead" style="padding-left: 12px">
+        <button class="tab on" aria-pressed="true">Sounds</button>
+        <button class="tab">Effects</button>
+        <button class="tab">Songs</button>
+        <div style="flex: 1"></div>
+        <button class="xb" aria-label="Close browser" onClick="{{tp.toggleBrowser}}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+      </div>
+      <label for="bsearch" class="sr">Search sounds</label>
+      <input id="bsearch" class="search" type="search" placeholder="Search sounds, tags…">
+      <div class="lbl" style="padding: 4px 16px 6px">Drum voices and synths</div>
+      <sc-for list="{{br.items}}" as="it" hint-placeholder-count="6">
+        <div class="bitem" draggable="true" onDragStart="{{it.dragStart}}">
+          <span class="dot" style="background: {{it.col}}; width: 10px; height: 10px"></span>
+          <div style="flex: 1; min-width: 0">
+            <div style="font-weight: 700; font-size: 12.5px">{{it.name}}</div>
+            <div class="muted" style="font-size: 11px">{{it.type}}</div>
+          </div>
+          <sc-if value="{{it.previewing}}" hint-placeholder-val="{{false}}"><span class="pv" style="color: {{it.col}}" aria-hidden="true"><i></i><i></i><i></i></span></sc-if>
+          <button class="xb" aria-label="Preview {{it.name}}" onClick="{{it.preview}}"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"></path></svg></button>
+          <button class="ib sm" aria-label="Add {{it.name}} as a new track" onClick="{{it.add}}">Add</button>
+        </div>
+      </sc-for>
+      <div style="flex: 1"></div>
+      <div class="help" style="flex-direction: column; align-items: flex-start; justify-content: center; height: 64px; gap: 2px">
+        <span><b>Drag a sound onto the timeline</b> to make a new track.</span>
+        <span>Samples and the sampler arrive later; they will live here too.</span>
+      </div>
+    </aside>
+  </sc-if>
+
+  <sc-if value="{{dk.open}}" hint-placeholder-val="{{false}}">
+    <section class="{{dk.cls}}" style="box-sizing: border-box; {{dk.style}}" aria-label="{{dk.name}} module">
+      <div class="dock-h" onPointerDown="{{drag.down}}" onPointerMove="{{drag.move}}" onPointerUp="{{drag.up}}">
+        <span class="dot" style="background: {{dk.col}}; width: 10px; height: 10px"></span>
+        <span style="font-weight: 800">{{dk.name}}</span>
+        <span class="muted" style="font-size: 11.5px">{{dk.chain}}</span>
+        <div style="flex: 1"></div>
+        <span class="muted" style="font-size: 11px">{{dk.hint}}</span>
+        <button class="ib sm" onClick="{{dk.toggleFloat}}" aria-label="{{dk.floatLabel}}"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"></path></svg>{{dk.floatLabel}}</button>
+        <button class="xb" aria-label="Close module" onClick="{{dk.close}}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+      </div>
+      <div class="dock-b">
+        <sc-for list="{{dk.mods}}" as="md" hint-placeholder-count="3">
+          <div class="mod">
+            <div class="mod-t"><span class="dot" style="background: {{md.col}}"></span>{{md.title}}</div>
+            <div class="kg" style="grid-template-columns: repeat({{md.cols}}, 62px)">
+              <sc-for list="{{md.knobs}}" as="k" hint-placeholder-count="5">
+                <div class="{{k.wcls}}">
+                  <button class="{{k.cls}}" aria-label="{{k.label}} {{k.val}}" onClick="{{k.click}}"><span class="dial"><svg viewBox="0 0 46 46" aria-hidden="true"><circle class="trk" cx="23" cy="23" r="18" pathLength="100"></circle><circle class="arc" cx="23" cy="23" r="18" pathLength="100" style="stroke: {{k.col}}; stroke-dasharray: {{k.dash}} 100"></circle></svg><span class="cap" style="transform: rotate({{k.deg}}deg)"><span class="ptr"></span></span></span><span class="kv">{{k.val}}</span><span class="kl">{{k.label}}</span></button>
+                  <sc-if value="{{k.spot}}" hint-placeholder-val="{{false}}">
+                    <div class="{{k.b.cls}}" role="status">
+                      <div class="lbl" style="color: #3FDCEB">{{k.b.stepLabel}}</div>
+                      <div style="font-weight: 800; font-size: 13.5px; margin: 3px 0 4px">{{k.b.title}}</div>
+                      <div>{{k.b.body}}</div>
+                      <sc-if value="{{k.b.showWhy}}" hint-placeholder-val="{{false}}"><div style="margin-top: 6px; color: #BDF6FB">{{k.b.why}}</div></sc-if>
+                      <div class="muted" style="margin-top: 8px; font-size: 11.5px">{{k.b.status}}</div>
+                      <sc-if value="{{k.b.tryMode}}" hint-placeholder-val="{{false}}"><button class="ib sm agentbtn" style="margin-top: 8px" onClick="{{k.b.done}}">Done</button></sc-if>
+                    </div>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+            <sc-if value="{{md.hasSeg}}" hint-placeholder-val="{{false}}">
+              <div class="seg" style="margin-top: 6px" role="group" aria-label="Distortion mode">
+                <sc-for list="{{md.seg}}" as="o" hint-placeholder-count="3"><button class="{{o.cls}}" onClick="{{o.pick}}" aria-pressed="{{o.on}}">{{o.n}}</button></sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+  </sc-if>
+
+  <sc-if value="{{lis.open}}" hint-placeholder-val="{{false}}">
+    <section class="listen glass" aria-label="Listening">
+      <div class="tlbar">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round"><path d="M2 12h2M6 8v8M10 4v16M14 7v10M18 10v4M22 12h0"></path></svg>
+        <span style="font-weight: 800; font-size: 13px">Listening</span>
+        <span class="muted" style="font-size: 12px">what the agent hears · whole song</span>
+        <div style="flex: 1"></div>
+        <button class="{{lis.cmpCls}}" aria-pressed="{{lis.compare}}" onClick="{{lis.toggleCompare}}">Compare with reference</button>
+        <button class="xb" aria-label="Close listening" onClick="{{lis.close}}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+      </div>
+      <div class="lgrid">
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0">
+          <div class="lcard">
+            <span class="lbl">Loudness</span>
+            <div style="display: flex; align-items: baseline; gap: 8px"><span class="mono" style="font-size: 40px; font-weight: 600; line-height: 1">−7.6</span><span class="muted">LUFS integrated</span></div>
+            <div style="position: relative; height: 10px; border-radius: 5px; background: rgba(255,255,255,.08)">
+              <div style="position: absolute; left: 60%; width: 10%; top: -3px; bottom: -3px; border-radius: 3px; background: rgba(168,240,76,.25); box-shadow: inset 0 0 0 1px rgba(168,240,76,.6)"></div>
+              <div style="position: absolute; left: 0; width: 62%; top: 0; bottom: 0; border-radius: 5px; background: linear-gradient(90deg, rgba(247,242,255,.2), rgba(247,242,255,.9))"></div>
+            </div>
+            <div class="mono muted" style="display: flex; justify-content: space-between; font-size: 10px"><span>−20</span><span>target −8 to −6</span><span>0</span></div>
+            <div style="display: flex; gap: 22px; margin-top: 4px">
+              <div><div class="lbl">True peak</div><div class="mono" style="font-size: 17px">−1.6 dBTP</div><div class="muted" style="font-size: 11.5px">at most −1: safe after encoding</div></div>
+              <div><div class="lbl">Range</div><div class="mono" style="font-size: 17px">5.2 LU</div><div class="muted" style="font-size: 11.5px">loudness range</div></div>
+            </div>
+          </div>
+          <div class="lcard">
+            <span class="lbl">Band balance · dB vs the total</span>
+            <sc-for list="{{lis.bands}}" as="b" hint-placeholder-count="6">
+              <div class="bandrow"><span style="width: 58px">{{b.n}}</span><span class="bt"><i style="box-sizing: border-box; {{b.w}}"></i></span><span class="mono muted" style="width: 52px; text-align: right">{{b.v}}</span></div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px; min-height: 0">
+          <div class="lcard">
+            <div style="display: flex; align-items: center"><span class="lbl">Energy per section · LUFS</span><div style="flex: 1"></div><span class="muted" style="font-size: 11.5px">the drop should be the loudest part</span></div>
+            <div class="ebars">
+              <sc-for list="{{lis.secs}}" as="e" hint-placeholder-count="8">
+                <div class="{{e.cls}}"><span class="mono" style="color: var(--ink)">{{e.v}}</span><i style="box-sizing: border-box; {{e.h}}"></i><span>{{e.n}}</span></div>
+              </sc-for>
+            </div>
+          </div>
+          <div class="lcard" style="flex: 1">
+            <div style="display: flex; align-items: center; gap: 8px"><span class="lbl">Our drop vs a reference</span><div style="flex: 1"></div><button class="ib sm">Reference: [your reference] ▾</button></div>
+            <sc-if value="{{lis.compare}}" hint-placeholder-val="{{false}}">
+              <sc-for list="{{lis.verdicts}}" as="v" hint-placeholder-count="3">
+                <div class="verdict"><span class="dot" style="background: {{v.col}}; margin-top: 5px"></span><span>{{v.t}}</span></div>
+              </sc-for>
+            </sc-if>
+            <sc-if value="{{lis.noCompare}}" hint-placeholder-val="{{true}}">
+              <div class="muted" style="font-size: 12.5px">Press Compare with reference to put our drop next to a track you like. References are your own files and stay on this machine.</div>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+    </section>
+  </sc-if>
+
+  <aside class="chat glass" aria-label="Agent">
+    <div class="chead">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="fill: #3FDCEB"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>
+      <sc-for list="{{tabs}}" as="tb" hint-placeholder-count="3">
+        <button class="{{tb.cls}}" aria-pressed="{{tb.on}}" onClick="{{tb.pick}}">{{tb.n}}<sc-if value="{{tb.badge}}" hint-placeholder-val="{{false}}"><span class="n">{{tb.badge}}</span></sc-if></button>
+      </sc-for>
+      <div style="flex: 1"></div>
+      <button class="xb" aria-label="Sessions, memory and skills"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg></button>
+    </div>
+
+    <sc-if value="{{view.chat}}" hint-placeholder-val="{{true}}">
+      <div class="msgs scroll">
+        <sc-for list="{{msgs}}" as="m" hint-placeholder-count="2">
+          <sc-if value="{{m.isMe}}" hint-placeholder-val="{{false}}"><div class="me">{{m.text}}</div></sc-if>
+          <sc-if value="{{m.isThinking}}" hint-placeholder-val="{{false}}"><div class="who thinking"><i></i><i></i><i></i> thinking</div></sc-if>
+          <sc-if value="{{m.isAgent}}" hint-placeholder-val="{{true}}">
+            <div>
+              <div class="who"><svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true" style="fill: #3FDCEB"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>tune-ai</div>
+              <div>{{m.text}}</div>
+            </div>
+          </sc-if>
+          <sc-if value="{{m.isCard}}" hint-placeholder-val="{{false}}">
+            <div class="card">
+              <div class="card-h">
+                <span style="color: var(--agent)">{{m.card.count}}</span>
+                <span class="muted" style="font-weight: 600">· {{m.card.where}}</span>
+                <div style="flex: 1"></div>
+                <sc-if value="{{m.card.canUndoAll}}" hint-placeholder-val="{{true}}"><button class="xb" aria-label="Undo all" onClick="{{m.card.undoAll}}"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg></button></sc-if>
+              </div>
+              <sc-for list="{{m.card.lines}}" as="ln" hint-placeholder-count="3">
+                <div class="cl">
+                  <span class="dot" style="background: {{ln.col}}"></span>
+                  <div class="t">
+                    <div style="font-weight: 600">{{ln.what}}</div>
+                    <div class="mono v">{{ln.val}}</div>
+                  </div>
+                  <sc-if value="{{ln.canShow}}" hint-placeholder-val="{{true}}"><button class="ib sm" onClick="{{ln.show}}" aria-label="Show {{ln.what}}">Show</button></sc-if>
+                  <sc-if value="{{ln.live}}" hint-placeholder-val="{{true}}"><button class="xb" aria-label="Undo {{ln.what}}" onClick="{{ln.undo}}"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg></button></sc-if>
+                  <sc-if value="{{ln.undone}}" hint-placeholder-val="{{false}}"><span class="muted" style="font-size: 11px; padding-right: 6px">undone</span></sc-if>
+                </div>
+              </sc-for>
+              <sc-if value="{{m.card.teachable}}" hint-placeholder-val="{{true}}">
+                <div class="card-f">
+                  <button class="ib sm agentbtn" onClick="{{m.card.teach}}"><svg viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"></path><path d="M6 11v5c3 2 9 2 12 0v-5"></path></svg>Teach me this</button>
+                </div>
+              </sc-if>
+            </div>
+          </sc-if>
+          <sc-if value="{{m.isRecap}}" hint-placeholder-val="{{false}}">
+            <div class="card">
+              <div class="card-h"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="fill: none; stroke: #3FDCEB; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round"><path d="M2 9l10-5 10 5-10 5z"></path><path d="M6 11v5c3 2 9 2 12 0v-5"></path></svg><span style="color: var(--agent)">Lesson recap</span><span class="muted" style="font-weight: 600">· opening the filter in the build</span></div>
+              <div style="padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12px">
+                <sc-for list="{{m.bullets}}" as="bl" hint-placeholder-count="3"><div style="display: flex; gap: 8px"><span class="dot" style="background: #A8F04C; margin-top: 5px"></span><span>{{bl.b}}</span></div></sc-for>
+                <div style="color: #BDF6FB; margin-top: 2px">In acid the energy comes from the filter, not from new notes.</div>
+              </div>
+              <div class="card-f"><button class="ib sm agentbtn" onClick="{{m.replay}}">Replay lesson</button></div>
+            </div>
+          </sc-if>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{view.approvals}}" hint-placeholder-val="{{false}}">
+      <div class="msgs">
+        <sc-if value="{{ap.pending}}" hint-placeholder-val="{{true}}">
+          <div class="pend">
+            <div class="card-h"><span>Waiting for you</span><span class="muted" style="font-weight: 600">· big change</span></div>
+            <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 8px">
+              <div style="font-weight: 800">Rearrange the song</div>
+              <div class="muted" style="font-size: 12px">Add an 8-bar second breakdown after drop_peak and shorten the outro to 8 bars, so the track breathes once more before it ends.</div>
+              <div class="mono" style="font-size: 11px; display: flex; flex-direction: column; gap: 3px">
+                <span style="color: #BDF6FB">+ breakdown_2 · 8 bars · bars 113–120</span>
+                <span style="color: #FFD08A">~ outro · 16 → 8 bars · bars 121–128</span>
+                <span class="muted">= outro_drums · bars 129–144</span>
+              </div>
+              <button class="{{ap.previewCls}}" aria-pressed="{{ap.preview}}" onClick="{{ap.togglePreview}}" style="align-self: flex-start">{{ap.previewLabel}}</button>
+            </div>
+            <div class="card-f">
+              <button class="ib sm primary" onClick="{{ap.approve}}"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"></path></svg>Approve</button>
+              <button class="ib sm" onClick="{{ap.reject}}">Reject</button>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ap.none}}" hint-placeholder-val="{{false}}">
+          <div class="muted" style="font-size: 12.5px">Nothing is waiting. Big changes (deleting a track or section, rearranging the song, replacing a pattern) wait here until you approve them.</div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{view.activity}}" hint-placeholder-val="{{false}}">
+      <div class="msgs" style="gap: 0">
+        <sc-for list="{{activity}}" as="a" hint-placeholder-count="3">
+          <div class="log"><span class="dot" style="background: #3FDCEB"></span><span>{{a.t}}</span></div>
+        </sc-for>
+        <sc-if value="{{noActivity}}" hint-placeholder-val="{{false}}"><div class="muted" style="font-size: 12.5px">No agent changes yet in this session.</div></sc-if>
+      </div>
+    </sc-if>
+
+    <div class="cfoot">
+      <button class="chip" onClick="{{askChip}}">open the filter in the build</button>
+      <label class="sw">
+        <input type="checkbox" role="switch" checked="{{learn}}" onChange="{{toggleLearn}}">
+        <span class="trk"></span>
+        Learning mode
+        <span class="muted" style="font-weight: 500; font-size: 11.5px">· one step at a time</span>
+      </label>
+      <div class="composer">
+        <label for="ask" class="sr">Tell tune-ai what to do</label>
+        <textarea id="ask" placeholder="Tell tune-ai what to do…" value="{{draft}}" onChange="{{onDraft}}"></textarea>
+        <button class="send" aria-label="Send" onClick="{{sendDraft}}"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+      </div>
+    </div>
+  </aside>
+
+  <sc-if value="{{ls.on}}" hint-placeholder-val="{{false}}">
+    <div class="lbar glass" role="toolbar" aria-label="Lesson controls">
+      <span style="display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 12px; padding: 0 4px; color: #BDF6FB"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round"><path d="M2 9l10-5 10 5-10 5z"></path><path d="M6 11v5c3 2 9 2 12 0v-5"></path></svg>Lesson</span>
+      <span class="mono muted" style="font-size: 11.5px; padding-right: 4px">{{ls.stepText}}</span>
+      <span class="sep"></span>
+      <button class="ib sm" onClick="{{ls.back}}" aria-label="Back: undo this step"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"></path></svg>Back</button>
+      <button class="ib sm" onClick="{{ls.pause}}">{{ls.pauseLabel}}</button>
+      <button class="ib sm on" onClick="{{ls.next}}">{{ls.nextLabel}}<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"></path></svg></button>
+      <div class="seg" role="group" aria-label="Speed"><button class="{{ls.s1}}" onClick="{{ls.speed1}}" aria-pressed="{{ls.is1}}">1×</button><button class="{{ls.s2}}" onClick="{{ls.speed2}}" aria-pressed="{{ls.is2}}">2×</button></div>
+      <button class="ib sm" onClick="{{ls.why}}">Why?</button>
+      <button class="ib sm agentbtn" onClick="{{ls.tryIt}}">Let me try</button>
+      <span class="sep"></span>
+      <span class="muted" style="font-size: 11px">loop keeps playing</span>
+      <button class="ib sm" onClick="{{ls.exit}}" aria-label="Exit lesson">Exit</button>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["a","b","c"],"default":"a"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.nid = 100;
+    this.timers = [];
+    this.drag = null;
+    this.dragItem = null;
+    this.TG = { cut: 'cutT', reso: 'resoT', dly: 'dlyT' };
+    this.STEPS = [
+      { key: 'cut', what: 'acid · cutoff ramp in build', from: 0.55, to: 0.75, inc: 0.05, title: 'Open the cutoff over the build', body: 'The cutoff decides how bright the 303 sounds. The build ramp now climbs to 75 % instead of 55 %, so the line keeps getting brighter right up to the breakdown.', why: 'Rising brightness is the main way acid builds tension: no new notes, just more filter.' },
+      { key: 'reso', what: 'acid · resonance', from: 85, to: 90, inc: 5, title: 'Push the resonance a little', body: 'Resonance makes the filter whistle around the cutoff. 85 to 90 % gives the squelch more bite as the filter opens.', why: 'Much more and the line starts to scream; around 90 % it stays musical.' },
+      { key: 'dly', what: 'acid · delay send', from: -16, to: -12, inc: 2, title: 'More echo in the build', body: 'The delay send sets how much of the acid goes into the dotted-eighth echo. −16 to −12 dB lets the echoes fill the gaps between notes.', why: 'Echoes on the dotted eighth bounce against the straight 16ths: more movement without more notes.' }
+    ];
+    this.ITEMS = [
+      { id: 'kick', name: '909 Kick', type: 'Drum voice', rgb: '255,84,112', kind: 'kick', track: 'Kick' },
+      { id: 'clap', name: '909 Clap', type: 'Drum voice', rgb: '255,181,71', kind: 'clap', track: 'Clap' },
+      { id: 'hatc', name: 'Closed hat', type: 'Drum voice', rgb: '94,140,255', kind: 'hatc', track: 'Closed hat' },
+      { id: 'hato', name: 'Open hat', type: 'Drum voice', rgb: '163,192,255', kind: 'hato', track: 'Open hat' },
+      { id: 'ride', name: 'Ride', type: 'Drum voice', rgb: '183,156,255', kind: 'ride', track: 'Ride' },
+      { id: 'acid', name: '303 Bass', type: 'Synth', rgb: '168,240,76', kind: 'acid', track: 'Acid 303' }
+    ];
+    this.state = {
+      playing: false, loop: true, pos: 80, loopA: 80, loopB: 96,
+      dock: null, floating: false, fx: 270, fy: 330,
+      learn: false, tab: 'chat', draft: '',
+      cut: 0.55, cutT: 0.55, reso: 85, resoT: 85, dly: -16, dlyT: -16,
+      glowUntil: 0, glowKeys: [], hi: null, hiUntil: 0,
+      lesson: null, prevLayout: null,
+      browser: false, over: false, extra: [], previewing: null,
+      pending: true, preview: false, approved: false,
+      listen: false, compare: false, distMode: 'soft',
+      cards: {},
+      msgs: [
+        { id: 1, kind: 'agent', text: 'first-acid is loaded and the loop sits on the drop (bars 81–96). Press play, then tell me what to change.' },
+        { id: 2, kind: 'agent', text: 'I also suggested a rearrangement earlier. It is a big change, so it waits for you in Approvals.' }
+      ],
+      log: []
+    };
+  }
+
+  componentDidMount() {
+    this.iv = setInterval(() => this.tick(), 60);
+  }
+
+  componentWillUnmount() {
+    clearInterval(this.iv);
+    this.timers.forEach((t) => clearTimeout(t));
+  }
+
+  later(ms, fn) {
+    this.timers.push(setTimeout(fn, ms));
+  }
+
+  tick() {
+    const s = this.state;
+    const now = Date.now();
+    const up = {};
+    if (s.playing) {
+      let pos = s.pos + 0.06 / (240 / 145);
+      if (s.loop && pos >= s.loopB) pos = s.loopA + (pos - s.loopB);
+      if (!s.loop && pos >= 144) { up.playing = false; pos = 0; }
+      up.pos = pos;
+    }
+    [['cut', 'cutT', 0.002], ['reso', 'resoT', 0.1], ['dly', 'dlyT', 0.1]].forEach(([v, t, eps]) => {
+      const d = s[t] - s[v];
+      if (Math.abs(d) > eps) up[v] = s[v] + d * 0.22;
+      else if (s[v] !== s[t]) up[v] = s[t];
+    });
+    if (s.glowUntil && now > s.glowUntil) { up.glowUntil = 0; up.glowKeys = []; }
+    if (s.hiUntil && now > s.hiUntil) { up.hiUntil = 0; up.hi = null; }
+    const L = s.lesson;
+    if (L && !L.paused && !L.tryMode && L.applied <= L.step) {
+      const w = L.wait - 60 * L.speed;
+      if (w <= 0) {
+        const st = this.STEPS[L.step];
+        up[this.TG[st.key]] = st.to;
+        up.glowKeys = [st.key];
+        up.glowUntil = now + 1800;
+        up.lesson = { ...L, applied: L.step + 1, wait: 0 };
+      } else {
+        up.lesson = { ...L, wait: w };
+      }
+    }
+    if (Object.keys(up).length) this.setState(up);
+  }
+
+  push(list, extra) {
+    this.setState((p) => ({ msgs: [...p.msgs, ...list.map((m) => ({ ...m, id: this.nid++ }))], ...(extra || {}) }));
+  }
+
+  send(text) {
+    const t = (text || this.state.draft || '').trim() || 'open the filter in the build';
+    this.push([{ kind: 'me', text: t }, { kind: 'thinking' }], { draft: '', tab: 'chat' });
+    this.later(600, () => {
+      this.setState((p) => ({ msgs: p.msgs.filter((m) => m.kind !== 'thinking') }), () => {
+        if (!/filter|cutoff/i.test(t)) {
+          this.push([{ kind: 'agent', text: 'This prototype knows one move so far. Try "open the filter in the build".' }]);
+          return;
+        }
+        if (this.state.learn) {
+          this.push([{ kind: 'agent', text: "Let's go one step at a time. I'll open the 303 and show you each control before I change it." }]);
+          this.startLesson(null);
+          return;
+        }
+        this.applyAll();
+      });
+    });
+  }
+
+  applyAll() {
+    const s = this.state;
+    if (s.cutT > 0.56) {
+      this.push([{ kind: 'agent', text: 'The filter in the build is already open. Undo it on the card if you want to compare.' }]);
+      return;
+    }
+    const cid = 'c' + (this.nid++);
+    const lines = this.STEPS.map((st) => ({ key: st.key, what: st.what, from: st.from, to: st.to, undone: false }));
+    const docked = s.dock === 'acid';
+    const text = docked
+      ? 'Done. The cutoff ramp in the build now climbs to 75 %, with a bit more resonance and echo, so the build keeps brightening into the breakdown.'
+      : 'Done. The cutoff ramp in the build now climbs to 75 %, with a bit more resonance and echo. Those knobs are not on screen: press Show on a line to see one.';
+    this.setState((p) => ({
+      cutT: 0.75, resoT: 90, dlyT: -12,
+      glowUntil: Date.now() + 2600, glowKeys: ['cut', 'reso', 'dly'],
+      cards: { ...p.cards, [cid]: { where: 'build · just now', lines, teach: true } },
+      msgs: [...p.msgs, { id: this.nid++, kind: 'agent', text }, { id: this.nid++, kind: 'card', cardId: cid }],
+      log: [...p.log, ...lines.map((l) => l.what)]
+    }));
+  }
+
+  startLesson(cardId) {
+    const s = this.state;
+    const cards = { ...s.cards };
+    if (cardId && cards[cardId]) cards[cardId] = { ...cards[cardId], lines: cards[cardId].lines.map((l) => ({ ...l, undone: true })) };
+    this.setState({
+      cards, cutT: 0.55, resoT: 85, dlyT: -16, glowUntil: 0, glowKeys: [], learn: true,
+      prevLayout: s.lesson ? s.prevLayout : { dock: s.dock, floating: s.floating, browser: s.browser, listen: s.listen },
+      dock: 'acid', floating: false, browser: false, listen: false, tab: 'chat',
+      playing: true, loopA: 48, loopB: 64, pos: 48, loop: true,
+      lesson: { step: 0, applied: 0, wait: 1400, paused: false, speed: 1, why: false, tryMode: false, tryNote: '' }
+    });
+  }
+
+  lessonNext() {
+    const s = this.state;
+    const L = s.lesson;
+    if (!L) return;
+    const up = {};
+    let applied = L.applied;
+    if (applied <= L.step) {
+      const st = this.STEPS[L.step];
+      up[this.TG[st.key]] = st.to;
+      applied = L.step + 1;
+    }
+    if (L.step >= 2) {
+      up.lesson = { ...L, applied };
+      this.setState(up, () => this.finish(true));
+      return;
+    }
+    up.lesson = { ...L, step: L.step + 1, applied, wait: 1400, why: false, tryMode: false, tryNote: '' };
+    this.setState(up);
+  }
+
+  lessonBack() {
+    const L = this.state.lesson;
+    if (!L) return;
+    const st = this.STEPS[L.step];
+    const up = {};
+    if (L.applied > L.step || L.tryMode) up[this.TG[st.key]] = st.from;
+    if (L.step > 0) up.lesson = { ...L, step: L.step - 1, applied: L.step, wait: 0, why: false, tryMode: false, tryNote: '' };
+    else up.lesson = { ...L, applied: 0, paused: true, wait: 1400, why: false, tryMode: false, tryNote: '' };
+    this.setState(up);
+  }
+
+  lessonPatch(patch) {
+    const L = this.state.lesson;
+    if (L) this.setState({ lesson: { ...L, ...patch } });
+  }
+
+  tryIt() {
+    const L = this.state.lesson;
+    if (!L) return;
+    const st = this.STEPS[L.step];
+    this.setState({ [this.TG[st.key]]: st.from, lesson: { ...L, tryMode: true, applied: L.step, tryNote: '' } });
+  }
+
+  tryDone() {
+    const s = this.state;
+    const L = s.lesson;
+    if (!L) return;
+    const st = this.STEPS[L.step];
+    const v = s[this.TG[st.key]];
+    let cmp = 'A little gentler than mine. It still works; the build just rises less.';
+    if (Math.abs(v - st.to) <= st.inc / 2) cmp = 'That is right where I would put it.';
+    else if (v > st.to) cmp = 'A bit further than mine: listen for it getting harsh.';
+    this.setState({ lesson: { ...L, tryMode: false, applied: L.step + 1, tryNote: `You set it to ${this.fmtv(st.key, v)}. ${cmp} Press Next.` } });
+  }
+
+  knobClick(key) {
+    const s = this.state;
+    const L = s.lesson;
+    if (!L || !L.tryMode) return;
+    const st = this.STEPS[L.step];
+    if (st.key !== key) return;
+    const f = this.TG[key];
+    const max = key === 'cut' ? 1 : key === 'reso' ? 100 : 0;
+    this.setState({ [f]: Math.min(max, s[f] + st.inc) });
+  }
+
+  finish(recap) {
+    const s = this.state;
+    const L = s.lesson;
+    if (!L) return;
+    const lines = this.STEPS.slice(0, L.applied)
+      .map((st) => ({ key: st.key, what: st.what, from: st.from, to: s[this.TG[st.key]], undone: false }))
+      .filter((l) => Math.abs(l.to - l.from) > 1e-6);
+    const pl = s.prevLayout || {};
+    const msgs = [...s.msgs];
+    const cards = { ...s.cards };
+    if (lines.length) {
+      const cid = 'c' + (this.nid++);
+      cards[cid] = { where: 'build · lesson', lines, teach: true };
+      msgs.push({ id: this.nid++, kind: 'card', cardId: cid });
+    }
+    if (recap) {
+      msgs.push({ id: this.nid++, kind: 'recap', bullets: [
+        `The cutoff ramp in the build climbs to ${this.fmtv('cut', s.cutT)}: the line gets brighter all the way up.`,
+        `Resonance at ${this.fmtv('reso', s.resoT)}: more squelch as the filter opens.`,
+        `Delay send at ${this.fmtv('dly', s.dlyT)}: dotted-eighth echoes fill the gaps.`
+      ] });
+    }
+    this.setState({
+      lesson: null, msgs, cards, tab: 'chat', prevLayout: null,
+      dock: pl.dock === undefined ? null : pl.dock, floating: !!pl.floating, browser: !!pl.browser, listen: !!pl.listen,
+      loopA: 80, loopB: 96, pos: 80,
+      log: [...s.log, ...lines.map((l) => l.what + ' (lesson)')]
+    });
+  }
+
+  undoLine(cid, i) {
+    const s = this.state;
+    const c = s.cards[cid];
+    const l = c.lines[i];
+    if (l.undone) return;
+    const up = {};
+    if (l.key === 'arr') { up.approved = false; up.preview = false; } else up[this.TG[l.key]] = l.from;
+    up.cards = { ...s.cards, [cid]: { ...c, lines: c.lines.map((x, j) => (j === i ? { ...x, undone: true } : x)) } };
+    up.log = [...s.log, 'undo · ' + l.what];
+    this.setState(up);
+  }
+
+  undoAll(cid) {
+    const s = this.state;
+    const c = s.cards[cid];
+    const up = { log: [...s.log] };
+    c.lines.forEach((l) => {
+      if (l.undone) return;
+      if (l.key === 'arr') { up.approved = false; up.preview = false; } else up[this.TG[l.key]] = l.from;
+      up.log.push('undo · ' + l.what);
+    });
+    up.cards = { ...s.cards, [cid]: { ...c, lines: c.lines.map((x) => ({ ...x, undone: true })) } };
+    this.setState(up);
+  }
+
+  show(key) {
+    this.setState({ dock: 'acid', browser: false, listen: false, hi: key, hiUntil: Date.now() + 2600 });
+  }
+
+  addTrack(id) {
+    const it = this.ITEMS.find((x) => x.id === id);
+    if (!it) return;
+    const s = this.state;
+    const same = s.extra.filter((x) => x.kind === it.kind).length;
+    const name = it.kind === 'ride' && same === 0 ? 'Ride' : `${it.track} ${same + 2}`;
+    this.setState({ extra: [...s.extra, { id: 'x' + (this.nid++), name, rgb: it.rgb, kind: it.kind, fresh: true }], over: false, log: [...s.log, 'you · new track ' + name] });
+  }
+
+  fmtv(key, v) {
+    if (key === 'cut') return `${Math.round(v * 100)} %`;
+    if (key === 'reso') return `${Math.round(v)} %`;
+    const r = Math.round(v);
+    return `${r < 0 ? '−' : ''}${Math.abs(r)} dB`;
+  }
+
+  renderVals() {
+    const s = this.state;
+    const look = this.props.look ?? 'a';
+    const now = Date.now();
+    const glowOn = s.glowUntil > now;
+    const mark = s.cutT > 0.56 || s.cut > 0.56;
+    const L = s.lesson;
+    const spotKey = L ? this.STEPS[L.step].key : null;
+    const dB = (v) => { const r = Math.round(v); return `${r < 0 ? '−' : ''}${Math.abs(r)} dB`; };
+
+    // sections
+    const BASE = [['intro', 16], ['intro_acid', 16], ['build', 32], ['breakdown', 16], ['drop', 16], ['drop_peak', 16], ['outro', 16], ['outro_drums', 16]];
+    const alt = s.approved || s.preview;
+    const list = alt ? [...BASE.slice(0, 6), ['breakdown_2', 8], ['outro', 8], ['outro_drums', 16]] : BASE;
+    let start = 1;
+    let cur = 0;
+    const secMeta = list.map(([name, bars], i) => {
+      const m = { name, bars, start, ghost: s.preview && !s.approved && (name === 'breakdown_2' || name === 'outro') };
+      if (s.pos >= start - 1 && s.pos < start - 1 + bars) cur = i;
+      start += bars;
+      return m;
+    });
+    const sections = secMeta.map((m, i) => ({
+      name: m.name, bars: m.bars, start: m.start,
+      on: s.playing && i === cur,
+      cls: m.ghost ? 'sec ghost' : (i === cur ? (s.playing ? 'sec on' : 'sec cur') : 'sec'),
+      label: m.ghost && m.name === 'outro' ? 'outro · 16→8' : m.name,
+      jump: () => this.setState({ pos: m.start - 1 })
+    }));
+
+    // patterns and tracks
+    const PAT = {
+      kick4: 'x.X.x...x...x...',
+      hats8: 'x.X.x.X.x.X.x.X.',
+      open_off: '..x...x...x...x.',
+      clap24: '....x.......x...',
+      acid_main: 'C2!~ C2!~ C3! C2~ . D#2!~ C2~ G2!~ D2!~ . C3!~ . A#1!~ C#2! E2!~ .',
+      acid_jump: 'C2 C3! C2~ C3 . D#3~ D#2 G2! . C2 C3! C2~ A#2~ A#1 C3! F2~'
+    };
+    const NOTE = { C: 0, 'C#': 1, D: 2, 'D#': 3, E: 4, F: 5, 'F#': 6, G: 7, 'G#': 8, A: 9, 'A#': 10, B: 11 };
+    const glyph = (id, rgb) => {
+      const p = PAT[id];
+      if (p.includes(' ')) {
+        return p.split(' ').map((tok) => {
+          const m = tok.match(/^([A-G]#?)(\d)/);
+          if (!m) return { s: 'height: 2px; opacity: 0' };
+          const semi = NOTE[m[1]] + 12 * Number(m[2]) - 22;
+          return { s: `height: 3px; margin-bottom: ${Math.round(semi * 0.6)}px; background: rgb(${rgb}); opacity: ${tok.includes('!') ? 1 : 0.6}` };
+        });
+      }
+      return p.split('').map((ch) => ({
+        s: ch === '.' ? `height: 2px; background: rgb(${rgb}); opacity: .2` : `height: ${ch === 'X' ? 13 : 8}px; background: rgb(${rgb}); opacity: ${ch === 'X' ? 1 : 0.7}`
+      }));
+    };
+    const P = {
+      kick: { intro: 'kick4', intro_acid: 'kick4', build: 'kick4', drop: 'kick4', drop_peak: 'kick4', outro: 'kick4', outro_drums: 'kick4' },
+      clap: { build: 'clap24', drop: 'clap24', drop_peak: 'clap24', outro: 'clap24' },
+      hat_closed: { intro: 'hats8', intro_acid: 'hats8', build: 'hats8', breakdown: 'hats8', drop: 'hats8', drop_peak: 'hats8', breakdown_2: 'hats8', outro: 'hats8', outro_drums: 'hats8' },
+      hat_open: { build: 'open_off', drop: 'open_off', drop_peak: 'open_off', outro: 'open_off' },
+      acid: { intro_acid: 'acid_main', build: 'acid_main', breakdown: 'acid_main', drop: 'acid_main', drop_peak: 'acid_jump', breakdown_2: 'acid_main', outro: 'acid_main' }
+    };
+    const TR = [
+      { id: 'kick', name: 'Kick', rgb: '255,84,112', lvl: 82, kind: 'kick' },
+      { id: 'clap', name: 'Clap', rgb: '255,181,71', lvl: 55, kind: 'clap' },
+      { id: 'hat_closed', name: 'Closed hat', rgb: '94,140,255', lvl: 46, kind: 'hatc' },
+      { id: 'hat_open', name: 'Open hat', rgb: '163,192,255', lvl: 38, kind: 'hato' },
+      { id: 'acid', name: 'Acid 303', rgb: '168,240,76', lvl: 74, kind: 'acid' }
+    ].concat(s.extra.map((x) => ({ id: x.id, name: x.name, rgb: x.rgb, lvl: 0, kind: x.kind, extra: true, fresh: x.fresh })));
+    const uses = {};
+    TR.forEach((t) => secMeta.forEach((m) => { const p = P[t.id] && P[t.id][m.name]; if (p) uses[p] = (uses[p] || 0) + 1; }));
+    const tracks = TR.map((t) => {
+      const isAcid = t.id === 'acid';
+      const lvl = s.playing ? t.lvl : 4;
+      let hdrCls = 'hdr';
+      if (isAcid && glowOn) hdrCls = 'hdr agent-hot';
+      else if (isAcid && mark) hdrCls = 'hdr agent-soft';
+      return {
+        name: t.name,
+        rowCls: t.fresh ? 'row fresh' : 'row',
+        bar: `background: rgb(${t.rgb})`,
+        meter: `height: ${lvl}%; background: linear-gradient(0deg, rgba(${t.rgb},.55), rgb(${t.rgb}))`,
+        hdrCls,
+        agentDot: isAcid && mark,
+        cells: secMeta.map((m, i) => {
+          let p = P[t.id] ? P[t.id][m.name] : null;
+          if (t.extra && m.name === 'drop') p = 'empty';
+          const live = s.playing && i === cur;
+          let st = `background: rgba(${t.rgb},.13); border-color: rgba(${t.rgb},.42); color: rgb(${t.rgb})`;
+          if (live) st = `background: rgba(${t.rgb},.30); border-color: rgba(${t.rgb},.95); color: #fff; box-shadow: 0 0 16px rgba(${t.rgb},.38)`;
+          if (t.extra) st = `background: rgba(${t.rgb},.08); border-color: rgba(${t.rgb},.75); border-style: dashed; color: rgb(${t.rgb})`;
+          if (isAcid && m.name === 'build' && mark) st += '; border-color: #3FDCEB';
+          if (isAcid && m.name === 'build' && glowOn) st += '; box-shadow: 0 0 0 1.5px #3FDCEB, 0 0 22px rgba(63,220,235,.55)';
+          if (m.ghost) st += '; opacity: .55';
+          return {
+            grow: `flex: ${m.bars} 1 0`,
+            has: !!p,
+            label: p === 'empty' ? 'empty' : (p || ''),
+            badge: p && p !== 'empty' && uses[p] > 1 ? `×${uses[p]}` : '',
+            st,
+            steps: p && p !== 'empty' ? glyph(p, t.rgb) : [],
+            aria: `${t.name}: ${p || ''} in ${m.name}. Open its sound`,
+            open: () => { if (!this.state.lesson) this.setState({ dock: t.id, browser: false, listen: false }); }
+          };
+        })
+      };
+    });
+
+    // cutoff lane
+    const Y = (v) => (100 - v * 90 - 5).toFixed(1);
+    const SEG = { intro_acid: [0.02, 0.12], build: [0.12, s.cut], breakdown: [0.35, 0.25], drop: [0.55, 0.80], drop_peak: [0.85, 0.95], breakdown_2: [0.5, 0.4], outro: [0.75, 0.10] };
+    const pts = [];
+    let bx0 = 0;
+    let bx1 = 0;
+    let lv = null;
+    secMeta.forEach((m) => {
+      const g = SEG[m.name];
+      if (!g) return;
+      const x0 = (m.start - 1) * 10;
+      const x1 = (m.start - 1 + m.bars) * 10;
+      const isB = m.name === 'build';
+      if (isB) { bx0 = x0; bx1 = x1; }
+      pts.push([x0, Y(g[0]), isB && mark], [x1, Y(g[1]), isB && mark]);
+      if (s.pos >= m.start - 1 && s.pos < m.start - 1 + m.bars) lv = g[0] + (g[1] - g[0]) * (s.pos - (m.start - 1)) / m.bars;
+    });
+    const line = pts.map(([x, y]) => `${x},${y}`).join(' ');
+    const first = pts.length ? pts[0][0] : 0;
+    const last = pts.length ? pts[pts.length - 1][0] : 0;
+    const lane = {
+      line,
+      area: `${first},100 ${line} ${last},100`,
+      old: mark ? `${bx0},${Y(0.12)} ${bx1},${Y(0.55)}` : '0,0',
+      agent: mark ? `${bx0},${Y(0.12)} ${bx1},${Y(s.cut)}` : '0,0',
+      dots: pts.map(([x, y, ag]) => ({ cls: ag ? 'bp ag' : 'bp', s: `left: ${(x / 14.4).toFixed(3)}%; top: calc(6px + (100% - 12px) * ${(Number(y) / 100).toFixed(3)})` })),
+      read: lv === null ? 'acid303 · 350 Hz' : `acid303 · ${Math.round(lv * 100)} %`
+    };
+
+    // transport
+    const bar = Math.floor(s.pos) + 1;
+    const beat = Math.floor((s.pos % 1) * 4) + 1;
+    const secs = s.pos * 4 * 60 / 145;
+    const loopSec = secMeta.find((m) => m.start - 1 <= s.loopA && s.loopA < m.start - 1 + m.bars);
+    const tp = {
+      playing: s.playing, stopped: !s.playing,
+      playLabel: s.playing ? 'Pause (space)' : 'Play (space)',
+      togglePlay: () => this.setState({ playing: !this.state.playing }),
+      stop: () => this.setState({ playing: false, pos: this.state.loop ? this.state.loopA : 0 }),
+      loop: s.loop, loopCls: s.loop ? 'ib on' : 'ib',
+      toggleLoop: () => this.setState({ loop: !this.state.loop }),
+      pos: `${bar}.${beat}`,
+      time: `${Math.floor(secs / 60)}:${(secs % 60).toFixed(1).padStart(4, '0')}`,
+      loopText: `${s.loopA + 1} – ${s.loopB}`,
+      loopName: loopSec ? loopSec.name : '',
+      browser: s.browser, browserCls: s.browser ? 'ib on' : 'ib',
+      toggleBrowser: () => {
+        const b = !this.state.browser;
+        const up = { browser: b, listen: false };
+        if (b && this.state.dock && !this.state.floating) up.dock = null;
+        this.setState(up);
+      },
+      openListen: () => this.setState({ listen: true, browser: false }),
+      reset: () => {
+        if (this.state.lesson) this.finish(false);
+        this.setState({ dock: null, floating: false, browser: false, listen: false });
+      }
+    };
+    const ov = {
+      ph: `left: ${(s.pos / 144 * 100).toFixed(3)}%`,
+      loop: `left: ${(s.loopA / 144 * 100).toFixed(3)}%; width: ${((s.loopB - s.loopA) / 144 * 100).toFixed(3)}%`
+    };
+
+    // drag and drop from the browser
+    const dnd = {
+      over: (e) => { e.preventDefault(); if (!this.state.over) this.setState({ over: true }); },
+      leave: () => { if (this.state.over) this.setState({ over: false }); },
+      drop: (e) => {
+        e.preventDefault();
+        let id = this.dragItem;
+        try { id = e.dataTransfer.getData('text/plain') || id; } catch (err) { /* keep dragItem */ }
+        this.dragItem = null;
+        if (id) this.addTrack(id); else this.setState({ over: false });
+      }
+    };
+    const br = {
+      open: s.browser,
+      items: this.ITEMS.map((it) => ({
+        name: it.name, type: it.type, col: `rgb(${it.rgb})`,
+        previewing: s.previewing === it.id,
+        preview: () => {
+          this.setState({ previewing: it.id });
+          this.later(1800, () => { if (this.state.previewing === it.id) this.setState({ previewing: null }); });
+        },
+        add: () => this.addTrack(it.id),
+        dragStart: (e) => { this.dragItem = it.id; try { e.dataTransfer.setData('text/plain', it.id); e.dataTransfer.effectAllowed = 'copy'; } catch (err) { /* ignore */ } }
+      }))
+    };
+
+    // knobs and the module dock
+    const bub = (right) => {
+      const st = this.STEPS[L.step];
+      let status = L.paused ? 'Paused. Press Resume.' : 'Watch the knob…';
+      if (L.applied > L.step) status = 'Changed. Listen to the loop, then press Next.';
+      if (L.tryNote) status = L.tryNote;
+      if (L.tryMode) status = `Now: ${this.fmtv(st.key, s[this.TG[st.key]])}`;
+      return {
+        cls: right ? 'bubble r' : 'bubble',
+        stepLabel: `Step ${L.step + 1} of 3`,
+        title: L.tryMode ? 'Your turn' : st.title,
+        body: L.tryMode ? 'Click the knob to raise it a little at a time, then press Done. I will tell you what I hear.' : st.body,
+        why: st.why,
+        showWhy: L.why && !L.tryMode,
+        status,
+        tryMode: L.tryMode,
+        done: () => this.tryDone()
+      };
+    };
+    const K = (key, label, v, val, col, o) => {
+      const opt = o || {};
+      const vv = Math.max(0, Math.min(1, v));
+      const spot = !!L && key === spotKey;
+      const agent = (glowOn && s.glowKeys.includes(key)) || s.hi === key;
+      const k = {
+        key, label, val, col,
+        dash: (vv * 75).toFixed(1),
+        deg: (-135 + vv * 270).toFixed(1),
+        cls: 'knob' + (opt.auto ? ' auto' : '') + (agent ? ' agent' : ''),
+        wcls: spot ? 'kw spot' : 'kw',
+        spot,
+        click: () => this.knobClick(key)
+      };
+      if (spot) k.b = bub(opt.right);
+      return k;
+    };
+    const strip = (col, g, pan, dl, rv, duck) => ({
+      title: 'Strip', col: '#EEE9F8', cols: 3, hasSeg: false, seg: [],
+      knobs: [
+        K('gain', 'Gain', (g + 24) / 30, dB(g), col),
+        K('pan', 'Pan', (pan + 1) / 2, pan === 0 ? 'C' : (pan < 0 ? `L${Math.round(-pan * 100)}` : `R${Math.round(pan * 100)}`), col),
+        K('sdly', 'Delay', dl === null ? 0 : (dl + 60) / 60, dl === null ? 'off' : dB(dl), col, { right: true }),
+        K('srev', 'Reverb', rv === null ? 0 : (rv + 60) / 60, rv === null ? 'off' : dB(rv), col, { right: true }),
+        K('sduck', 'Duck', duck === null ? 0 : duck / 24, duck === null ? 'off' : `${duck} dB`, col, { right: true })
+      ]
+    });
+    const voice = (title, col, knobs) => ({ title, col, cols: knobs.length > 4 ? 5 : knobs.length, hasSeg: false, seg: [], knobs });
+    const modsFor = (kind, col) => {
+      if (kind === 'acid') {
+        return [
+          {
+            title: '303 · instrument', col, cols: 5, hasSeg: false, seg: [],
+            knobs: [
+              K('tuning', 'Tuning', 0.63, '450 Hz', col),
+              K('cut', 'Cutoff', s.cut, `${Math.round(s.cut * 100)} % lane`, col, { auto: true }),
+              K('reso', 'Resonance', s.reso / 100, `${Math.round(s.reso)} %`, col),
+              K('env', 'Env mod', 0.118, '12 %', col),
+              K('decay', 'Decay', 0.25, '758 ms', col),
+              K('accent', 'Accent', 0.87, '87 %', col),
+              K('slide', 'Slide', 0.3, '60 ms', col),
+              K('wave', 'Wave', 0.29, '29 % sq', col),
+              K('vol', 'Volume', 0.8, '0.0 dB', col)
+            ]
+          },
+          {
+            title: 'Distortion', col: '#EEE9F8', cols: 3, hasSeg: true,
+            seg: ['soft', 'hard', 'overdrive'].map((n) => ({ n, on: s.distMode === n, cls: s.distMode === n ? 'on' : '', pick: () => this.setState({ distMode: n }) })),
+            knobs: [K('drive', 'Drive', 0.6, '24 dB', col), K('mix', 'Mix', 0.79, '79 %', col), K('out', 'Output', 0.6, '−7.8 dB', col)]
+          },
+          {
+            title: 'Strip', col: '#EEE9F8', cols: 3, hasSeg: false, seg: [],
+            knobs: [
+              K('gain', 'Gain', (-2 + 24) / 30, '−2 dB', col),
+              K('pan', 'Pan', 0.5, 'C', col),
+              K('dly', 'Delay', (s.dly + 60) / 60, dB(s.dly), col, { right: true }),
+              K('rev', 'Reverb', (-22 + 60) / 60, '−22 dB', col, { right: true }),
+              K('duck', 'Duck', 4 / 24, '4 dB', col, { right: true })
+            ]
+          }
+        ];
+      }
+      if (kind === 'kick') return [voice('909 kick · voice', col, [K('ktune', 'Tune', 0.3, '49 Hz', col), K('kdecay', 'Decay', 0.45, '420 ms', col), K('punch', 'Punch', 0.6, '60 %', col), K('click', 'Click', 0.35, '35 %', col), K('kdrive', 'Drive', 0.5, '12 dB', col)]), strip(col, -5, 0, null, null, null)];
+      if (kind === 'clap') return [voice('909 clap · voice', col, [K('ctone', 'Tone', 0.5, '1.1 kHz', col), K('cdecay', 'Decay', 0.35, '180 ms', col), K('spread', 'Spread', 0.4, '12 ms', col)]), strip(col, -9, 0, null, -53, 12.6)];
+      if (kind === 'hatc') return [voice('Closed hat · voice', col, [K('htone', 'Tone', 0.7, '8.2 kHz', col), K('hdecay', 'Decay', 0.15, '45 ms', col), K('metal', 'Metal', 0.6, '60 %', col)]), strip(col, -12, -0.41, -38, 0, 7.2)];
+      if (kind === 'hato') return [voice('Open hat · voice', col, [K('htone', 'Tone', 0.65, '7.4 kHz', col), K('hdecay', 'Decay', 0.45, '260 ms', col), K('metal', 'Metal', 0.55, '55 %', col)]), strip(col, -7.7, 0.15, null, 0, 5.1)];
+      return [voice('Ride · voice', col, [K('rtone', 'Tone', 0.55, '5.6 kHz', col), K('rdecay', 'Decay', 0.7, '900 ms', col), K('metal', 'Metal', 0.7, '70 %', col)]), strip(col, 0, 0, null, null, null)];
+    };
+    const dt = s.dock ? TR.find((t) => t.id === s.dock) : null;
+    const dk = { open: !!dt };
+    if (dt) {
+      const col = `rgb(${dt.rgb})`;
+      Object.assign(dk, {
+        cls: 'dock glass ' + (s.floating ? 'floating' : 'docked'),
+        style: s.floating ? `left: ${Math.round(s.fx)}px; top: ${Math.round(s.fy)}px` : 'left: 12px',
+        name: dt.name,
+        col,
+        chain: dt.kind === 'acid' ? 'instrument → distortion → strip' : 'voice → strip',
+        hint: s.floating ? 'Drag the title bar to move' : 'Double-click a block for its steps',
+        mods: modsFor(dt.kind, col),
+        floatLabel: s.floating ? 'Dock' : 'Pop out',
+        toggleFloat: () => { if (!this.state.lesson) this.setState({ floating: !this.state.floating, browser: false }); },
+        close: () => { if (this.state.lesson) this.finish(false); this.setState({ dock: null, floating: false }); }
+      });
+    }
+    const drag = {
+      down: (e) => {
+        if (!this.state.floating || (e.target && e.target.closest && e.target.closest('button'))) return;
+        const app = e.currentTarget.closest('.app');
+        const sc = app ? app.getBoundingClientRect().width / 1440 : 1;
+        this.drag = { sx: e.clientX, sy: e.clientY, x: this.state.fx, y: this.state.fy, sc: sc || 1 };
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      },
+      move: (e) => {
+        const d = this.drag;
+        if (!d) return;
+        const fx = Math.max(0, Math.min(1440 - 900, d.x + (e.clientX - d.sx) / d.sc));
+        const fy = Math.max(70, Math.min(900 - 60, d.y + (e.clientY - d.sy) / d.sc));
+        this.setState({ fx, fy });
+      },
+      up: () => { this.drag = null; }
+    };
+
+    // chat
+    const fmtFT = (l) => {
+      if (l.key === 'cut') return `12→${Math.round(l.from * 100)} %  ⟶  12→${Math.round(l.to * 100)} %`;
+      if (l.key === 'arr') return l.val;
+      return `${this.fmtv(l.key, l.from)}  ⟶  ${this.fmtv(l.key, l.to)}`;
+    };
+    const msgs = s.msgs.map((m) => {
+      const v = { isMe: m.kind === 'me', isAgent: m.kind === 'agent', isThinking: m.kind === 'thinking', isCard: m.kind === 'card', isRecap: m.kind === 'recap', text: m.text || '', bullets: [], replay: () => this.startLesson(null) };
+      if (v.isCard) {
+        const c = s.cards[m.cardId];
+        const liveN = c.lines.filter((l) => !l.undone).length;
+        v.card = {
+          count: `${c.lines.length} change${c.lines.length > 1 ? 's' : ''}`,
+          where: c.where,
+          canUndoAll: liveN > 0,
+          undoAll: () => this.undoAll(m.cardId),
+          teachable: !!c.teach,
+          teach: () => this.startLesson(m.cardId),
+          lines: c.lines.map((l, i) => ({
+            what: l.what, val: fmtFT(l),
+            col: l.key === 'arr' ? '#EEE9F8' : '#A8F04C',
+            live: !l.undone, undone: !!l.undone,
+            canShow: l.key !== 'arr' && !l.undone,
+            show: () => this.show(l.key),
+            undo: () => this.undoLine(m.cardId, i)
+          }))
+        };
+      } else {
+        v.card = { lines: [] };
+      }
+      if (v.isRecap) v.bullets = (m.bullets || []).map((b) => ({ b }));
+      return v;
+    }).reverse();
+    const tabs = [['chat', 'Chat', ''], ['approvals', 'Approvals', s.pending ? '1' : ''], ['activity', 'Activity', '']].map(([id, n, badge]) => ({
+      n, badge, on: s.tab === id, cls: s.tab === id ? 'tab on' : 'tab', pick: () => this.setState({ tab: id })
+    }));
+    const ap = {
+      pending: s.pending, none: !s.pending, preview: s.preview,
+      previewCls: s.preview ? 'ib sm on' : 'ib sm',
+      previewLabel: s.preview ? 'Hide preview' : 'Preview on timeline',
+      togglePreview: () => this.setState({ preview: !this.state.preview }),
+      approve: () => {
+        const cid = 'c' + (this.nid++);
+        this.setState((p) => ({
+          approved: true, pending: false, preview: false, tab: 'chat',
+          cards: { ...p.cards, [cid]: { where: 'arrangement · approved', teach: false, lines: [{ key: 'arr', what: 'song · rearranged', val: '+ breakdown_2 (8 bars) · outro 16 → 8', undone: false }] } },
+          msgs: [...p.msgs, { id: this.nid++, kind: 'agent', text: 'Approved and applied. breakdown_2 now sits at bars 113–120 and the outro is 8 bars.' }, { id: this.nid++, kind: 'card', cardId: cid }],
+          log: [...p.log, 'song · rearranged (approved)']
+        }));
+      },
+      reject: () => this.setState((p) => ({ pending: false, preview: false, tab: 'chat', msgs: [...p.msgs, { id: this.nid++, kind: 'agent', text: 'Okay, the arrangement stays as it is.' }] }))
+    };
+    const activity = [...s.log].reverse().map((t) => ({ t }));
+
+    // listening
+    const LU = { intro: -11.8, intro_acid: -10.9, build: -9.2, breakdown: -10.4, drop: -7.4, drop_peak: -7.0, breakdown_2: -10.1, outro: -9.0, outro_drums: -11.5 };
+    const lis = {
+      open: s.listen,
+      compare: s.compare, noCompare: !s.compare,
+      cmpCls: s.compare ? 'ib sm on' : 'ib sm',
+      toggleCompare: () => this.setState({ compare: !this.state.compare }),
+      close: () => this.setState({ listen: false }),
+      secs: secMeta.map((m) => ({ n: m.name, v: (LU[m.name] < 0 ? '−' : '') + Math.abs(LU[m.name]).toFixed(1), h: `height: ${Math.round((LU[m.name] + 16) / 10 * 100)}%`, cls: m.name.startsWith('drop') ? 'ebar hot' : 'ebar' })),
+      bands: [['sub', -9.8], ['low', -6.1], ['low mid', -8.9], ['mid', -11.2], ['high', -15.4], ['air', -22.6]].map(([n, d]) => ({ n, v: `−${Math.abs(d).toFixed(1)}`, w: `width: ${Math.round((d + 30) / 30 * 100)}%` })),
+      verdicts: [
+        { col: '#FFB547', t: 'The drop is 0.9 LU quieter than the reference.' },
+        { col: '#FFB547', t: 'Low mids sit 2.1 dB under the reference in the drop: it can sound a little hollow.' },
+        { col: '#A8F04C', t: 'Stereo width is within 0.5 dB of the reference.' }
+      ]
+    };
+
+    // lesson bar
+    const ls = { on: !!L };
+    if (L) {
+      Object.assign(ls, {
+        stepText: `Step ${L.step + 1} of 3`,
+        back: () => this.lessonBack(),
+        pause: () => this.lessonPatch({ paused: !this.state.lesson.paused }),
+        pauseLabel: L.paused ? 'Resume' : 'Pause',
+        next: () => this.lessonNext(),
+        nextLabel: L.step >= 2 ? 'Finish' : 'Next',
+        s1: L.speed === 1 ? 'on' : '', s2: L.speed === 2 ? 'on' : '',
+        is1: L.speed === 1, is2: L.speed === 2,
+        speed1: () => this.lessonPatch({ speed: 1 }),
+        speed2: () => this.lessonPatch({ speed: 2 }),
+        why: () => this.lessonPatch({ why: !this.state.lesson.why }),
+        tryIt: () => this.tryIt(),
+        exit: () => this.finish(false)
+      });
+    }
+
+    const rootCls = `app look-${look} chat-open${s.dock && !s.floating ? ' dock-on' : ''}${s.browser ? ' browser-on' : ''}${L ? ' lesson-on' : ''}`;
+    return {
+      look, rootCls, tp, ov, sections, tracks, lane, dnd, br, dk, drag, lis, ls, tabs, ap, activity, msgs,
+      tlCls: s.over ? 'tl glass over' : 'tl glass',
+      tlInfo: `${secMeta.length} sections · ${TR.length} tracks`,
+      dropText: s.over ? 'Drop to make a new track' : 'Drag a sound here or ask the agent',
+      noActivity: activity.length === 0,
+      view: { chat: s.tab === 'chat', approvals: s.tab === 'approvals', activity: s.tab === 'activity' },
+      learn: s.learn,
+      toggleLearn: () => this.setState({ learn: !this.state.learn }),
+      draft: s.draft,
+      onDraft: (e) => this.setState({ draft: e.target.value }),
+      sendDraft: () => this.send(''),
+      askChip: () => this.send('open the filter in the build')
+    };
+  }
+}
+</script>
+</body>
+</html>

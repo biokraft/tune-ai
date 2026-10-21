@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Knobs and controls</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#07040D}
+a{color:#3FDCEB}a:hover{color:#9FF3FA}
+.app{--bg:#0A0612;--ink:#EEE9F8;--ink2:#B5ADCB;--ink3:#9790AE;--line:rgba(255,255,255,.085);--line2:rgba(255,255,255,.16);--glass:rgba(23,16,39,.56);--glass2:rgba(10,6,18,.45);--blur:22px;--r:16px;--rs:9px;--row:46px;--blobop:.55;--kick:#FF5470;--clap:#FFB547;--hat:#5E8CFF;--ohat:#A3C0FF;--ride:#B79CFF;--acid:#A8F04C;--agent:#3FDCEB;--play:#F7F2FF;position:relative;width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.35}
+.app *{box-sizing:border-box}
+.look-b{--glass:rgba(16,12,27,.86);--glass2:rgba(6,4,12,.6);--blur:8px;--r:10px;--rs:6px;--row:40px;--blobop:.2;--line:rgba(255,255,255,.07)}
+.look-c{--glass:rgba(44,30,78,.32);--glass2:rgba(20,12,36,.35);--blur:40px;--r:22px;--rs:13px;--row:48px;--blobop:.9;--line:rgba(255,255,255,.15)}
+.blob{position:absolute;border-radius:50%;filter:blur(110px);opacity:var(--blobop);pointer-events:none}
+.glass{background:var(--glass);backdrop-filter:blur(var(--blur)) saturate(150%);-webkit-backdrop-filter:blur(var(--blur)) saturate(150%);border:1px solid var(--line);border-radius:var(--r);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 60px rgba(0,0,0,.35)}
+.look-c .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),inset 0 0 0 1px rgba(255,255,255,.04),0 30px 80px rgba(0,0,0,.45)}
+.look-b .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+.muted{color:var(--ink2)}
+.ib{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;min-width:32px;padding:0 9px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);font:600 12px Manrope,system-ui,sans-serif;cursor:pointer;white-space:nowrap}
+.ib:hover{background:rgba(255,255,255,.09)}
+.ib:focus-visible{outline:2px solid var(--play);outline-offset:2px}
+.ib.on{background:rgba(255,255,255,.13);border-color:var(--line2)}
+.ib svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ib.sm{height:26px;min-width:26px;padding:0 6px;font-size:11px}
+.ib.sm svg{width:14px;height:14px}
+.kbd{font:600 10px 'JetBrains Mono',monospace;color:var(--ink3);border:1px solid var(--line2);border-radius:4px;padding:0 4px;line-height:15px}
+.sep{width:1px;height:28px;background:var(--line);flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.transport{position:absolute;left:12px;top:12px;right:12px;height:56px;display:flex;align-items:center;gap:12px;padding:0 12px}
+.play{width:40px;height:40px;border-radius:50%;border:none;background:var(--play);color:#120A1F;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 0 0 4px rgba(247,242,255,.12),0 0 24px rgba(220,200,255,.55);cursor:pointer}
+.play svg{width:18px;height:18px;fill:currentColor}
+.readout{display:flex;flex-direction:column;gap:1px}
+.big{font-size:20px;font-weight:600;line-height:22px}
+.lufs{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);cursor:pointer;font-family:Manrope,system-ui,sans-serif}
+.lufs:hover{background:rgba(255,255,255,.09)}
+.lmeter{position:relative;width:96px;height:6px;border-radius:3px;background:rgba(255,255,255,.1)}
+
+.tl{position:absolute;left:12px;top:80px;width:1064px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .tl{width:1348px}
+.tlbar{height:46px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line)}
+.grid{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
+.row{display:flex;height:var(--row);flex:none;border-bottom:1px solid rgba(255,255,255,.045);padding-right:10px}
+.hdr{width:168px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 0 0;border-right:1px solid var(--line)}
+.hdr .cbar{width:3px;align-self:stretch;margin:6px 4px 6px 0;border-radius:2px}
+.hdr .nm{flex:1;min-width:0;font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ms{width:22px;height:20px;border-radius:5px;border:1px solid var(--line);background:transparent;color:var(--ink2);font:700 10px Manrope,sans-serif;cursor:pointer;padding:0}
+.ms:hover{color:var(--ink);background:rgba(255,255,255,.08)}
+.hmeter{width:4px;height:26px;border-radius:2px;background:rgba(255,255,255,.08);position:relative;overflow:hidden}
+.hmeter i{position:absolute;left:0;right:0;bottom:0;border-radius:2px}
+.lanes{flex:1;display:flex;position:relative;min-width:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.035) 0 1px,transparent 1px 100%);background-size:calc(100% / 18) 100%}
+.cell{min-width:0;padding:5px 1px;display:flex}
+.blk{position:relative;flex:1;min-width:0;border:1px solid;border-radius:7px;padding:4px 6px 4px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;cursor:pointer}
+.look-b .blk{border-radius:4px}
+.look-c .blk{border-radius:11px}
+.blk .bn{font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:22px}
+.glyph{display:flex;align-items:flex-end;gap:1.5px;height:14px}
+.glyph i{flex:1;border-radius:1px;min-width:1px}
+.badge{position:absolute;right:4px;top:3px;font:600 9.5px 'JetBrains Mono',monospace;padding:0 4px;border-radius:4px;background:rgba(0,0,0,.35);color:var(--ink2);line-height:14px}
+.ruler{height:24px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.ruler .lanes{background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.22) 0 1px,transparent 1px 100%);background-size:calc(100% / 36) 5px;background-repeat:repeat-x;background-position:0 100%}
+.rc{min-width:0;font:500 10px 'JetBrains Mono',monospace;color:var(--ink3);padding:4px 0 0 4px;border-left:1px solid rgba(255,255,255,.18)}
+.secrow{height:32px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.sec{min-width:0;display:flex;align-items:center;gap:6px;padding:0 4px 0 7px;margin:4px 1px;border-radius:7px;font-size:11px;font-weight:700;color:var(--ink2);white-space:nowrap;overflow:hidden;background:rgba(255,255,255,.035);cursor:pointer}
+.sec.on{background:rgba(255,255,255,.14);color:var(--ink);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),0 0 18px rgba(220,200,255,.18)}
+.livedot{width:6px;height:6px;border-radius:50%;background:var(--play);box-shadow:0 0 8px var(--play);flex:none}
+.ov{position:absolute;left:168px;right:10px;top:0;bottom:0;pointer-events:none}
+.ph{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--play);box-shadow:0 0 8px rgba(247,242,255,.9),0 0 22px rgba(200,170,255,.55)}
+.ph::before{content:"";position:absolute;top:0;left:-5px;border:6px solid transparent;border-top:8px solid var(--play)}
+.loop{position:absolute;top:0;bottom:0;background:rgba(255,255,255,.035);border-left:1px solid rgba(255,255,255,.4);border-right:1px solid rgba(255,255,255,.4)}
+.loop::before{content:"";position:absolute;left:0;right:0;top:0;height:5px;background:rgba(255,255,255,.55);border-radius:0 0 2px 2px}
+.lane{height:72px}
+.lane .hdr{padding-left:15px;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px}
+.lane svg{position:absolute;inset:6px 0;width:100%;height:calc(100% - 12px);overflow:visible}
+.bp{position:absolute;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#0A0612;border:1.5px solid var(--acid)}
+.bp.ag{border-color:var(--agent);box-shadow:0 0 8px var(--agent)}
+.drop{flex:1;display:flex;padding:10px 10px 10px 178px}
+.dropzone{flex:1;border:1.5px dashed rgba(255,255,255,.12);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--ink3);font-size:12.5px}
+.help{height:36px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-top:1px solid var(--line);font-size:12px;color:var(--ink2)}
+.help b{color:var(--ink);font-weight:700}
+.agent-soft{box-shadow:inset 3px 0 0 var(--agent)}
+
+.chat{position:absolute;left:1088px;top:80px;width:340px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .chat{display:none}
+.rail{display:none;position:absolute;left:1372px;top:80px;width:56px;height:808px;flex-direction:column;align-items:center;gap:6px;padding:10px 0}
+.chat-rail .rail{display:flex}
+.rail .ib{width:40px;height:40px;padding:0;position:relative}
+.pip{position:absolute;top:4px;right:4px;min-width:15px;height:15px;border-radius:8px;background:var(--agent);color:#04161A;font:700 9.5px Manrope,sans-serif;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.chead{height:50px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px 0 14px;border-bottom:1px solid var(--line)}
+.tab{height:28px;padding:0 9px;border-radius:7px;border:none;background:transparent;color:var(--ink2);font:700 12px Manrope,sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.tab.on{background:rgba(255,255,255,.1);color:var(--ink)}
+.tab .n{min-width:16px;height:16px;border-radius:8px;background:var(--agent);color:#04161A;font-size:9.5px;display:inline-flex;align-items:center;justify-content:center}
+.msgs{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:12px;padding:14px}
+.me{align-self:flex-end;max-width:86%;background:rgba(255,255,255,.09);border:1px solid var(--line);border-radius:14px 14px 4px 14px;padding:8px 11px}
+.who{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--agent);margin-bottom:4px}
+.card{border-radius:12px;background:var(--glass2);border:1px solid rgba(63,220,235,.3);overflow:hidden}
+.card-h{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:11.5px;font-weight:700}
+.cl{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 10px;font-size:12px;cursor:pointer}
+.cl:hover{background:rgba(255,255,255,.05)}
+.cl .t{flex:1;min-width:0}
+.cl .v{font-size:10.5px;color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.card-f{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--line)}
+.agentbtn{border-color:rgba(63,220,235,.45);color:#BDF6FB}
+.xb{width:26px;height:26px;border-radius:6px;border:none;background:transparent;color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.xb:hover{background:rgba(255,255,255,.08);color:var(--ink)}
+.xb svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cfoot{flex:none;padding:10px 12px 12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:9px}
+.sw{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;cursor:pointer}
+.sw input{position:absolute;opacity:0;width:1px;height:1px}
+.sw .trk{width:30px;height:17px;border-radius:9px;background:rgba(255,255,255,.14);position:relative;flex:none}
+.sw .trk::after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:var(--ink2)}
+.sw input:checked + .trk{background:var(--agent)}
+.sw input:checked + .trk::after{left:15px;background:#04161A}
+.sw input:focus-visible + .trk{outline:2px solid var(--play);outline-offset:2px}
+.composer{display:flex;align-items:flex-end;gap:8px;border-radius:12px;border:1px solid var(--line2);background:rgba(0,0,0,.25);padding:8px 8px 8px 12px}
+.composer textarea{flex:1;resize:none;border:none;background:transparent;color:var(--ink);font:500 13px Manrope,sans-serif;height:38px;outline:none}
+.composer textarea::placeholder{color:var(--ink3)}
+.send{width:32px;height:32px;border-radius:9px;border:none;background:var(--agent);color:#04161A;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.send svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+.knob{display:flex;flex-direction:column;align-items:center;gap:3px;width:62px;border:none;background:transparent;color:var(--ink);padding:0;cursor:ns-resize;font-family:Manrope,sans-serif}.knob .dial{position:relative;width:46px;height:46px;border-radius:50%}.knob svg{position:absolute;inset:0;width:46px;height:46px;transform:rotate(135deg);overflow:visible}.knob .trk{fill:none;stroke:rgba(255,255,255,.1);stroke-width:4;stroke-linecap:round;stroke-dasharray:75 100}.knob .arc{fill:none;stroke-width:4;stroke-linecap:round}.knob .cap{position:absolute;inset:9px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#3B2F57,#140E1F 72%);box-shadow:0 2px 6px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.14)}.knob .ptr{position:absolute;left:50%;top:2px;width:2px;height:8px;margin-left:-1px;border-radius:1px;background:var(--ink)}.knob .kv{font:500 11px 'JetBrains Mono',monospace;color:var(--ink)}.knob .kl{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);font-weight:700}.look-b .knob .cap{background:transparent;box-shadow:none;border:1px solid var(--line)}.look-c .knob .arc{filter:drop-shadow(0 0 4px currentColor)}.knob.agent .dial{box-shadow:0 0 0 2px #3FDCEB,0 0 16px rgba(63,220,235,.6)}.knob.auto .dial::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1px dashed rgba(255,255,255,.35)}.knob:disabled{opacity:.38;cursor:not-allowed}
+
+.pane{position:absolute;display:flex;flex-direction:column;overflow:hidden}
+.ptitle{height:46px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);font-weight:800;font-size:13px}
+.kmat{display:flex;flex-direction:column;padding:6px 16px 10px}
+.khead{display:flex;height:30px;align-items:center}
+.khead span{flex:1;text-align:center}
+.krow{display:flex;align-items:center;height:128px;border-top:1px solid rgba(255,255,255,.05);background:transparent}
+.krow .rl{width:120px;flex:none;display:flex;flex-direction:column;gap:2px}
+.krow .rl b{font-size:12.5px}
+.kc{flex:1;position:relative;height:100%;display:flex;align-items:center;justify-content:center}
+.knob.hov .trk{stroke:rgba(255,255,255,.24)}
+.knob.hov .dial{box-shadow:0 0 0 1px rgba(255,255,255,.28)}
+.knob.drag .dial{box-shadow:0 0 0 1px rgba(255,255,255,.45),0 0 18px rgba(168,240,76,.4)}
+.knob.drag .arc{filter:drop-shadow(0 0 6px #A8F04C)}
+.tipb{position:absolute;bottom:calc(50% + 40px);left:50%;transform:translateX(-50%);width:196px;padding:8px 10px;border-radius:10px;background:rgba(14,9,24,.95);border:1px solid var(--line2);font-size:11px;color:var(--ink2);z-index:2;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.tipb b{display:block;color:var(--ink);font-size:11.5px;margin-bottom:2px}
+.vbub{position:absolute;top:8px;left:50%;transform:translateX(-50%);padding:2px 8px;border-radius:6px;background:#A8F04C;color:#0B1403;font:600 11px 'JetBrains Mono',monospace;white-space:nowrap}
+.hint{position:absolute;bottom:4px;left:50%;transform:translateX(-50%);font-size:10.5px;color:var(--ink2);white-space:nowrap}
+.tag{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:9px;font:700 9.5px Manrope,sans-serif;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.tag.lane{background:rgba(168,240,76,.14);color:#D9FBB0;border:1px solid rgba(168,240,76,.4)}
+.tag.ag{background:rgba(63,220,235,.14);color:#BDF6FB;border:1px solid rgba(63,220,235,.5)}
+.undo{position:absolute;bottom:2px;left:50%;transform:translateX(-50%)}
+.fader{position:relative;width:8px;border-radius:4px;background:rgba(255,255,255,.08)}
+.fader .fill{position:absolute;left:0;right:0;bottom:0;border-radius:4px}
+.fader .thumb{position:absolute;left:50%;width:30px;height:14px;margin:-7px 0 0 -15px;border-radius:5px;background:linear-gradient(180deg,#EDE6FA,#B8AECB);box-shadow:0 3px 8px rgba(0,0,0,.5);border:none;padding:0;cursor:ns-resize}
+.fader .thumb::after{content:"";position:absolute;left:5px;right:5px;top:6px;height:2px;background:#2A2140}
+.scale{display:flex;flex-direction:column;justify-content:space-between;font:500 9.5px 'JetBrains Mono',monospace;color:var(--ink3);text-align:right}
+.hfader{position:relative;height:8px;border-radius:4px;background:rgba(255,255,255,.08)}
+.hfader .thumb{position:absolute;top:50%;width:14px;height:24px;margin:-12px 0 0 -7px;border-radius:5px;background:linear-gradient(90deg,#EDE6FA,#B8AECB);box-shadow:0 3px 8px rgba(0,0,0,.5);border:none;padding:0;cursor:ew-resize}
+.mbar{position:relative;width:10px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden}
+.mbar i{position:absolute;left:0;right:0;bottom:0}
+.peak{position:absolute;left:-2px;right:-2px;height:2px;background:#F7F2FF}
+.stb{width:56px;height:56px;border-radius:10px;border:1px solid;position:relative;padding:0;cursor:pointer}
+.look-b .stb{border-radius:5px}
+.look-c .stb{border-radius:14px}
+.stb .acc{position:absolute;left:25%;right:25%;top:6px;height:3px;border-radius:2px;background:rgba(255,255,255,.9)}
+.scol{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:11px;color:var(--ink2)}
+.seg{display:inline-flex;padding:3px;border-radius:10px;background:rgba(0,0,0,.3);border:1px solid var(--line)}
+.seg button{height:28px;padding:0 12px;border:none;border-radius:7px;background:transparent;color:var(--ink2);font:700 12px Manrope,sans-serif;cursor:pointer}
+.seg button.on{background:rgba(168,240,76,.2);color:#E3FCC4;box-shadow:inset 0 0 0 1px rgba(168,240,76,.6)}
+.msb{width:30px;height:26px;border-radius:6px;border:1px solid var(--line2);background:transparent;color:var(--ink2);font:800 11px Manrope,sans-serif;padding:0;cursor:pointer}
+.msb.mute{background:rgba(255,255,255,.85);color:#120A1F;border-color:transparent}
+.msb.solo{background:#F7F2FF;color:#120A1F;border-color:transparent;box-shadow:0 0 12px rgba(247,242,255,.6)}
+.sub{display:flex;flex-direction:column;gap:10px;padding:14px 16px}
+.menu{width:220px;padding:5px;border-radius:12px;background:rgba(14,9,24,.96);border:1px solid var(--line2);box-shadow:0 18px 40px rgba(0,0,0,.55)}
+.menu button{display:flex;width:100%;align-items:center;gap:8px;height:30px;padding:0 9px;border:none;border-radius:7px;background:transparent;color:var(--ink);font:600 12px Manrope,sans-serif;cursor:pointer;text-align:left}
+.menu button:hover,.menu button.hl{background:rgba(255,255,255,.08)}
+.menu svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.menu .k{margin-left:auto}
+</style>
+</helmet>
+<div class="app look-{{look}}">
+  <div class="blob" style="left: -160px; top: 420px; width: 620px; height: 520px; background: #B4237E"></div>
+  <div class="blob" style="left: 520px; top: -220px; width: 720px; height: 460px; background: #3A2BC2"></div>
+  <div class="blob" style="left: 1080px; top: 560px; width: 560px; height: 460px; background: #5B1E9E"></div>
+
+  <section class="pane glass" style="left: 12px; top: 12px; width: 1000px; height: 470px" aria-label="Knob states">
+    <div class="ptitle">Knob <span class="muted" style="font-weight: 600">· three styles × six states</span></div>
+    <div class="kmat">
+      <div class="khead">
+        <span style="flex: none; width: 120px"></span>
+        <sc-for list="{{states}}" as="h" hint-placeholder-count="6"><span class="lbl">{{h}}</span></sc-for>
+      </div>
+      <sc-for list="{{krows}}" as="r" hint-placeholder-count="3">
+        <div class="{{r.cls}}">
+          <div class="rl"><b>{{r.name}}</b><span class="muted" style="font-size: 11px">{{r.sub}}</span></div>
+          <sc-for list="{{r.cells}}" as="k" hint-placeholder-count="6">
+            <div class="kc">
+              <sc-if value="{{k.tip}}" hint-placeholder-val="{{false}}">
+                <div class="tipb"><b>Resonance · 85 %</b>How much the filter rings at the cutoff. High = squelchy, whistling.</div>
+              </sc-if>
+              <sc-if value="{{k.bub}}" hint-placeholder-val="{{false}}"><span class="vbub">24.0 %</span></sc-if>
+              <sc-if value="{{k.lane}}" hint-placeholder-val="{{false}}"><span class="tag lane">lane</span></sc-if>
+              <sc-if value="{{k.ag}}" hint-placeholder-val="{{false}}"><span class="tag ag">agent · 87 → 94</span></sc-if>
+              <button class="{{k.cls}}" disabled="{{k.dis}}" aria-label="{{k.label}} {{k.val}}"><span class="dial"><svg viewBox="0 0 46 46" aria-hidden="true"><circle class="trk" cx="23" cy="23" r="18" pathLength="100"></circle><circle class="arc" cx="23" cy="23" r="18" pathLength="100" style="stroke: {{k.col}}; stroke-dasharray: {{k.dash}} 100"></circle></svg><span class="cap" style="transform: rotate({{k.deg}}deg)"><span class="ptr"></span></span></span><span class="kv">{{k.val}}</span><span class="kl">{{k.label}}</span></button>
+              <sc-if value="{{k.bub}}" hint-placeholder-val="{{false}}"><span class="hint"><span class="kbd">⇧</span> for fine</span></sc-if>
+              <sc-if value="{{k.ag}}" hint-placeholder-val="{{false}}"><button class="xb undo" aria-label="Undo agent change to accent"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg></button></sc-if>
+              <sc-if value="{{k.dis}}" hint-placeholder-val="{{false}}"><span class="hint">locked while slide is off</span></sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="pane glass" style="left: 1024px; top: 12px; width: 404px; height: 470px" aria-label="Faders and meters">
+    <div class="ptitle">Faders and meters</div>
+    <div style="flex: 1; display: flex; gap: 22px; padding: 18px 18px 14px">
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+        <span class="lbl">Gain</span>
+        <div style="display: flex; gap: 8px; height: 230px">
+          <div class="scale"><span>+6</span><span>0</span><span>−6</span><span>−12</span><span>−24</span><span>−60</span></div>
+          <div class="fader" style="height: 230px">
+            <div class="fill" style="height: 76%; background: linear-gradient(0deg, rgba(168,240,76,.25), rgba(168,240,76,.8))"></div>
+            <button class="thumb" style="top: 24%" aria-label="Acid gain −2.0 dB"></button>
+          </div>
+        </div>
+        <span class="mono" style="font-size: 12px">−2.0 dB</span>
+        <span class="muted" style="font-size: 10.5px">vertical fader</span>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+        <span class="lbl">Level</span>
+        <div style="display: flex; gap: 4px; height: 230px; align-items: stretch">
+          <div class="mbar" style="height: 230px"><i style="height: 71%; background: linear-gradient(0deg, rgba(168,240,76,.35), #A8F04C)"></i><span class="peak" style="bottom: 79%"></span></div>
+          <div class="mbar" style="height: 230px"><i style="height: 68%; background: linear-gradient(0deg, rgba(168,240,76,.35), #A8F04C)"></i><span class="peak" style="bottom: 77%"></span></div>
+        </div>
+        <span class="mono" style="font-size: 12px">−6.2 pk</span>
+        <span class="muted" style="font-size: 10.5px">peak hold</span>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+        <span class="lbl">Master</span>
+        <div style="display: flex; gap: 8px; height: 230px">
+          <div class="scale"><span>0</span><span>−4</span><span>−8</span><span>−12</span><span>−16</span><span>−20</span></div>
+          <div style="position: relative; width: 22px; height: 230px; border-radius: 4px; background: rgba(255,255,255,.07); overflow: hidden">
+            <div style="position: absolute; left: 0; right: 0; bottom: 60%; height: 10%; background: rgba(168,240,76,.22); border-top: 1px solid rgba(168,240,76,.7); border-bottom: 1px solid rgba(168,240,76,.7)"></div>
+            <div style="position: absolute; left: 4px; right: 4px; bottom: 0; height: 62%; border-radius: 2px; background: linear-gradient(0deg, rgba(247,242,255,.2), rgba(247,242,255,.85))"></div>
+            <div style="position: absolute; left: 0; right: 0; bottom: 63%; height: 2px; background: #A8F04C"></div>
+          </div>
+        </div>
+        <span class="mono" style="font-size: 12px">−7.6 LUFS</span>
+        <span class="muted" style="font-size: 10.5px">target −8 to −6</span>
+      </div>
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 14px; justify-content: center">
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <span class="lbl">True peak</span>
+          <span class="mono" style="font-size: 16px; font-weight: 600">−1.6 <span style="font-size: 11px; color: var(--ink2)">dBTP</span></span>
+          <span style="font-size: 11px; color: #D9FBB0">under −1, ok</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <span class="lbl">Limiter</span>
+          <div style="position: relative; height: 6px; border-radius: 3px; background: rgba(255,255,255,.08)"><div style="position: absolute; right: 0; top: 0; bottom: 0; width: 22%; border-radius: 3px; background: #FFB547"></div></div>
+          <span class="mono" style="font-size: 11px; color: var(--ink2)">−1.8 dB reduction</span>
+        </div>
+      </div>
+    </div>
+    <div style="padding: 0 18px 18px; display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; justify-content: space-between"><span class="lbl">Pan · closed hat</span><span class="mono" style="font-size: 11.5px">L 41</span></div>
+      <div class="hfader">
+        <div style="position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: rgba(255,255,255,.35)"></div>
+        <div style="position: absolute; top: 0; bottom: 0; left: 29.3%; width: 20.7%; border-radius: 4px; background: rgba(94,140,255,.7)"></div>
+        <button class="thumb" style="left: 29.3%" aria-label="Pan left 41"></button>
+      </div>
+      <span class="muted" style="font-size: 10.5px">horizontal fader, centre detent</span>
+    </div>
+  </section>
+
+  <section class="pane glass" style="left: 12px; top: 494px; width: 700px; height: 394px" aria-label="Steps, toggles and buttons">
+    <div class="ptitle">Steps, toggles, buttons</div>
+    <div class="sub">
+      <span class="lbl">Step button</span>
+      <div style="display: flex; gap: 18px">
+        <div class="scol"><button class="stb" style="background: rgba(255,255,255,.035); border-color: rgba(255,255,255,.12)" aria-label="Step off"></button>off</div>
+        <div class="scol"><button class="stb" style="background: rgba(94,140,255,.38); border-color: rgba(94,140,255,.7)" aria-label="Step hit"></button>hit</div>
+        <div class="scol"><button class="stb" style="background: #5E8CFF; border-color: transparent; box-shadow: 0 0 14px rgba(94,140,255,.45)" aria-label="Step accented"><span class="acc"></span></button>accent</div>
+        <div class="scol"><button class="stb" style="background: rgba(168,240,76,.2); border-color: rgba(168,240,76,.7)" aria-label="Step with slide"><svg viewBox="0 0 28 14" aria-hidden="true" style="width: 28px; height: 14px; fill: none; stroke: #A8F04C; stroke-width: 2; stroke-linecap: round"><path d="M2 12h8l8-10h8"></path></svg></button>slide</div>
+        <div class="scol"><button class="stb" style="background: rgba(94,140,255,.38); border-color: rgba(94,140,255,.7); outline: 2px solid rgba(247,242,255,.9); outline-offset: 1px; box-shadow: 0 0 20px rgba(94,140,255,.8)" aria-label="Step playing"></button>playing</div>
+        <div class="scol"><button class="stb" style="background: #5E8CFF; border-color: transparent; box-shadow: 0 0 0 2px #3FDCEB, 0 0 16px rgba(63,220,235,.6)" aria-label="Step changed by the agent"><span class="acc"></span></button>agent</div>
+      </div>
+      <div style="display: flex; gap: 40px; margin-top: 14px">
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <span class="lbl">Toggle</span>
+          <label class="sw"><input type="checkbox" role="switch"><span class="trk"></span>Off</label>
+          <label class="sw"><input type="checkbox" role="switch" checked><span class="trk"></span>On</label>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <span class="lbl">Segmented · distortion mode</span>
+          <div class="seg" role="group" aria-label="Distortion mode">
+            <button class="on" aria-pressed="true">soft</button>
+            <button aria-pressed="false">hard</button>
+            <button aria-pressed="false">overdrive</button>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <span class="lbl">Mute / solo</span>
+          <div style="display: flex; gap: 6px; align-items: center">
+            <button class="msb" aria-label="Mute off">M</button>
+            <button class="msb mute" aria-label="Mute on" aria-pressed="true">M</button>
+            <button class="msb" aria-label="Solo off">S</button>
+            <button class="msb solo" aria-label="Solo on" aria-pressed="true">S</button>
+          </div>
+          <span class="muted" style="font-size: 10.5px">off · on · off · on</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane glass" style="left: 724px; top: 494px; width: 704px; height: 394px" aria-label="Help and tooltips">
+    <div class="ptitle">Help, tooltip, ask about this</div>
+    <div style="flex: 1; position: relative; display: flex; gap: 26px; padding: 18px 18px 0">
+      <div style="position: relative; width: 250px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 16px">
+        <div style="position: absolute; top: 0; left: 0; right: 0; padding: 10px 12px; border-radius: 12px; background: rgba(14,9,24,.95); border: 1px solid var(--line2); box-shadow: 0 14px 34px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 6px">
+          <div style="display: flex; justify-content: space-between; align-items: baseline"><b style="font-size: 12.5px">Distortion · drive</b><span class="mono" style="font-size: 12px">24 dB</span></div>
+          <span class="muted" style="font-size: 11.5px">How hard the 303 hits the distortion. More drive = grittier and louder; pull output down to match.</span>
+          <span class="muted" style="font-size: 10.5px; display: flex; gap: 8px; flex-wrap: wrap"><span><span class="kbd">↕</span> drag</span><span><span class="kbd">⇧</span> fine</span><span><span class="kbd">⌥</span> click reset</span></span>
+        </div>
+        <button class="knob hov" aria-label="Drive 24 dB"><span class="dial"><svg viewBox="0 0 46 46" aria-hidden="true"><circle class="trk" cx="23" cy="23" r="18" pathLength="100"></circle><circle class="arc" cx="23" cy="23" r="18" pathLength="100" style="stroke: #A8F04C; stroke-dasharray: 50 100"></circle></svg><span class="cap" style="transform: rotate(45deg)"><span class="ptr"></span></span></span><span class="kv">24 dB</span><span class="kl">Drive</span></button>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <span class="lbl">Right-click a knob or block</span>
+        <div class="menu" role="menu" aria-label="Knob menu">
+          <button class="hl" role="menuitem"><svg viewBox="0 0 24 24" style="stroke: #3FDCEB"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>Ask about this<span class="kbd k">⌘ ?</span></button>
+          <button role="menuitem"><svg viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"></path><path d="M6 11v5c3 2 9 2 12 0v-5"></path></svg>Teach me this control</button>
+          <button role="menuitem"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 5-7 4 4"></path></svg>Add automation lane</button>
+          <button role="menuitem"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg>Reset to default</button>
+          <button role="menuitem"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V5H5v11h3"></path></svg>Copy value</button>
+        </div>
+      </div>
+    </div>
+    <div class="help" style="margin-top: auto">
+      <span class="kbd">?</span>
+      <span><b>acid · drive</b> — focus or hover any control and its help line shows here.</span>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["a","b","c"],"default":"a"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const look = this.props.look ?? 'a';
+    const states = ['Idle', 'Hover', 'Dragging', 'Automated', 'Agent-edited', 'Disabled'];
+    const base = [
+      { label: 'Cutoff', val: '350 Hz', v: 0.18, cls: 'knob' },
+      { label: 'Resonance', val: '85 %', v: 0.85, cls: 'knob hov' },
+      { label: 'Env mod', val: '24.0 %', v: 0.24, cls: 'knob drag', bub: true },
+      { label: 'Cutoff', val: '62 %', v: 0.62, cls: 'knob auto', lane: true },
+      { label: 'Accent', val: '94 %', v: 0.94, cls: 'knob agent', ag: true },
+      { label: 'Slide time', val: '60 ms', v: 0.3, cls: 'knob', dis: true }
+    ];
+    const ROWS = [
+      { cls: 'krow look-a', name: 'A · dimensional', sub: 'cap with light, arc ring' },
+      { cls: 'krow look-b', name: 'B · flat', sub: 'outline cap, arc only' },
+      { cls: 'krow look-c', name: 'C · ring', sub: 'glowing arc, glass cap' }
+    ];
+    const krows = ROWS.map((r, ri) => ({
+      ...r,
+      cells: base.map((k) => ({
+        label: k.label,
+        val: k.val,
+        cls: k.cls,
+        col: '#A8F04C',
+        dash: (k.v * 75).toFixed(1),
+        deg: (-135 + k.v * 270).toFixed(1),
+        tip: k.cls === 'knob hov' && ri === 0,
+        bub: !!k.bub,
+        lane: !!k.lane,
+        ag: !!k.ag,
+        dis: !!k.dis
+      }))
+    }));
+    return { look, states, krows };
+  }
+}
+</script>
+</body>
+</html>
