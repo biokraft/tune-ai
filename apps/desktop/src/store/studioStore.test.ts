@@ -87,7 +87,7 @@ describe("createStudioStore", () => {
     const client = new FakeClient();
     const store = createStudioStore(client);
     client.emit(stateEvent());
-    client.emit(goldenExternal);
+    client.emit(external({ merged: [] }));
     expect(store.get().noticeUndoable).toBe(true);
     client.emit({
       event: "applied",
@@ -97,8 +97,19 @@ describe("createStudioStore", () => {
     // Undo now reverts the producer's edit, not the notice's change.
     expect(store.get().notice).not.toBeNull();
     expect(store.get().noticeUndoable).toBe(false);
-    client.emit(goldenExternal);
+    client.emit(external({ merged: [] }));
     expect(store.get().noticeUndoable).toBe(true);
+  });
+
+  it("a change that merged pending edits is not undoable from the notice", () => {
+    const client = new FakeClient();
+    const store = createStudioStore(client);
+    client.emit(stateEvent());
+    // The merged edits were written on top as their own undo step.
+    client.emit(goldenExternal);
+    expect(goldenExternal.merged.length).toBeGreaterThan(0);
+    expect(store.get().notice).not.toBeNull();
+    expect(store.get().noticeUndoable).toBe(false);
   });
 
   it("an unreadable file sets no notice", () => {

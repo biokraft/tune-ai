@@ -18,8 +18,9 @@ export type StudioView = {
   /** The last change on disk, until dismissed. */
   notice: ExternalChange | null;
   /**
-   * Whether one undo still reverts the notice's change: true until a local edit, undo, redo or
-   * re-apply (an `applied` event from a human) lands on top of it.
+   * Whether one undo still reverts the notice's change: not when it merged pending edits, and no
+   * longer once a local edit, undo, redo or re-apply (an `applied` event from a human) lands on
+   * top of it.
    */
   noticeUndoable: boolean;
   selectedSection: number | null;
@@ -128,7 +129,9 @@ export function createStudioStore(client: StudioClient): StudioStore {
           kind,
         );
         const worth = change.changes.length > 0 || change.offered.length > 0 || change.replaced;
-        if (worth) set({ notice: change, noticeUndoable: true });
+        // Merged pending edits were written on top as their own undo step, so one undo would
+        // revert those, not this change.
+        if (worth) set({ notice: change, noticeUndoable: change.merged.length === 0 });
         break;
       }
       case "error":
