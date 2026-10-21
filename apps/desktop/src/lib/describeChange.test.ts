@@ -9,7 +9,8 @@ const change = (path: string, old: unknown, next: unknown) =>
 describe("describeChange on the mixer", () => {
   it("names a send knob with its unit", () => {
     expect(change("tracks.kick.send.delay", -60, -18)).toBe("kick Delay -60 → -18 dB");
-    expect(change("tracks.acid.duck.depth", 0, 6)).toBe("Duck 0 → 6 dB");
+    expect(change("tracks.acid.send.delay", -60, -18)).toBe("acid Delay -60 → -18 dB");
+    expect(change("tracks.acid.duck.depth", 0, 6)).toBe("acid Duck 0 → 6 dB");
   });
   it("names a delay param of the mix", () => {
     expect(change("mix.delay.feedback", 35, 45)).toBe("Delay feedback 35 → 45%");
@@ -23,5 +24,9 @@ describe("describeChange on the mixer", () => {
   });
   it("falls back to the path for an unknown mix path", () => {
     expect(change("mix.nonsense", 1, 2)).toBe("mix nonsense 1 → 2");
+  });
+  it("says the mix table was created or removed", () => {
+    expect(change("mix", null, {})).toBe("Mix settings added");
+    expect(change("mix", {}, null)).toBe("Mix settings removed");
   });
 });
