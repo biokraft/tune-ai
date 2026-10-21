@@ -91,7 +91,8 @@ The producer may have the studio (app or browser) open on the same song.
   `agent-browser` skill: start the agent Chrome, pick a session
   (`session id --prefix <task>`), `open http://127.0.0.1:4580/`, `snapshot`,
   interact, and `screenshot scratch/<name>.png`. Read the PNG to see the UI.
-  Ctrl-C stops the server (it prints `stopped`). Never commit screenshots.
+  Ctrl-C or `kill` stops the server and writes pending edits (it prints
+  `stopped`). Never commit screenshots.
 - `edits.jsonl` sits next to the song: local and gitignored, never committed.
 
 ## Rules

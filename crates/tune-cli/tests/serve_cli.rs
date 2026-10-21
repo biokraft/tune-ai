@@ -172,6 +172,41 @@ async fn ws_command_round_trip() {
     }
 }
 
+/// `kill` (SIGTERM) stops the server like Ctrl-C: pending edits are written
+/// before it exits, inside the 150 ms debounce.
+#[tokio::test]
+async fn sigterm_writes_pending_edits() {
+    use std::os::unix::process::ExitStatusExt;
+    let mut s = Server::spawn();
+    let mut ws = s.connect().await;
+    ws.next_json().await;
+    ws.send(json!({"id": 1, "cmd": "set_param", "args": {
+        "track": "acid", "param": "acid303.cutoff", "value": 823.456, "commit": true}}))
+        .await;
+    let reply = ws.until(|v| v.get("reply").is_some()).await;
+    assert_eq!(reply["ok"], true, "reply: {reply}");
+
+    let killed = Command::new("kill")
+        .args(["-TERM", &s.child.id().to_string()])
+        .status()
+        .expect("run kill");
+    assert!(killed.success());
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = s.child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(start.elapsed() < Duration::from_secs(5), "still running");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert_eq!(status.signal(), None, "ended by the signal: {status:?}");
+    let text = std::fs::read_to_string(&s.song).unwrap();
+    assert!(
+        text.contains("\"acid303.cutoff\" = 823.5"),
+        "not written:\n{text}"
+    );
+}
+
 #[tokio::test]
 async fn ws_errors() {
     let s = Server::spawn();
