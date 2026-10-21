@@ -45,7 +45,7 @@
 - **Ducking** is trigger-based: every hit of the duck source in the arrangement (mute and solo ignored) restarts each ducking track's envelope: 2 ms linear attack, then a raised-cosine recovery over `duck.release`. Source = `[mix] duck_source`, else the first `kick` track.
 - **Buses run only when a track sends to them** (an explicit `send.*` param, or a lane on it). Bus params without sends are kept but inactive.
 - **Delay:** stereo, `delay.width` blends mono (0) to ping-pong (100); time in 16ths (1–8, default 3 = dotted eighth); high-pass and low-pass inside the feedback loop. **Reverb:** the Freeverb network (a public-domain design), with pre-delay and an input low cut.
-- **Limiter:** 1.5 ms lookahead, 4× windowed-sinc true-peak detector, min-hold + boxcar attack, exponential release, default ceiling −1.5 dBTP (margin for detector differences against BS.1770). Its latency (78 frames at 48 kHz) is not compensated: limit-mode renders start 1.6 ms late.
+- **Limiter:** 1.5 ms lookahead, 4× windowed-sinc true-peak detector, min-hold + boxcar attack, exponential release, default ceiling −1.5 dBTP (margin for detector differences against BS.1770). Its latency (84 frames at 48 kHz) is not compensated: limit-mode renders start 1.75 ms late.
 - **Ride** = `HatKind::Ride` on the hat's metal-bank voice (new constants and param table, `ride.*`).
 - **Stems** carry each dry track (eq and ducking included, no bus returns).
 - **UI:** no new commands. Send/duck knobs on every strip and an FX/master panel; master mode, duck source and per-track EQ are shown read-only or left to TOML/`tune set`.
@@ -246,11 +246,11 @@ Test helpers each new `tune-dsp` test file uses (add only `sine`, `rms_db`, `gai
   pub const MASTER_PARAMS: &[ParamSpec];
   pub const MASTER_GAIN: usize = 0; pub const MASTER_CEILING: usize = 1; pub const MASTER_RELEASE: usize = 2;
   pub const LIMITER_LOOKAHEAD_MS: f64 = 1.5;
-  pub const DETECTOR_DELAY: usize = 6;
+  pub const DETECTOR_DELAY: usize = 12;
   #[derive(Clone, Debug)] pub struct Limiter;
   impl Limiter {
       pub fn new(sample_rate: f64) -> Self;     // ceiling −1.5 dB, release 100 ms; allocates its rings
-      pub fn latency(&self) -> usize;           // W + DETECTOR_DELAY, W = max(1, round(1.5 ms · sr)); 78 at 48 kHz
+      pub fn latency(&self) -> usize;           // W + DETECTOR_DELAY, W = max(1, round(1.5 ms · sr)); 84 at 48 kHz
       pub fn set_ceiling_db(&mut self, db: f64);
       pub fn set_release_ms(&mut self, ms: f64);
       /// One stereo frame in; the frame from latency() frames ago out, with the gain applied to it.
@@ -265,7 +265,7 @@ Test helpers each new `tune-dsp` test file uses (add only `sine`, `rms_db`, `gai
   3. `held` = minimum of `g_t` over the last `W + 1` estimates; `avg` = the mean of the last `W` `held` values, summed directly every frame (no running sum: it drifts and would break the exact 1.0).
   4. Release: `g = avg` if `avg < g_prev`, else `g = g_prev + α·(avg − g_prev)` with `α = 1 − exp(−1 / (release_s · sr))`; snap `g = 1.0` when `1 − g < 1e-9`.
   5. Output = the input frame delayed by `latency()` × `g`, then clamped to `±c`.
-- [ ] **Step 1: Write the failing tests** in `tests/fx_limiter.rs` (48 kHz; true peak via `tune_analysis::{Audio, measure_loudness}` on the f32 output). `latency_is_lookahead_plus_detector`: 78 at 48 kHz, 72 at 44.1 kHz (66 + 6). `transparent_below_ceiling`: a −12 dBFS 1 kHz sine → `out[n + 78]` equals `in[n]` bit for bit and the gain is `1.0` on every frame. `sample_peak_never_exceeds_ceiling`: +12 dB noise and a +12 dB 1 kHz sine → `max |out| <= db2amp(-1.5)`. `true_peak_stays_under_ceiling`: (a) a 12 kHz sine at phase π/4, amplitude 2.0, 5 s; (b) seeded noise × 4; (c) 50 Hz bursts (4 per second, 80 ms each, amplitude 3) plus a 3 kHz saw at amplitude 1 → true peak ≤ −1.2 dBTP in each case. `releases_back_to_unity`: 0.1 s at +6 dBFS then a −20 dBFS sine → the gain is exactly `1.0` again within 2 s. `extreme_gain_stays_finite`: input × `db2amp(24)` on noise plus a DC offset of 0.5 → all finite, sample peak ≤ ceiling. `deterministic`: two instances bitwise equal.
+- [ ] **Step 1: Write the failing tests** in `tests/fx_limiter.rs` (48 kHz; true peak via `tune_analysis::{Audio, measure_loudness}` on the f32 output). `latency_is_lookahead_plus_detector`: 84 at 48 kHz, 78 at 44.1 kHz (66 + 12). `transparent_below_ceiling`: a −12 dBFS 1 kHz sine → `out[n + 84]` equals `in[n]` bit for bit and the gain is `1.0` on every frame. `sample_peak_never_exceeds_ceiling`: +12 dB noise and a +12 dB 1 kHz sine → `max |out| <= db2amp(-1.5)`. `true_peak_stays_under_ceiling`: (a) a 12 kHz sine at phase π/4, amplitude 2.0, 5 s; (b) seeded noise × 4; (c) 50 Hz bursts (4 per second, 80 ms each, amplitude 3) plus a 3 kHz saw at amplitude 1 → true peak ≤ −1.2 dBTP in each case. `releases_back_to_unity`: 0.1 s at +6 dBFS then a −20 dBFS sine → the gain is exactly `1.0` again within 2.1 s. `extreme_gain_stays_finite`: input × `db2amp(24)` on noise plus a DC offset of 0.5 → all finite, sample peak ≤ ceiling. `deterministic`: two instances bitwise equal.
 - [ ] **Step 2: Run** `cargo test -p tune-dsp --test fx_limiter` — Expected: FAIL.
 - [ ] **Step 3: Implement** `limiter.rs`.
 - [ ] **Step 4: Run** `cargo test -p tune-dsp` — Expected: PASS.
