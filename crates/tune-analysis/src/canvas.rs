@@ -31,6 +31,16 @@ impl Canvas {
         }
     }
 
+    /// Sum of the RGB channels of a pixel (0 outside the canvas).
+    pub fn luma_sum(&self, x: u32, y: u32) -> u32 {
+        if x < self.width && y < self.height {
+            let i = (y as usize * self.width as usize + x as usize) * 3;
+            self.data[i..i + 3].iter().map(|&v| u32::from(v)).sum()
+        } else {
+            0
+        }
+    }
+
     pub fn rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: Rgb) {
         for yy in y..(y.saturating_add(h)).min(self.height) {
             for xx in x..(x.saturating_add(w)).min(self.width) {

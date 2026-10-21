@@ -1,6 +1,6 @@
 //! The labelled spectrogram PNG Claude reads in place of listening.
 //!
-//! Panel layout from the top (px): title 24, bar ruler 24, spectrogram 640
+//! Panel layout from the top (px): title 24, bar ruler 40 (section names, then bar numbers), spectrogram 640
 //! (log frequency, 30 Hz bottom to 16 kHz top), gap 8, band strip 96, time
 //! axis 24. Colours are absolute: -100 dB is black, -20 dB is the brightest.
 
@@ -10,7 +10,7 @@ use crate::canvas::{Canvas, Rgb};
 use crate::spectral::{BANDS, for_each_frame, stft_size};
 
 pub const WIDTH: u32 = 1600;
-pub const PANEL_HEIGHT: u32 = 816;
+pub const PANEL_HEIGHT: u32 = 856;
 /// Section boundary colour (2 px wide, from the ruler through the band strip).
 pub const BOUNDARY: [u8; 3] = [255, 255, 255];
 
@@ -18,11 +18,11 @@ const PLOT_X0: u32 = 64;
 const PLOT_W: u32 = 1520;
 const TITLE_H: u32 = 24;
 const RULER_Y: u32 = 24;
-const SPEC_Y: u32 = 48;
+const SPEC_Y: u32 = 64;
 const SPEC_H: u32 = 640;
-const STRIP_Y: u32 = 696;
-const STRIP_ROW_H: u32 = 16;
-const AXIS_Y: u32 = 792;
+const STRIP_Y: u32 = 712;
+const STRIP_ROW_H: u32 = 20;
+const AXIS_Y: u32 = 832;
 
 const LOW_HZ: f64 = 30.0;
 const HIGH_HZ: f64 = 16_000.0;
@@ -57,7 +57,8 @@ const HZ_LABELS: [(f64, &str); 8] = [
 /// Strip labels, `sub` first; four characters is all the 64 px margin holds at 2x.
 const STRIP_LABELS: [&str; 6] = ["sub", "low", "lmid", "mid", "high", "air"];
 
-/// y of `hz` in a panel whose top is y = 0.
+/// y of `hz` in a panel whose top is y = 0: 30 Hz at the bottom of the
+/// spectrogram (y = 703), 16 kHz at its top (y = 64).
 pub fn freq_to_y(hz: f64) -> u32 {
     let t = (hz / LOW_HZ).ln() / (HIGH_HZ / LOW_HZ).ln();
     let y = f64::from(SPEC_Y) + (1.0 - t) * f64::from(SPEC_H - 1);
@@ -213,15 +214,19 @@ fn column_powers(audio: &Audio) -> Columns {
     Columns { rows, bands }
 }
 
+fn luma_sum(c: Rgb) -> u32 {
+    c.iter().map(|&v| u32::from(v)).sum()
+}
+
 fn m_ss(seconds: u32) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 
-fn time_step(px_per_second: f64) -> u32 {
+fn time_step(px_per_second: f64, min_px: f64) -> u32 {
     let steps = [1u32, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600];
     steps
         .into_iter()
-        .find(|&s| f64::from(s) * px_per_second >= 80.0)
+        .find(|&s| f64::from(s) * px_per_second >= min_px)
         .unwrap_or(3600)
 }
 
@@ -240,13 +245,10 @@ fn draw_ruler(canvas: &mut Canvas, map: &BarMap, total: usize) {
         let bar0 = first + i as u32;
         let x = x_of_frame(map.bar_frames[i], total);
         if bar0.is_multiple_of(step) {
-            canvas.rect(x, RULER_Y + 16, 1, 8, TICK);
-            // 1x text is small: strike it twice, one pixel apart, to embolden it.
-            let label = (bar0 + 1).to_string();
-            canvas.text(x + 2, RULER_Y + 16, &label, 1, TEXT);
-            canvas.text(x + 3, RULER_Y + 16, &label, 1, TEXT);
+            canvas.rect(x, RULER_Y + 16, 1, 24, TICK);
+            canvas.text(x + 3, RULER_Y + 16, &(bar0 + 1).to_string(), 2, TEXT);
         } else if px_per_bar >= 4.0 {
-            canvas.rect(x, RULER_Y + 20, 1, 4, TICK);
+            canvas.rect(x, RULER_Y + 32, 1, 8, TICK);
         }
     }
 
@@ -314,13 +316,21 @@ fn panel(audio: &Audio, title: &str, map: Option<&BarMap>) -> Canvas {
         canvas.text(PLOT_X0 - 4 - w, y.saturating_sub(8), label, 2, TEXT);
     }
     for (i, label) in STRIP_LABELS.iter().enumerate() {
-        canvas.text(0, STRIP_Y + (5 - i as u32) * STRIP_ROW_H, label, 2, TEXT);
+        canvas.text(
+            0,
+            STRIP_Y + (5 - i as u32) * STRIP_ROW_H + 2,
+            label,
+            2,
+            TEXT,
+        );
     }
 
     let seconds = total as f64 / f64::from(audio.sample_rate.max(1));
     if seconds > 0.0 {
         let pps = f64::from(PLOT_W) / seconds;
-        let step = time_step(pps);
+        // Room for the widest label plus 8 px, never under 80 px.
+        let widest = Canvas::text_width(&m_ss(seconds as u32), 2);
+        let step = time_step(pps, f64::from(widest + 8).max(80.0));
         let mut t = 0u32;
         while f64::from(t) <= seconds {
             let x = PLOT_X0 + (f64::from(t) * pps).round() as u32;
