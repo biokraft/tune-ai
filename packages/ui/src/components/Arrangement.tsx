@@ -71,6 +71,8 @@ export function Arrangement(p: ArrangementProps) {
   const [drag, setDrag] = useState<Drag | null>(null);
   const dragRef = useRef<Drag | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  /** A body drag passed the slop; the click that follows the release must do nothing. */
+  const didDrag = useRef(false);
   const update = (d: Drag | null) => {
     dragRef.current = d;
     setDrag(d);
@@ -86,6 +88,7 @@ export function Arrangement(p: ArrangementProps) {
   const bodyDown = (i: number, e: PointerEvent<SVGRectElement>) => {
     if (e.button !== 0) return;
     capture(e);
+    didDrag.current = false;
     update({ kind: "move", i, startX: e.clientX, dx: 0 });
   };
   const bodyMove = (e: PointerEvent<SVGRectElement>) => {
@@ -99,11 +102,15 @@ export function Arrangement(p: ArrangementProps) {
     release(e);
     update(null);
     if (Math.abs(d.dx) < DRAG_SLOP) return;
+    didDrag.current = true;
     const to = Math.min(
       p.sections.length - 1,
       dropIndex(p.sections, p.sections[d.i]!.start_bar * PX_PER_BAR + d.dx),
     );
-    if (to !== d.i) p.onMove(d.i, to);
+    if (to !== d.i) {
+      p.onMove(d.i, to);
+      p.onSelect(to);
+    }
   };
 
   const edgeDown = (i: number, e: PointerEvent<SVGRectElement>) => {
@@ -245,8 +252,12 @@ export function Arrangement(p: ArrangementProps) {
                     onPointerMove={bodyMove}
                     onPointerUp={bodyUp}
                     onPointerCancel={bodyUp}
-                    onClick={() => p.onSelect(i)}
-                    onDoubleClick={() => p.onSeek(s.start_bar)}
+                    onClick={() => {
+                      if (!didDrag.current) p.onSelect(i);
+                    }}
+                    onDoubleClick={() => {
+                      if (!didDrag.current) p.onSeek(s.start_bar);
+                    }}
                   />
                   <text
                     x={8}

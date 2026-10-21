@@ -64,6 +64,20 @@ describe("Arrangement", () => {
     expect(onMove).toHaveBeenCalledWith(1, 0);
   });
 
+  it("a reorder selects the moved section and ignores the trailing click", () => {
+    const { onMove, onSelect, onSeek } = setup([sec("a", 0, 16), sec("b", 16, 16)]);
+    fireEvent.pointerDown(block(1), { clientX: 200, pointerId: 1 });
+    fireEvent.pointerMove(block(1), { clientX: 13, pointerId: 1 });
+    fireEvent.pointerUp(block(1), { clientX: 13, pointerId: 1 });
+    expect(onMove).toHaveBeenCalledWith(1, 0);
+    expect(onSelect).toHaveBeenCalledWith(0);
+    onSelect.mockClear();
+    fireEvent.click(block(1));
+    fireEvent.doubleClick(block(1));
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
   it("body jitter does not move", () => {
     const { onMove } = setup([sec("a", 0, 16), sec("b", 16, 16)]);
     fireEvent.pointerDown(block(1), { clientX: 200, pointerId: 1 });
