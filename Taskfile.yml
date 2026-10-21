@@ -11,6 +11,21 @@ tasks:
     cmds:
       - cargo fmt --all -- --check
 
+  install:
+    desc: Install JS dependencies from the lockfile
+    cmds:
+      - pnpm install --frozen-lockfile
+
+  js:check:
+    desc: ESLint, Prettier, TypeScript and Vitest across the workspace
+    cmds:
+      - pnpm lint && pnpm format:check && pnpm -r typecheck && pnpm -r test
+
+  ui:build:
+    desc: Build the desktop frontend (no-op until apps/desktop exists)
+    cmds:
+      - test -f apps/desktop/package.json || exit 0; pnpm --filter @tune/desktop build
+
   lint:
     desc: Clippy with warnings denied
     cmds:
@@ -31,6 +46,9 @@ tasks:
     desc: Everything that must pass before a commit
     cmds:
       - task: fmt:check
+      - task: install
+      - task: js:check
+      - task: ui:build
       - task: lint
       - task: test
       - task: privacy
