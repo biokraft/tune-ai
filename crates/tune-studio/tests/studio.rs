@@ -800,6 +800,33 @@ fn open_song_stays_under_root() {
     }
 }
 
+/// Every `OpenSong` starts a file watcher, and on macOS registering its
+/// FSEvents stream takes time in proportion to the number of entries in
+/// the directory of the running executable (measured: about 0.3 s per
+/// stream with 200k entries on an idle machine, seconds under load). Test
+/// binaries run from `target/debug/deps`, where the default unpacked split
+/// debuginfo leaves every codegen unit's `.rcgu.o` behind and incremental
+/// rebuilds never remove them: the directory grew past 200k entries and
+/// `OpenSong` took seconds, past the call timeout under load. The workspace builds with packed debuginfo so
+/// the objects are deleted after linking; this keeps the directory small.
+#[cfg(target_os = "macos")]
+#[test]
+fn test_binary_directory_stays_small() {
+    // Stale objects pile up by the hundreds per rebuild; a concurrent
+    // build's transient files stay far below this.
+    const MAX_ENTRIES: usize = 20_000;
+    let exe = std::env::current_exe().unwrap();
+    let dir = exe.parent().unwrap();
+    let entries = fs::read_dir(dir).unwrap().count();
+    assert!(
+        entries <= MAX_ENTRIES,
+        "{} holds {entries} entries (at most {MAX_ENTRIES}): every watcher \
+         start pays for them. Check `split-debuginfo = \"packed\"` in the \
+         workspace Cargo.toml and delete the stale `*.rcgu.o` files there.",
+        dir.display()
+    );
+}
+
 fn mix_knob(param: &str, value: f64, commit: bool) -> Command {
     Command::SetParam {
         track: "mix".into(),
