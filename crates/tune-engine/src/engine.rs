@@ -18,14 +18,20 @@ use crate::live::SongUpdate;
 use crate::mixer::Meter;
 use crate::tracks::{make_effect, make_instrument};
 
-/// The live DSP objects of one track.
+/// The live DSP objects of one track, with its knob overrides.
 pub struct TrackRuntime {
     pub instrument: Box<dyn Instrument>,
     pub fx: Vec<Box<dyn Effect>>,
+    /// One override per instrument param in plain units; `NaN` is none.
+    overrides: Vec<f64>,
+    /// One override table per fx slot, like `overrides`. It travels with
+    /// the fx chain: a swap that rebuilds the chain drops it.
+    fx_overrides: Vec<Vec<f64>>,
 }
 
 impl TrackRuntime {
-    /// Fresh instrument and fx chain for `track`, with its static params set.
+    /// Fresh instrument and fx chain for `track`, with its static params set
+    /// and room for an override on every param (none set).
     pub fn build(track: &CompiledTrack, sample_rate: f64) -> Self {
         let mut rt = Self {
             instrument: make_instrument(track.kind, sample_rate),
@@ -33,6 +39,12 @@ impl TrackRuntime {
                 .fx
                 .iter()
                 .map(|fx| make_effect(&fx.spec, sample_rate))
+                .collect(),
+            overrides: vec![f64::NAN; track.params.len()],
+            fx_overrides: track
+                .fx
+                .iter()
+                .map(|fx| vec![f64::NAN; fx.params.len()])
                 .collect(),
         };
         rt.apply_static(track);
@@ -51,6 +63,74 @@ impl TrackRuntime {
         }
     }
 
+    /// Sets one param in plain units.
+    fn set_target(&mut self, target: ParamTarget, plain: f64) {
+        match target {
+            ParamTarget::Instrument(index) => self.instrument.set_param_at(index, plain),
+            ParamTarget::Fx { slot, index } => self.fx[slot].set_param_at(index, plain),
+        }
+    }
+
+    /// The override slot of `target` and its spec, if the runtime has both.
+    fn override_slot(&mut self, target: ParamTarget) -> Option<(&mut f64, &'static ParamSpec)> {
+        match target {
+            ParamTarget::Instrument(index) => {
+                let spec = self.instrument.params().get(index)?;
+                Some((self.overrides.get_mut(index)?, spec))
+            }
+            ParamTarget::Fx { slot, index } => {
+                let spec = self.fx.get(slot)?.params().get(index)?;
+                Some((self.fx_overrides.get_mut(slot)?.get_mut(index)?, spec))
+            }
+        }
+    }
+
+    /// Sets every overridden param to its override.
+    fn apply_overrides(&mut self) {
+        for (index, &plain) in self.overrides.iter().enumerate() {
+            if !plain.is_nan() {
+                self.instrument.set_param_at(index, plain);
+            }
+        }
+        for (fx, table) in self.fx.iter_mut().zip(&self.fx_overrides) {
+            for (index, &plain) in table.iter().enumerate() {
+                if !plain.is_nan() {
+                    fx.set_param_at(index, plain);
+                }
+            }
+        }
+    }
+
+    /// Clears every override, setting each param it held back to the
+    /// track's static value.
+    fn clear_overrides(&mut self, track: &CompiledTrack) {
+        for (index, plain) in self.overrides.iter_mut().enumerate() {
+            if !plain.is_nan() {
+                *plain = f64::NAN;
+                self.instrument.set_param_at(index, track.params[index]);
+            }
+        }
+        for ((fx, table), spec) in self
+            .fx
+            .iter_mut()
+            .zip(&mut self.fx_overrides)
+            .zip(&track.fx)
+        {
+            for (index, plain) in table.iter_mut().enumerate() {
+                if !plain.is_nan() {
+                    *plain = f64::NAN;
+                    fx.set_param_at(index, spec.params[index]);
+                }
+            }
+        }
+    }
+
+    /// How many overrides are set.
+    fn overrides_set(&self) -> u32 {
+        let set = |table: &[f64]| table.iter().filter(|v| !v.is_nan()).count() as u32;
+        set(&self.overrides) + self.fx_overrides.iter().map(|t| set(t)).sum::<u32>()
+    }
+
     fn reset(&mut self) {
         self.instrument.reset();
         for fx in &mut self.fx {
@@ -65,6 +145,8 @@ impl TrackRuntime {
         Self {
             instrument: Box::new(Vacant),
             fx: Vec::new(),
+            overrides: Vec::new(),
+            fx_overrides: Vec::new(),
         }
     }
 }
@@ -118,6 +200,10 @@ pub struct Engine {
     /// The last applied swap, holding the old song, until it is taken.
     retired: Option<Box<SongUpdate>>,
     swaps_applied: u64,
+    /// The generation of the song playing (see [`generation`](Self::generation)).
+    generation: u64,
+    /// Knob overrides set across all runtimes.
+    overrides_active: u32,
 }
 
 static REST: Cell = Cell::Rest;
@@ -157,6 +243,8 @@ impl Engine {
             pending: None,
             retired: None,
             swaps_applied: 0,
+            generation: 0,
+            overrides_active: 0,
         }
     }
 
@@ -179,11 +267,19 @@ impl Engine {
     ///
     /// A finished engine applies a swap at once and stays finished at the
     /// new end; [`seek`](Self::seek) restarts it.
-    pub fn queue_swap(&mut self, update: Box<SongUpdate>) -> Option<Box<SongUpdate>> {
+    ///
+    /// Knob overrides travel with the runtimes a swap keeps (an fx chain's
+    /// overrides only when the chain is kept). An update made to clear the
+    /// overrides clears them all when it lands; an update that replaces such
+    /// a pending one inherits that.
+    pub fn queue_swap(&mut self, mut update: Box<SongUpdate>) -> Option<Box<SongUpdate>> {
         debug_assert_eq!(
             update.song.clock.sample_rate, self.song.clock.sample_rate,
             "a swap must keep the sample rate"
         );
+        if self.pending.as_ref().is_some_and(|p| p.clear_overrides) {
+            update.clear_overrides = true;
+        }
         self.pending.replace(update)
     }
 
@@ -206,8 +302,70 @@ impl Engine {
         self.swaps_applied
     }
 
+    /// The generation of the song playing: 0 for the song the engine was
+    /// built with, then that of each applied swap's update (assigned by the
+    /// [`LiveController`](crate::live::LiveController)).
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Overrides param `target` of track `track` with `plain` (clamped to the
+    /// param's range), or clears the override with `None` (or a NaN), which
+    /// sets the param back to its static value; a lane then takes it over
+    /// again from the next sample. An override wins over static params and
+    /// lanes and is applied every sample, before `on_step` (see
+    /// [`process`](Self::process)). A track or target outside the song is
+    /// ignored. Never allocates. Overrides are live-only: offline renders
+    /// build their own engine and never see them.
+    pub fn set_override(&mut self, track: usize, target: ParamTarget, plain: Option<f64>) {
+        let Some(rt) = self.tracks.get_mut(track) else {
+            return;
+        };
+        let Some((slot, spec)) = rt.override_slot(target) else {
+            return;
+        };
+        let was_set = !slot.is_nan();
+        match plain.filter(|v| !v.is_nan()) {
+            Some(v) => {
+                *slot = v.clamp(spec.min, spec.max);
+                if !was_set {
+                    self.overrides_active += 1;
+                }
+            }
+            None => {
+                *slot = f64::NAN;
+                if was_set {
+                    self.overrides_active -= 1;
+                    let track = &self.song.tracks[track];
+                    let plain = match target {
+                        ParamTarget::Instrument(index) => track.params[index],
+                        ParamTarget::Fx { slot, index } => track.fx[slot].params[index],
+                    };
+                    rt.set_target(target, plain);
+                }
+            }
+        }
+    }
+
+    /// Clears every override (see [`set_override`](Self::set_override)).
+    pub fn clear_overrides(&mut self) {
+        if self.overrides_active == 0 {
+            return;
+        }
+        for (rt, track) in self.tracks.iter_mut().zip(&self.song.tracks) {
+            rt.clear_overrides(track);
+        }
+        self.overrides_active = 0;
+    }
+
+    /// Knob overrides currently set.
+    pub fn overrides_active(&self) -> u32 {
+        self.overrides_active
+    }
+
     /// Jumps to the start of 0-based `bar` (clamped to the song's end) and
-    /// resets every instrument and effect. The loop and meter are kept.
+    /// resets every instrument and effect. The loop, meter and knob
+    /// overrides are kept.
     ///
     /// Audio after a seek starts from reset instrument state (silent filters,
     /// envelopes and delay lines), so only the param values match play-through,
@@ -245,9 +403,11 @@ impl Engine {
     /// 2. At a step boundary: wrap at the loop end (nothing is reset); finish
     ///    at the song end; re-apply static params on a section change (or the
     ///    first step after `new`/`seek`); apply the section's lanes for this
-    ///    sample; fire `on_step` on every track in order; advance the step.
-    ///    Elsewhere: apply the section's lanes for this sample. Lanes run
-    ///    exactly once per sample, always before the tracks' `on_step`.
+    ///    sample; apply the knob overrides; fire `on_step` on every track in
+    ///    order; advance the step. Elsewhere: apply the section's lanes, then
+    ///    the overrides, for this sample. Lanes and overrides run exactly once
+    ///    per sample (overrides only when one is set), always before the
+    ///    tracks' `on_step`, so a hit reads the overridden value.
     /// 3. Process every track (instrument, then fx in order), write its stem
     ///    and add it to the master when audible.
     /// 4. Meter, soft-clip, write, advance the position.
@@ -313,6 +473,9 @@ impl Engine {
                 self.needs_static = false;
             }
             apply_lanes(song, section, self.pos, &mut self.tracks);
+            if self.overrides_active > 0 {
+                apply_overrides(&mut self.tracks);
+            }
             let step = self.step;
             // Across the loop wrap the next cell is the loop start's.
             let next_step = match self.looping {
@@ -333,6 +496,9 @@ impl Engine {
             self.step += 1;
         } else {
             apply_lanes(song, self.section, self.pos, &mut self.tracks);
+            if self.overrides_active > 0 {
+                apply_overrides(&mut self.tracks);
+            }
         }
 
         let (mut ml, mut mr) = (0.0, 0.0);
@@ -378,6 +544,7 @@ impl Engine {
                     let mut unused = fresh;
                     if !same_fx_chain(&self.song.tracks[i].fx, &new.fx) {
                         std::mem::swap(&mut kept.fx, &mut unused.fx);
+                        std::mem::swap(&mut kept.fx_overrides, &mut unused.fx_overrides);
                     }
                     u.tracks[j] = Some(unused);
                     kept
@@ -387,8 +554,14 @@ impl Engine {
         }
         std::mem::swap(&mut self.tracks, &mut u.spare);
         std::mem::swap(&mut self.song, &mut u.song);
+        self.generation = u.generation;
+        let clear = u.clear_overrides;
         self.retired = Some(update);
         self.swaps_applied += 1;
+        self.overrides_active = self.tracks.iter().map(TrackRuntime::overrides_set).sum();
+        if clear {
+            self.clear_overrides();
+        }
 
         let song = &*self.song;
         self.any_solo = song.tracks.iter().any(|t| t.solo);
@@ -475,6 +648,13 @@ fn cell_at(song: &CompiledSong, section: usize, t: usize, step: u64) -> &Cell {
     }
 }
 
+/// Applies every override of every track.
+fn apply_overrides(tracks: &mut [TrackRuntime]) {
+    for rt in tracks {
+        rt.apply_overrides();
+    }
+}
+
 /// Applies every lane of `section` at song sample `pos`.
 fn apply_lanes(song: &CompiledSong, section: usize, pos: u64, tracks: &mut [TrackRuntime]) {
     let s = &song.sections[section];
@@ -485,11 +665,7 @@ fn apply_lanes(song: &CompiledSong, section: usize, pos: u64, tracks: &mut [Trac
     let x = pos.saturating_sub(start) as f64 / (16.0 * song.clock.samples_per_step);
     for lane in &s.lanes {
         let plain = lane.spec.to_plain(lane_value(&lane.points, x));
-        let rt = &mut tracks[lane.track];
-        match lane.target {
-            ParamTarget::Instrument(index) => rt.instrument.set_param_at(index, plain),
-            ParamTarget::Fx { slot, index } => rt.fx[slot].set_param_at(index, plain),
-        }
+        tracks[lane.track].set_target(lane.target, plain);
     }
 }
 

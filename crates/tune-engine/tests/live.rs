@@ -4,7 +4,11 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use common::{MINI, compile_song, compiled, song};
-use tune_engine::{CompiledSong, LiveError, LiveProcessor, RenderOptions, live, render};
+use tune_dsp::DistortionMode;
+use tune_engine::{
+    CompiledSong, LiveError, LiveProcessor, ParamTarget, RenderOptions, live, render,
+};
+use tune_song::FxSpec;
 
 /// One bar at 120 BPM and 48 kHz.
 const BAR: u64 = 96_000;
@@ -348,4 +352,179 @@ fn swap_after_the_end_stays_finished() {
     let out = play(&mut p, BAR, 4096);
     assert!(!ctl.finished());
     assert!(out.iter().any(|&x| x != 0.0));
+}
+
+/// Track 1 of `mini` is `acid`.
+const ACID: usize = 1;
+const CUTOFF: ParamTarget = ParamTarget::Instrument(2);
+const DRIVE: ParamTarget = ParamTarget::Fx { slot: 0, index: 0 };
+
+/// `mini` without section `b`'s cutoff lane (so an override and a static
+/// value sound the same), then `edit`.
+fn no_lane(edit: impl FnOnce(&mut tune_song::Song)) -> Arc<CompiledSong> {
+    mini_with(|s| {
+        s.sections[1].automation.clear();
+        edit(s);
+    })
+}
+
+fn set_cutoff(s: &mut tune_song::Song, plain: f64) {
+    s.tracks
+        .get_mut("acid")
+        .unwrap()
+        .params
+        .insert("acid303.cutoff".into(), plain);
+}
+
+fn mute_hat(s: &mut tune_song::Song) {
+    s.tracks.get_mut("hat").unwrap().mute = true;
+}
+
+#[test]
+fn live_override_equals_static_value() {
+    let a = no_lane(|_| {});
+    let expected = render_bars(&no_lane(|s| set_cutoff(s, 2394.0)), 0, 4);
+    let (mut ctl, mut p) = live(a.clone(), 0, None);
+    ctl.set_override(ACID, CUTOFF, Some(2394.0)).unwrap();
+    let out = play(&mut p, END, 512);
+    assert_eq!(ctl.overrides_active(), 1);
+    assert_bits(&out, &expected);
+    assert_ne!(out, render_bars(&a, 0, 4), "the override is heard");
+}
+
+#[test]
+fn override_survives_swap() {
+    let a = no_lane(|_| {});
+    let b = no_lane(mute_hat);
+    let ra = render_bars(&no_lane(|s| set_cutoff(s, 2394.0)), 0, 4);
+    let rb = render_bars(
+        &no_lane(|s| {
+            mute_hat(s);
+            set_cutoff(s, 2394.0);
+        }),
+        0,
+        4,
+    );
+    let (mut ctl, mut p) = live(a, 0, None);
+    ctl.set_override(ACID, CUTOFF, Some(2394.0)).unwrap();
+    // Inside section `b`, where the acid plays.
+    let swap_at = 2 * BAR + 1000;
+    let boundary = 2 * BAR + STEP;
+    let mut out = play(&mut p, swap_at, 512);
+    ctl.swap(b.clone()).unwrap();
+    out.extend(play(&mut p, END - swap_at, 512));
+    assert_eq!(ctl.swaps_applied(), 1);
+    assert_eq!(ctl.overrides_active(), 1);
+    assert_bits(frames(&out, 0..boundary), frames(&ra, 0..boundary));
+    assert_bits(frames(&out, boundary..END), frames(&rb, boundary..END));
+    assert_ne!(
+        frames(&out, boundary..END),
+        frames(&render_bars(&b, 0, 4), boundary..END),
+        "the override is still heard after the swap"
+    );
+}
+
+#[test]
+fn stale_override_dropped() {
+    let (mut ctl, mut p) = live(compiled(MINI), 0, None);
+    assert_eq!(ctl.playing_generation(), 0);
+    ctl.swap(kick_muted()).unwrap();
+    // Meant for the swapped-in song, but it reaches the processor first.
+    ctl.set_override(ACID, CUTOFF, Some(2000.0)).unwrap();
+    play(&mut p, STEP + 1, 512);
+    assert_eq!(ctl.swaps_applied(), 1);
+    assert_eq!(ctl.playing_generation(), 1);
+    assert_eq!(ctl.overrides_active(), 0);
+    // Once the swap has landed, the next one applies.
+    ctl.set_override(ACID, CUTOFF, Some(2000.0)).unwrap();
+    play(&mut p, 1, 1);
+    assert_eq!(ctl.overrides_active(), 1);
+}
+
+#[test]
+fn override_after_replaced_swap_applies() {
+    let (mut ctl, mut p) = live(compiled(MINI), 0, None);
+    play(&mut p, 1000, 1000);
+    ctl.swap(without_hat()).unwrap();
+    ctl.swap(kick_muted()).unwrap();
+    play(&mut p, STEP, 512);
+    assert_eq!(ctl.swaps_applied(), 1, "the first swap was replaced");
+    assert_eq!(ctl.playing_generation(), 2);
+    ctl.set_override(ACID, CUTOFF, Some(2000.0)).unwrap();
+    play(&mut p, 1, 1);
+    assert_eq!(ctl.overrides_active(), 1);
+}
+
+#[test]
+fn clearing_swap() {
+    let (mut ctl, mut p) = live(compiled(MINI), 0, None);
+    ctl.set_override(ACID, CUTOFF, Some(2000.0)).unwrap();
+    play(&mut p, 1000, 512);
+    assert_eq!(ctl.overrides_active(), 1);
+    ctl.swap_clearing_overrides(kick_muted()).unwrap();
+    play(&mut p, 1000, 512);
+    assert_eq!(ctl.overrides_active(), 1, "kept until the swap lands");
+    play(&mut p, STEP, 512);
+    assert_eq!(ctl.swaps_applied(), 1);
+    assert_eq!(ctl.overrides_active(), 0);
+}
+
+#[test]
+fn clearing_survives_a_replacing_swap() {
+    let (mut ctl, mut p) = live(compiled(MINI), 0, None);
+    ctl.set_override(ACID, CUTOFF, Some(2000.0)).unwrap();
+    play(&mut p, 1000, 512);
+    ctl.swap_clearing_overrides(kick_muted()).unwrap();
+    ctl.swap(without_hat()).unwrap();
+    play(&mut p, STEP, 512);
+    assert_eq!(ctl.swaps_applied(), 1);
+    assert_eq!(
+        ctl.overrides_active(),
+        0,
+        "the replaced swap's clear still lands"
+    );
+}
+
+#[test]
+fn fx_overrides_follow_the_fx_chain() {
+    let hard = mini_with(|s| {
+        let FxSpec::Distortion { mode, .. } = &mut s.tracks.get_mut("acid").unwrap().fx[0];
+        *mode = DistortionMode::Hard;
+    });
+    let (mut ctl, mut p) = live(compiled(MINI), 0, None);
+    ctl.set_override(ACID, CUTOFF, Some(2000.0)).unwrap();
+    ctl.set_override(ACID, DRIVE, Some(30.0)).unwrap();
+    play(&mut p, 1000, 512);
+    assert_eq!(ctl.overrides_active(), 2);
+    // A kept fx chain keeps its overrides.
+    ctl.swap(kick_muted()).unwrap();
+    play(&mut p, STEP, 512);
+    assert_eq!(ctl.overrides_active(), 2);
+    // A rebuilt fx chain starts without them; the instrument keeps its own.
+    ctl.swap(hard).unwrap();
+    play(&mut p, STEP, 512);
+    assert_eq!(ctl.swaps_applied(), 2);
+    assert_eq!(ctl.overrides_active(), 1);
+}
+
+#[test]
+fn rejected_swap_keeps_generation() {
+    let (mut ctl, mut p) = live(compiled(MINI), 0, None);
+    for _ in 0..16 {
+        ctl.seek(0).unwrap();
+    }
+    assert_eq!(ctl.swap(kick_muted()), Err(LiveError::QueueFull));
+    assert_eq!(
+        ctl.set_override(ACID, CUTOFF, Some(2000.0)),
+        Err(LiveError::QueueFull)
+    );
+    play(&mut p, 10, 10);
+    ctl.set_override(ACID, CUTOFF, Some(2000.0)).unwrap();
+    play(&mut p, 10, 10);
+    assert_eq!(ctl.playing_generation(), 0);
+    assert_eq!(
+        ctl.overrides_active(),
+        1,
+        "no swap was sent, so none is awaited"
+    );
 }

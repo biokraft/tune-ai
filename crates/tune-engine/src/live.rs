@@ -3,10 +3,11 @@
 //!
 //! The two halves talk through two lock-free SPSC queues ([`rtrb`]):
 //!
-//! - Commands (controller to processor): swap, seek, loop. The processor
-//!   drains them at the start of each [`LiveProcessor::process`] call, so a
-//!   seek or loop change takes effect at the next sample. A swap is handed to
-//!   the [`Engine`], which applies it at the next step boundary.
+//! - Commands (controller to processor): swap, seek, loop, knob override.
+//!   The processor drains them at the start of each
+//!   [`LiveProcessor::process`] call, so a seek, loop or override change
+//!   takes effect at the next sample. A swap is handed to the [`Engine`],
+//!   which applies it at the next step boundary.
 //! - Garbage (processor to controller): every [`SongUpdate`] comes back in
 //!   the same box, now holding the old song and every runtime the new song
 //!   did not take, so nothing is freed on the audio thread.
@@ -18,8 +19,14 @@
 //! arrives while another is still pending replaces it, and the replaced
 //! update goes straight back as garbage.
 //!
-//! The processor publishes position, bar, finished and the number of applied
-//! swaps through atomics after each call.
+//! Every swap the controller sends carries a generation, one higher than the
+//! last. Every override carries the generation of the last swap sent, and the
+//! processor drops it unless the engine is playing that generation, because
+//! its track index may belong to another song.
+//!
+//! The processor publishes position, bar, finished, the number of applied
+//! swaps, the playing generation and the number of overrides set through
+//! atomics after each call.
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -27,7 +34,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 
-use crate::compile::CompiledSong;
+use crate::compile::{CompiledSong, ParamTarget};
 use crate::engine::{Engine, TrackRuntime};
 
 /// Capacity of each queue.
@@ -45,6 +52,11 @@ pub struct SongUpdate {
     /// Empty with room for one runtime per new track; becomes the engine's
     /// runtime list. After the swap it holds the old list.
     pub(crate) spare: Vec<TrackRuntime>,
+    /// Assigned by the controller, one higher per swap it sends; the
+    /// engine plays this generation once the update lands.
+    pub(crate) generation: u64,
+    /// Whether landing clears every knob override.
+    pub(crate) clear_overrides: bool,
 }
 
 impl SongUpdate {
@@ -62,11 +74,17 @@ impl SongUpdate {
             song,
             tracks,
             spare,
+            generation: 0,
+            clear_overrides: false,
         })
     }
 
     pub fn song(&self) -> &Arc<CompiledSong> {
         &self.song
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 }
 
@@ -82,6 +100,14 @@ enum Command {
     Swap(Box<SongUpdate>),
     Seek(u32),
     Loop(Option<Range<u32>>),
+    Override {
+        /// The generation the controller had sent last: the song whose
+        /// track indices `track` and `target` refer to.
+        generation: u64,
+        track: usize,
+        target: ParamTarget,
+        plain: Option<f64>,
+    },
 }
 
 /// What the processor publishes after each block.
@@ -91,6 +117,8 @@ struct Shared {
     bar: AtomicU32,
     finished: AtomicBool,
     swaps_applied: AtomicU64,
+    generation: AtomicU64,
+    overrides_active: AtomicU32,
 }
 
 impl Shared {
@@ -100,6 +128,10 @@ impl Shared {
         self.finished.store(engine.finished(), Ordering::Relaxed);
         self.swaps_applied
             .store(engine.swaps_applied(), Ordering::Release);
+        self.generation
+            .store(engine.generation(), Ordering::Release);
+        self.overrides_active
+            .store(engine.overrides_active(), Ordering::Relaxed);
     }
 }
 
@@ -125,6 +157,7 @@ pub fn live(
             garbage: garbage_rx,
             shared: shared.clone(),
             sample_rate,
+            generation: 0,
         },
         LiveProcessor {
             engine,
@@ -142,12 +175,49 @@ pub struct LiveController {
     garbage: Consumer<Box<SongUpdate>>,
     shared: Arc<Shared>,
     sample_rate: u32,
+    /// The generation of the last swap sent (0 before any).
+    generation: u64,
 }
 
 impl LiveController {
-    /// Swaps in `song` at the next step boundary, keeping the playhead.
+    /// Swaps in `song` at the next step boundary, keeping the playhead and
+    /// the knob overrides of every kept runtime (see [`Engine::queue_swap`]).
     /// Builds the update here, off the audio thread.
     pub fn swap(&mut self, song: Arc<CompiledSong>) -> Result<(), LiveError> {
+        self.send_swap(song, false)
+    }
+
+    /// Like [`swap`](Self::swap), but every knob override is cleared when
+    /// the swap lands (for instance once a knob's value is in the song).
+    pub fn swap_clearing_overrides(&mut self, song: Arc<CompiledSong>) -> Result<(), LiveError> {
+        self.send_swap(song, true)
+    }
+
+    /// Overrides param `target` of track `track` (an index into the song of
+    /// the last swap sent, or the first song) with `plain`, or clears it
+    /// with `None` (see [`Engine::set_override`]). Takes effect at the next
+    /// block. The processor drops it if that song has not landed yet, since
+    /// the index may name another track in the song still playing; send it
+    /// again (the next pointer move does).
+    pub fn set_override(
+        &mut self,
+        track: usize,
+        target: ParamTarget,
+        plain: Option<f64>,
+    ) -> Result<(), LiveError> {
+        self.send(Command::Override {
+            generation: self.generation,
+            track,
+            target,
+            plain,
+        })
+    }
+
+    fn send_swap(
+        &mut self,
+        song: Arc<CompiledSong>,
+        clear_overrides: bool,
+    ) -> Result<(), LiveError> {
         let rate = song.clock.sample_rate;
         if rate != self.sample_rate {
             return Err(LiveError::SampleRateMismatch {
@@ -158,7 +228,13 @@ impl LiveController {
         if self.commands.is_full() {
             return Err(LiveError::QueueFull);
         }
-        self.send(Command::Swap(SongUpdate::new(song)))
+        let mut update = SongUpdate::new(song);
+        update.generation = self.generation + 1;
+        update.clear_overrides = clear_overrides;
+        self.send(Command::Swap(update))?;
+        // Only a sent swap counts: a rejected one never lands.
+        self.generation += 1;
+        Ok(())
     }
 
     /// Jumps to the start of 0-based `bar` (see [`Engine::seek`]).
@@ -196,6 +272,18 @@ impl LiveController {
     /// Swaps applied so far (a swap replaced before its boundary is not one).
     pub fn swaps_applied(&self) -> u64 {
         self.shared.swaps_applied.load(Ordering::Acquire)
+    }
+
+    /// The generation of the song playing, as of the last block: 0 for the
+    /// first song, then that of each swap as it lands (a replaced swap never
+    /// plays, so its generation is skipped).
+    pub fn playing_generation(&self) -> u64 {
+        self.shared.generation.load(Ordering::Acquire)
+    }
+
+    /// Knob overrides set, as of the last block.
+    pub fn overrides_active(&self) -> u32 {
+        self.shared.overrides_active.load(Ordering::Relaxed)
     }
 
     /// Drops every update the processor sent back; returns how many.
@@ -255,6 +343,17 @@ impl LiveProcessor {
                 }
                 Command::Seek(bar) => self.engine.seek(bar),
                 Command::Loop(bars) => self.engine.set_loop(bars),
+                Command::Override {
+                    generation,
+                    track,
+                    target,
+                    plain,
+                } => {
+                    // Meant for a song that has not landed (or never will).
+                    if generation == self.engine.generation() {
+                        self.engine.set_override(track, target, plain);
+                    }
+                }
             }
         }
     }

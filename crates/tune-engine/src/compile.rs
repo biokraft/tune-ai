@@ -71,7 +71,7 @@ pub struct CompiledLane {
     pub points: Vec<(f64, f64)>,
 }
 
-/// Which parameter of a track a lane drives.
+/// Which parameter of a track a lane (or a knob override) drives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParamTarget {
     /// Index into the instrument's param table.
@@ -159,7 +159,10 @@ impl CompiledSong {
                     .iter()
                     .map(|lane| {
                         let track = track_index(&lane.track);
-                        let (target, spec) = resolve(&tracks[track], &lane.param);
+                        let (target, spec) =
+                            resolve(&tracks[track], &lane.param).unwrap_or_else(|| {
+                                panic!("unknown lane param `{}` in a validated song", lane.param)
+                            });
                         CompiledLane {
                             track,
                             target,
@@ -193,6 +196,16 @@ impl CompiledSong {
         self.tracks.iter().position(|t| t.id == id)
     }
 
+    /// Resolves `param_id` on track `track` against the instrument table,
+    /// then each fx table in slot order. `None` for an unknown track or id.
+    pub fn param_target(
+        &self,
+        track: usize,
+        param_id: &str,
+    ) -> Option<(ParamTarget, &'static ParamSpec)> {
+        resolve(self.tracks.get(track)?, param_id)
+    }
+
     /// The sample after the last one of the song.
     pub fn end_sample(&self) -> u64 {
         self.clock.bar_start(self.total_bars)
@@ -213,22 +226,17 @@ fn fill<'a>(
     params
 }
 
-/// Resolves a lane's param id against the instrument table, then each fx
-/// table in slot order (the order validation checks them in).
-fn resolve(track: &CompiledTrack, id: &str) -> (ParamTarget, &'static ParamSpec) {
+/// Resolves a param id against the instrument table, then each fx table in
+/// slot order (the order validation checks them in).
+fn resolve(track: &CompiledTrack, id: &str) -> Option<(ParamTarget, &'static ParamSpec)> {
     if let Ok((index, spec)) = find_spec(track.kind.params(), id) {
-        return (ParamTarget::Instrument(index), spec);
+        return Some((ParamTarget::Instrument(index), spec));
     }
-    track
-        .fx
-        .iter()
-        .enumerate()
-        .find_map(|(slot, fx)| {
-            find_spec(fx.spec.params_table(), id)
-                .ok()
-                .map(|(index, spec)| (ParamTarget::Fx { slot, index }, spec))
-        })
-        .unwrap_or_else(|| panic!("unknown lane param `{id}` in a validated song"))
+    track.fx.iter().enumerate().find_map(|(slot, fx)| {
+        find_spec(fx.spec.params_table(), id)
+            .ok()
+            .map(|(index, spec)| (ParamTarget::Fx { slot, index }, spec))
+    })
 }
 
 #[cfg(test)]
