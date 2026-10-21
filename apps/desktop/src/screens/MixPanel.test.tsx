@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { stateEvent } from "../client/fakeClient";
 import type { Command, SongView } from "../client/protocol";
 import type { HighlightKind } from "../store/studioStore";
-import { MixPanel } from "./MixPanel";
+import { LIMITER_OFF, MixPanel } from "./MixPanel";
 
 function setup(
   song: SongView = stateEvent().song!,
@@ -89,6 +89,26 @@ describe("MixPanel", () => {
     setup(song);
     expect(screen.getByText("Master: limiter")).toBeInTheDocument();
     expect(screen.getByText("Ducking: no kick to follow")).toBeInTheDocument();
+  });
+
+  it("dims the limiter's knobs in clip mode, with a hint", () => {
+    setup();
+    const limiter = screen.getByRole("group", { name: "Limiter" });
+    expect(limiter).toHaveAttribute("data-inactive", "true");
+    expect(within(limiter).getByText(LIMITER_OFF)).toBeInTheDocument();
+    for (const name of ["Ceiling", "Release"]) {
+      expect(within(limiter).getByRole("slider", { name })).toBeInTheDocument();
+    }
+    const master = screen.getByRole("group", { name: "Master" });
+    expect(master).not.toHaveAttribute("data-inactive");
+    expect(within(master).getByRole("slider", { name: "Master gain" })).toBeInTheDocument();
+  });
+
+  it("the limiter's knobs are live in limit mode", () => {
+    setup(stateEvent((s) => (s.song!.mix.master = "limit")).song!);
+    const limiter = screen.getByRole("group", { name: "Limiter" });
+    expect(limiter).not.toHaveAttribute("data-inactive");
+    expect(screen.queryByText(LIMITER_OFF)).toBeNull();
   });
 
   it("explains an unused bus", () => {
