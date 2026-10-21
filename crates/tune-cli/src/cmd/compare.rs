@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use tune_analysis::spectrogram::compare_png;
 use tune_analysis::{Analysis, BANDS, Comparison, analyze};
 
-use crate::ears::{Input, load_input, load_named_ref, png_path, title, write_png};
+use crate::ears::{Input, is_song, load_input, load_named_ref, png_path, title, write_png};
 use crate::report::{Failure, Success, finish};
 
 pub struct Args {
@@ -35,7 +35,10 @@ fn parse_seconds(s: &str, len: f64) -> Result<(f64, f64), String> {
     if !(a.is_finite() && b.is_finite()) {
         return Err(bad());
     }
-    if !(a >= 0.0 && a < b && b <= len) {
+    if a >= b {
+        return Err(format!("bad --ref-seconds `{s}`: A must be less than B"));
+    }
+    if !(a >= 0.0 && b <= len) {
         return Err(format!(
             "bad --ref-seconds `{s}`: the reference is {len:.1} s long"
         ));
@@ -155,6 +158,11 @@ fn load_reference(a: &Args) -> Result<(Input, Option<String>), Vec<Failure>> {
 }
 
 fn run_inner(a: &Args) -> Result<Success, Vec<Failure>> {
+    if a.bars.is_some() && !is_song(&a.ours) {
+        return Err(fail(
+            "--bars needs a song file as OURS: compare cannot map a WAV onto bars",
+        ));
+    }
     let ours = load_input(&a.ours, a.bars.as_deref(), None, None)?;
     let (reference, _) = load_reference(a)?;
     let err = |e: tune_analysis::AnalysisError| fail(e.to_string());
