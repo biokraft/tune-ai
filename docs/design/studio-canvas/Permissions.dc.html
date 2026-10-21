@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent permissions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#07040D}
+a{color:#3FDCEB}a:hover{color:#9FF3FA}
+.app{--bg:#0A0612;--ink:#EEE9F8;--ink2:#B5ADCB;--ink3:#9790AE;--line:rgba(255,255,255,.085);--line2:rgba(255,255,255,.16);--glass:rgba(23,16,39,.56);--glass2:rgba(10,6,18,.45);--blur:22px;--r:16px;--rs:9px;--row:46px;--blobop:.55;--kick:#FF5470;--clap:#FFB547;--hat:#5E8CFF;--ohat:#A3C0FF;--ride:#B79CFF;--acid:#A8F04C;--agent:#3FDCEB;--play:#F7F2FF;position:relative;width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.35}
+.app *{box-sizing:border-box}
+.look-b{--glass:rgba(16,12,27,.86);--glass2:rgba(6,4,12,.6);--blur:8px;--r:10px;--rs:6px;--row:40px;--blobop:.2;--line:rgba(255,255,255,.07)}
+.look-c{--glass:rgba(44,30,78,.32);--glass2:rgba(20,12,36,.35);--blur:40px;--r:22px;--rs:13px;--row:48px;--blobop:.9;--line:rgba(255,255,255,.15)}
+.blob{position:absolute;border-radius:50%;filter:blur(110px);opacity:var(--blobop);pointer-events:none}
+.glass{background:var(--glass);backdrop-filter:blur(var(--blur)) saturate(150%);-webkit-backdrop-filter:blur(var(--blur)) saturate(150%);border:1px solid var(--line);border-radius:var(--r);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 60px rgba(0,0,0,.35)}
+.look-c .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),inset 0 0 0 1px rgba(255,255,255,.04),0 30px 80px rgba(0,0,0,.45)}
+.look-b .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+.muted{color:var(--ink2)}
+.ib{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;min-width:32px;padding:0 9px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);font:600 12px Manrope,system-ui,sans-serif;cursor:pointer;white-space:nowrap}
+.ib:hover{background:rgba(255,255,255,.09)}
+.ib:focus-visible{outline:2px solid var(--play);outline-offset:2px}
+.ib.on{background:rgba(255,255,255,.13);border-color:var(--line2)}
+.ib svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ib.sm{height:26px;min-width:26px;padding:0 6px;font-size:11px}
+.ib.sm svg{width:14px;height:14px}
+.kbd{font:600 10px 'JetBrains Mono',monospace;color:var(--ink3);border:1px solid var(--line2);border-radius:4px;padding:0 4px;line-height:15px}
+.sep{width:1px;height:28px;background:var(--line);flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.xb{width:26px;height:26px;border-radius:6px;border:none;background:transparent;color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.xb:hover{background:rgba(255,255,255,.08);color:var(--ink)}
+.xb svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+.bgapp{position:absolute;left:0;top:0;width:1440px;height:900px}
+.dim{position:absolute;inset:0;background:rgba(5,3,10,.66);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+.sheet{position:absolute;left:330px;top:34px;width:780px;height:832px;display:flex;flex-direction:column;background:rgba(20,14,34,.9);overflow:hidden}
+.sh-h{padding:20px 24px 14px;display:flex;align-items:flex-start;gap:12px;border-bottom:1px solid var(--line)}
+.presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 24px}
+.pre{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.035);color:var(--ink);font-family:Manrope,sans-serif;text-align:left;cursor:pointer}
+.pre:hover{background:rgba(255,255,255,.07)}
+.pre.on{border-color:rgba(63,220,235,.6);background:rgba(63,220,235,.08);box-shadow:0 0 0 1px rgba(63,220,235,.3)}
+.pre b{font-size:13px}
+.pre span{font-size:11.5px;color:var(--ink2)}
+.thead{display:flex;align-items:center;padding:6px 24px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.prow{display:flex;align-items:center;gap:16px;padding:0 24px;height:47px;border-bottom:1px solid rgba(255,255,255,.045)}
+.prow .t{flex:1;min-width:0}
+.prow .t div:first-child{font-weight:700}
+.prow .t div:last-child{font-size:11.5px;color:var(--ink2)}
+.opts{display:flex;width:348px;flex:none;padding:2px;border-radius:9px;background:rgba(0,0,0,.28);border:1px solid var(--line)}
+.opt{flex:1;position:relative;display:flex;align-items:center;justify-content:center;height:28px;border-radius:7px;font-size:11.5px;font-weight:700;color:var(--ink2);cursor:pointer}
+.opt input{position:absolute;opacity:0;width:1px;height:1px}
+.opt.on{background:rgba(255,255,255,.14);color:var(--ink)}
+.opt:focus-within{outline:2px solid var(--play);outline-offset:1px}
+.lock{width:348px;flex:none;display:flex;align-items:center;justify-content:center;gap:6px;height:32px;border-radius:9px;border:1px dashed var(--line2);color:var(--ink2);font-size:11.5px;font-weight:700}
+.sh-f{margin-top:auto;display:flex;align-items:center;gap:10px;padding:14px 24px;border-top:1px solid var(--line)}
+.primary{background:#3FDCEB;color:#04161A;border-color:#3FDCEB}
+.primary:hover{background:#7DEAF4}
+</style>
+</helmet>
+<div class="app look-{{look}}">
+  <div class="bgapp" aria-hidden="true"><dc-import name="Main" look="{{look}}" chat="open" hint-size="1440px,900px"></dc-import></div>
+  <div class="dim"></div>
+  <section class="sheet glass" role="dialog" aria-modal="true" aria-labelledby="permTitle">
+    <div class="sh-h">
+      <div style="flex: 1">
+        <div class="lbl" style="color: var(--agent)">Agent permissions · first-acid</div>
+        <h2 id="permTitle" style="margin: 4px 0 4px; font-size: 20px; font-weight: 800">What can the agent change without asking?</h2>
+        <div class="muted" style="font-size: 12.5px">Anything set to Just do it happens at once, glows cyan and can be undone. Ask me first waits in Approvals.</div>
+      </div>
+      <button class="xb" aria-label="Close (Esc)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+    </div>
+    <div class="presets" role="group" aria-label="Presets">
+      <sc-for list="{{presets}}" as="p" hint-placeholder-count="3">
+        <button class="{{p.cls}}" aria-pressed="{{p.on}}" onClick="{{p.pick}}"><b>{{p.name}}</b><span>{{p.desc}}</span></button>
+      </sc-for>
+    </div>
+    <div class="thead">
+      <span class="lbl" style="flex: 1">Kind of change</span>
+      <div style="width: 348px; display: flex">
+        <span class="lbl" style="flex: 1; text-align: center">Just do it</span>
+        <span class="lbl" style="flex: 1; text-align: center">Ask me first</span>
+        <span class="lbl" style="flex: 1; text-align: center">Never</span>
+      </div>
+    </div>
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="10">
+      <div class="prow">
+        <div class="t"><div>{{r.name}}</div><div>{{r.desc}}</div></div>
+        <div class="opts" role="radiogroup" aria-label="{{r.name}}">
+          <sc-for list="{{r.opts}}" as="o" hint-placeholder-count="3">
+            <label class="{{o.cls}}"><input type="radio" name="{{r.id}}" checked="{{o.on}}" onChange="{{o.pick}}">{{o.label}}</label>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+    <div class="prow" style="border-bottom: none">
+      <div class="t"><div>Render and listen</div><div>Read-only: renders, loudness and spectrum never change the song.</div></div>
+      <div class="lock"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 2"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 018 0v3"></path></svg>Always allowed</div>
+    </div>
+    <div class="sh-f">
+      <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" style="fill: none; stroke: #B5ADCB; stroke-width: 1.8; stroke-linecap: round"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg>
+      <span class="muted" style="font-size: 12px; flex: 1">Undo works on every change, whatever you pick here.</span>
+      <button class="ib">Cancel</button>
+      <button class="ib primary">Save</button>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["a","b","c"],"default":"a"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { preset: 1, over: {} };
+  }
+  renderVals() {
+    const look = this.props.look ?? 'a';
+    const P = [
+      { name: 'Cautious', desc: 'Asks before anything beyond knob tweaks.' },
+      { name: 'Balanced', desc: 'Tweaks, steps and lanes at once. Shape changes wait for you.' },
+      { name: 'Hands-off', desc: 'Does almost everything. You undo what you do not like.' }
+    ];
+    const R = [
+      ['tweak', 'Knob and parameter tweaks', 'Cutoff, decay, gain, pan, sends, ducking.', [0, 0, 0]],
+      ['steps', 'Step edits in a pattern', 'Turn a step on or off, change a note, accent or slide.', [1, 0, 0]],
+      ['lanes', 'Automation lanes', 'Draw or move a lane, like the cutoff over the build.', [1, 0, 0]],
+      ['replace', 'Replace a pattern wholesale', 'Swap a whole 303 line or drum pattern for a new one.', [1, 1, 0]],
+      ['addtrack', 'Add a track', 'A new row fades in; nothing else moves.', [1, 0, 0]],
+      ['deltrack', 'Delete a track', 'Removes its blocks, its sound and its lanes.', [1, 1, 1]],
+      ['section', 'Add or remove a section', 'Changes how long the song is.', [1, 1, 0]],
+      ['arrange', 'Rearrange the song', 'Moves sections or changes their bar counts.', [1, 1, 0]],
+      ['tempo', 'Tempo change', 'Changes the BPM of the whole song; delay echoes restart.', [1, 1, 1]],
+      ['master', 'Master and limiter settings', 'Master gain, clip or limit, ceiling, release.', [1, 1, 0]]
+    ];
+    const LBL = ['Just do it', 'Ask me first', 'Never'];
+    const st = this.state;
+    const presets = P.map((p, i) => ({
+      ...p,
+      on: st.preset === i,
+      cls: st.preset === i ? 'pre on' : 'pre',
+      pick: () => this.setState({ preset: i, over: {} })
+    }));
+    const rows = R.map(([id, name, desc, def]) => {
+      const cur = st.over[id] !== undefined ? st.over[id] : def[st.preset < 0 ? 1 : st.preset];
+      return {
+        id, name, desc,
+        opts: LBL.map((label, v) => ({
+          label,
+          on: cur === v,
+          cls: 'opt o' + v + (cur === v ? ' on' : ''),
+          pick: () => this.setState({ over: { ...st.over, [id]: v } })
+        }))
+      };
+    });
+    return { look, presets, rows };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>303 step sequencer</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#07040D}
+a{color:#3FDCEB}a:hover{color:#9FF3FA}
+.app{--bg:#0A0612;--ink:#EEE9F8;--ink2:#B5ADCB;--ink3:#9790AE;--line:rgba(255,255,255,.085);--line2:rgba(255,255,255,.16);--glass:rgba(23,16,39,.56);--glass2:rgba(10,6,18,.45);--blur:22px;--r:16px;--rs:9px;--row:46px;--blobop:.55;--kick:#FF5470;--clap:#FFB547;--hat:#5E8CFF;--ohat:#A3C0FF;--ride:#B79CFF;--acid:#A8F04C;--agent:#3FDCEB;--play:#F7F2FF;position:relative;width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.35}
+.app *{box-sizing:border-box}
+.look-b{--glass:rgba(16,12,27,.86);--glass2:rgba(6,4,12,.6);--blur:8px;--r:10px;--rs:6px;--row:40px;--blobop:.2;--line:rgba(255,255,255,.07)}
+.look-c{--glass:rgba(44,30,78,.32);--glass2:rgba(20,12,36,.35);--blur:40px;--r:22px;--rs:13px;--row:48px;--blobop:.9;--line:rgba(255,255,255,.15)}
+.blob{position:absolute;border-radius:50%;filter:blur(110px);opacity:var(--blobop);pointer-events:none}
+.glass{background:var(--glass);backdrop-filter:blur(var(--blur)) saturate(150%);-webkit-backdrop-filter:blur(var(--blur)) saturate(150%);border:1px solid var(--line);border-radius:var(--r);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 60px rgba(0,0,0,.35)}
+.look-c .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),inset 0 0 0 1px rgba(255,255,255,.04),0 30px 80px rgba(0,0,0,.45)}
+.look-b .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+.muted{color:var(--ink2)}
+.ib{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;min-width:32px;padding:0 9px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);font:600 12px Manrope,system-ui,sans-serif;cursor:pointer;white-space:nowrap}
+.ib:hover{background:rgba(255,255,255,.09)}
+.ib:focus-visible{outline:2px solid var(--play);outline-offset:2px}
+.ib.on{background:rgba(255,255,255,.13);border-color:var(--line2)}
+.ib svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ib.sm{height:26px;min-width:26px;padding:0 6px;font-size:11px}
+.ib.sm svg{width:14px;height:14px}
+.kbd{font:600 10px 'JetBrains Mono',monospace;color:var(--ink3);border:1px solid var(--line2);border-radius:4px;padding:0 4px;line-height:15px}
+.sep{width:1px;height:28px;background:var(--line);flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.transport{position:absolute;left:12px;top:12px;right:12px;height:56px;display:flex;align-items:center;gap:12px;padding:0 12px}
+.play{width:40px;height:40px;border-radius:50%;border:none;background:var(--play);color:#120A1F;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 0 0 4px rgba(247,242,255,.12),0 0 24px rgba(220,200,255,.55);cursor:pointer}
+.play svg{width:18px;height:18px;fill:currentColor}
+.readout{display:flex;flex-direction:column;gap:1px}
+.big{font-size:20px;font-weight:600;line-height:22px}
+.lufs{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);cursor:pointer;font-family:Manrope,system-ui,sans-serif}
+.lufs:hover{background:rgba(255,255,255,.09)}
+.lmeter{position:relative;width:96px;height:6px;border-radius:3px;background:rgba(255,255,255,.1)}
+
+.tl{position:absolute;left:12px;top:80px;width:1064px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .tl{width:1348px}
+.tlbar{height:46px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line)}
+.grid{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
+.row{display:flex;height:var(--row);flex:none;border-bottom:1px solid rgba(255,255,255,.045);padding-right:10px}
+.hdr{width:168px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 0 0;border-right:1px solid var(--line)}
+.hdr .cbar{width:3px;align-self:stretch;margin:6px 4px 6px 0;border-radius:2px}
+.hdr .nm{flex:1;min-width:0;font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ms{width:22px;height:20px;border-radius:5px;border:1px solid var(--line);background:transparent;color:var(--ink2);font:700 10px Manrope,sans-serif;cursor:pointer;padding:0}
+.ms:hover{color:var(--ink);background:rgba(255,255,255,.08)}
+.hmeter{width:4px;height:26px;border-radius:2px;background:rgba(255,255,255,.08);position:relative;overflow:hidden}
+.hmeter i{position:absolute;left:0;right:0;bottom:0;border-radius:2px}
+.lanes{flex:1;display:flex;position:relative;min-width:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.035) 0 1px,transparent 1px 100%);background-size:calc(100% / 18) 100%}
+.cell{min-width:0;padding:5px 1px;display:flex}
+.blk{position:relative;flex:1;min-width:0;border:1px solid;border-radius:7px;padding:4px 6px 4px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;cursor:pointer}
+.look-b .blk{border-radius:4px}
+.look-c .blk{border-radius:11px}
+.blk .bn{font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:22px}
+.glyph{display:flex;align-items:flex-end;gap:1.5px;height:14px}
+.glyph i{flex:1;border-radius:1px;min-width:1px}
+.badge{position:absolute;right:4px;top:3px;font:600 9.5px 'JetBrains Mono',monospace;padding:0 4px;border-radius:4px;background:rgba(0,0,0,.35);color:var(--ink2);line-height:14px}
+.ruler{height:24px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.ruler .lanes{background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.22) 0 1px,transparent 1px 100%);background-size:calc(100% / 36) 5px;background-repeat:repeat-x;background-position:0 100%}
+.rc{min-width:0;font:500 10px 'JetBrains Mono',monospace;color:var(--ink3);padding:4px 0 0 4px;border-left:1px solid rgba(255,255,255,.18)}
+.secrow{height:32px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.sec{min-width:0;display:flex;align-items:center;gap:6px;padding:0 4px 0 7px;margin:4px 1px;border-radius:7px;font-size:11px;font-weight:700;color:var(--ink2);white-space:nowrap;overflow:hidden;background:rgba(255,255,255,.035);cursor:pointer}
+.sec.on{background:rgba(255,255,255,.14);color:var(--ink);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),0 0 18px rgba(220,200,255,.18)}
+.livedot{width:6px;height:6px;border-radius:50%;background:var(--play);box-shadow:0 0 8px var(--play);flex:none}
+.ov{position:absolute;left:168px;right:10px;top:0;bottom:0;pointer-events:none}
+.ph{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--play);box-shadow:0 0 8px rgba(247,242,255,.9),0 0 22px rgba(200,170,255,.55)}
+.ph::before{content:"";position:absolute;top:0;left:-5px;border:6px solid transparent;border-top:8px solid var(--play)}
+.loop{position:absolute;top:0;bottom:0;background:rgba(255,255,255,.035);border-left:1px solid rgba(255,255,255,.4);border-right:1px solid rgba(255,255,255,.4)}
+.loop::before{content:"";position:absolute;left:0;right:0;top:0;height:5px;background:rgba(255,255,255,.55);border-radius:0 0 2px 2px}
+.lane{height:72px}
+.lane .hdr{padding-left:15px;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px}
+.lane svg{position:absolute;inset:6px 0;width:100%;height:calc(100% - 12px);overflow:visible}
+.bp{position:absolute;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#0A0612;border:1.5px solid var(--acid)}
+.bp.ag{border-color:var(--agent);box-shadow:0 0 8px var(--agent)}
+.drop{flex:1;display:flex;padding:10px 10px 10px 178px}
+.dropzone{flex:1;border:1.5px dashed rgba(255,255,255,.12);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--ink3);font-size:12.5px}
+.help{height:36px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-top:1px solid var(--line);font-size:12px;color:var(--ink2)}
+.help b{color:var(--ink);font-weight:700}
+.agent-soft{box-shadow:inset 3px 0 0 var(--agent)}
+
+.chat{position:absolute;left:1088px;top:80px;width:340px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .chat{display:none}
+.rail{display:none;position:absolute;left:1372px;top:80px;width:56px;height:808px;flex-direction:column;align-items:center;gap:6px;padding:10px 0}
+.chat-rail .rail{display:flex}
+.rail .ib{width:40px;height:40px;padding:0;position:relative}
+.pip{position:absolute;top:4px;right:4px;min-width:15px;height:15px;border-radius:8px;background:var(--agent);color:#04161A;font:700 9.5px Manrope,sans-serif;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.chead{height:50px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px 0 14px;border-bottom:1px solid var(--line)}
+.tab{height:28px;padding:0 9px;border-radius:7px;border:none;background:transparent;color:var(--ink2);font:700 12px Manrope,sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.tab.on{background:rgba(255,255,255,.1);color:var(--ink)}
+.tab .n{min-width:16px;height:16px;border-radius:8px;background:var(--agent);color:#04161A;font-size:9.5px;display:inline-flex;align-items:center;justify-content:center}
+.msgs{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:12px;padding:14px}
+.me{align-self:flex-end;max-width:86%;background:rgba(255,255,255,.09);border:1px solid var(--line);border-radius:14px 14px 4px 14px;padding:8px 11px}
+.who{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--agent);margin-bottom:4px}
+.card{border-radius:12px;background:var(--glass2);border:1px solid rgba(63,220,235,.3);overflow:hidden}
+.card-h{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:11.5px;font-weight:700}
+.cl{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 10px;font-size:12px;cursor:pointer}
+.cl:hover{background:rgba(255,255,255,.05)}
+.cl .t{flex:1;min-width:0}
+.cl .v{font-size:10.5px;color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.card-f{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--line)}
+.agentbtn{border-color:rgba(63,220,235,.45);color:#BDF6FB}
+.xb{width:26px;height:26px;border-radius:6px;border:none;background:transparent;color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.xb:hover{background:rgba(255,255,255,.08);color:var(--ink)}
+.xb svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cfoot{flex:none;padding:10px 12px 12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:9px}
+.sw{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;cursor:pointer}
+.sw input{position:absolute;opacity:0;width:1px;height:1px}
+.sw .trk{width:30px;height:17px;border-radius:9px;background:rgba(255,255,255,.14);position:relative;flex:none}
+.sw .trk::after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:var(--ink2)}
+.sw input:checked + .trk{background:var(--agent)}
+.sw input:checked + .trk::after{left:15px;background:#04161A}
+.sw input:focus-visible + .trk{outline:2px solid var(--play);outline-offset:2px}
+.composer{display:flex;align-items:flex-end;gap:8px;border-radius:12px;border:1px solid var(--line2);background:rgba(0,0,0,.25);padding:8px 8px 8px 12px}
+.composer textarea{flex:1;resize:none;border:none;background:transparent;color:var(--ink);font:500 13px Manrope,sans-serif;height:38px;outline:none}
+.composer textarea::placeholder{color:var(--ink3)}
+.send{width:32px;height:32px;border-radius:9px;border:none;background:var(--agent);color:#04161A;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.send svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+.pnl{position:absolute;left:12px;right:12px;display:flex;flex-direction:column;overflow:hidden}
+.ph2{height:52px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line)}
+.trkchip{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:13px}
+.trkchip i{width:10px;height:10px;border-radius:3px;background:var(--acid);box-shadow:0 0 10px rgba(168,240,76,.5)}
+.vlab{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);border:1px solid var(--line2);border-radius:5px;padding:2px 7px}
+.stepper{display:inline-flex;align-items:center;gap:4px}
+.stepper .val{min-width:40px;text-align:center;font-size:12px}
+.linkb{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink2)}
+.cols{flex:1;display:flex;padding:10px 14px 0;gap:0;min-height:0}
+.rlab{width:70px;flex:none;display:flex;flex-direction:column;gap:6px;padding:6px 6px 6px 0}
+.rlab span{display:flex;align-items:center;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--ink2)}
+.sc{flex:1;min-width:0;display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:6px 4px;border-radius:10px;position:relative}
+.sc.g{background:rgba(255,255,255,.035)}
+.sc.live{background:rgba(247,242,255,.12);box-shadow:inset 0 0 0 1px rgba(247,242,255,.55),0 0 22px rgba(220,200,255,.25)}
+.sc.agent{box-shadow:inset 0 0 0 1.5px #3FDCEB,0 0 18px rgba(63,220,235,.4)}
+.snum{font:500 10px 'JetBrains Mono',monospace;color:var(--ink3);text-align:center;height:16px;line-height:16px}
+.sc.live .snum{color:var(--play)}
+.note{height:64px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1px solid;cursor:pointer;font-family:'JetBrains Mono',monospace}
+.note b{font-size:16px;font-weight:600}
+.note .pm{width:70%;height:3px;border-radius:2px;background:rgba(255,255,255,.1);position:relative}
+.note .pm i{position:absolute;top:-2px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:currentColor}
+.pud{display:flex;gap:4px;height:24px}
+.pud button{flex:1;border-radius:6px;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--ink2);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+.pud svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tg{height:26px;border-radius:6px;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--ink3);font:700 10px Manrope,sans-serif;letter-spacing:.06em;cursor:pointer;padding:0}
+.tg.acc.on{background:#A8F04C;color:#0B1403;border-color:transparent}
+.tg.sld.on{background:rgba(168,240,76,.18);color:#D9FBB0;border-color:rgba(168,240,76,.7)}
+.tg.gate.on{background:rgba(255,255,255,.12);color:var(--ink);border-color:var(--line2)}
+.pfoot{height:40px;flex:none;display:flex;align-items:center;gap:14px;padding:0 14px 0 84px;font-size:11.5px;color:var(--ink2)}
+.roll{display:flex;padding:10px 14px 0;gap:0}
+.keys{width:70px;flex:none;display:flex;flex-direction:column}
+.key{height:14px;font:500 9px 'JetBrains Mono',monospace;color:var(--ink3);display:flex;align-items:center;justify-content:flex-end;padding-right:6px;border-radius:2px 0 0 2px;background:rgba(255,255,255,.07);border-bottom:1px solid rgba(0,0,0,.35)}
+.key.blk2{background:rgba(0,0,0,.45)}
+.key.c{color:var(--ink);font-weight:600}
+.rgrid{flex:1;position:relative;height:252px;border-radius:0 8px 8px 0;overflow:hidden;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.14) 0 1px,transparent 1px 100%),repeating-linear-gradient(90deg,rgba(255,255,255,.05) 0 1px,transparent 1px 100%);background-size:25% 100%,6.25% 100%}
+.rrow{height:14px;border-bottom:1px solid rgba(255,255,255,.03)}
+.rrow.blk2{background:rgba(0,0,0,.22)}
+.rrow.c{border-bottom:1px solid rgba(255,255,255,.08)}
+.nb{position:absolute;border-radius:4px;cursor:pointer}
+.rgrid svg{position:absolute;left:0;top:0;width:100%;height:252px;overflow:visible;pointer-events:none}
+.livecol{position:absolute;top:0;bottom:0;background:rgba(247,242,255,.08);box-shadow:inset 1px 0 0 rgba(247,242,255,.6),inset -1px 0 0 rgba(247,242,255,.6)}
+.ghost{position:absolute;height:12px;border:1.5px dashed rgba(238,233,248,.6);border-radius:4px}
+.ghostlab{position:absolute;font-size:10.5px;color:var(--ink);background:rgba(10,6,18,.85);border:1px solid var(--line2);border-radius:5px;padding:1px 6px;white-space:nowrap}
+.sublane{display:flex;padding:0 14px;gap:0}
+.sublane .sl{width:70px;flex:none;display:flex;align-items:center;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--ink2)}
+.sublane .cells{flex:1;display:flex;border-top:1px solid var(--line)}
+.sublane .cells > div{flex:1;min-width:0;display:flex;align-items:flex-end;justify-content:center;padding:4px 3px}
+.accbar{width:60%;border-radius:2px 2px 0 0;background:#A8F04C}
+.sldic{width:100%;height:18px;display:flex;align-items:center;justify-content:center}
+.sldic svg{width:28px;height:14px;fill:none;stroke:#A8F04C;stroke-width:2;stroke-linecap:round}
+</style>
+</helmet>
+<div class="app look-{{look}}">
+  <div class="blob" style="left: -160px; top: 420px; width: 620px; height: 520px; background: #B4237E"></div>
+  <div class="blob" style="left: 520px; top: -220px; width: 720px; height: 460px; background: #3A2BC2"></div>
+  <div class="blob" style="left: 1080px; top: 560px; width: 560px; height: 460px; background: #5B1E9E"></div>
+
+  <section class="pnl glass" style="top: 12px; height: 362px" aria-label="303 steps, variation A">
+    <div class="ph2">
+      <span class="trkchip"><i></i>Acid 303</span>
+      <span class="muted">Steps</span>
+      <div class="sep" style="height: 22px"></div>
+      <span class="mono" style="font-size: 13px; font-weight: 600">acid_main</span>
+      <span class="linkb"><span class="badge" style="position: static">×5</span> used in 5 blocks</span>
+      <button class="ib sm">Make unique</button>
+      <div class="sep" style="height: 22px"></div>
+      <span class="lbl">Length</span>
+      <span class="stepper">
+        <button class="ib sm" aria-label="Fewer steps"><svg viewBox="0 0 24 24"><path d="M5 12h14"></path></svg></button>
+        <span class="mono val">16</span>
+        <button class="ib sm" aria-label="More steps"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg></button>
+      </span>
+      <span class="lbl">Transpose</span>
+      <span class="stepper">
+        <button class="ib sm" aria-label="Transpose down a semitone"><svg viewBox="0 0 24 24"><path d="M5 12h14"></path></svg></button>
+        <span class="mono val">0 st</span>
+        <button class="ib sm" aria-label="Transpose up a semitone"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg></button>
+      </span>
+      <div style="flex: 1"></div>
+      <span class="vlab">A · columns</span>
+    </div>
+    <div class="cols">
+      <div class="rlab">
+        <span style="height: 16px">Step</span>
+        <span style="height: 64px">Note</span>
+        <span style="height: 24px">Pitch</span>
+        <span style="height: 26px">Accent</span>
+        <span style="height: 26px">Slide</span>
+        <span style="height: 26px">Gate</span>
+      </div>
+      <sc-for list="{{steps}}" as="s" hint-placeholder-count="16">
+        <div class="{{s.cls}}">
+          <span class="snum">{{s.n}}</span>
+          <button class="note" style="box-sizing: border-box; {{s.noteSt}}" aria-label="Step {{s.n}} note {{s.name}}">
+            <b>{{s.name}}</b>
+            <span class="pm"><i style="left: {{s.pos}}%"></i></span>
+          </button>
+          <span class="pud">
+            <button aria-label="Step {{s.n}} pitch up"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"></path></svg></button>
+            <button aria-label="Step {{s.n}} pitch down"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"></path></svg></button>
+          </span>
+          <button class="{{s.accCls}}" aria-pressed="{{s.acc}}" aria-label="Step {{s.n}} accent">ACC</button>
+          <button class="{{s.sldCls}}" aria-pressed="{{s.sld}}" aria-label="Step {{s.n}} slide">SLIDE</button>
+          <button class="{{s.gateCls}}" aria-pressed="{{s.gate}}" aria-label="Step {{s.n}} gate">{{s.gateTxt}}</button>
+        </div>
+      </sc-for>
+    </div>
+    <div class="pfoot">
+      <span><span class="kbd">A</span> accent</span>
+      <span><span class="kbd">S</span> slide</span>
+      <span><span class="kbd">↑</span><span class="kbd">↓</span> pitch</span>
+      <span><span class="kbd">⇧ ↑</span> octave</span>
+      <span><span class="kbd">.</span> rest</span>
+      <span>Click a note to hear it</span>
+      <div style="flex: 1"></div>
+      <span style="display: inline-flex; align-items: center; gap: 6px"><span class="dot" style="background: #3FDCEB; box-shadow: 0 0 8px #3FDCEB"></span>Step 6 changed by the agent · D#2 accent on</span>
+      <button class="xb" aria-label="Undo agent change on step 6"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg></button>
+    </div>
+  </section>
+
+  <section class="pnl glass" style="top: 386px; height: 454px" aria-label="303 steps, variation B">
+    <div class="ph2">
+      <span class="trkchip"><i></i>Acid 303</span>
+      <span class="muted">Steps</span>
+      <div class="sep" style="height: 22px"></div>
+      <span class="mono" style="font-size: 13px; font-weight: 600">acid_main</span>
+      <span class="linkb"><span class="badge" style="position: static">×5</span> used in 5 blocks</span>
+      <button class="ib sm">Make unique</button>
+      <div class="sep" style="height: 22px"></div>
+      <span class="lbl">Length</span>
+      <span class="mono" style="font-size: 12px">16 steps</span>
+      <span class="lbl">Range</span>
+      <span class="mono" style="font-size: 12px">A#1 – D#3</span>
+      <div style="flex: 1"></div>
+      <span class="vlab">B · pitch lane</span>
+    </div>
+    <div class="roll">
+      <div class="keys" aria-hidden="true">
+        <sc-for list="{{keys}}" as="k" hint-placeholder-count="18"><div class="{{k.cls}}">{{k.label}}</div></sc-for>
+      </div>
+      <div class="rgrid" aria-label="Pitch lane">
+        <sc-for list="{{keys}}" as="k" hint-placeholder-count="18"><div class="{{k.rowCls}}"></div></sc-for>
+        <div class="livecol" style="left: 62.5%; width: 6.25%"></div>
+        <svg viewBox="0 0 1600 252" preserveAspectRatio="none" aria-hidden="true">
+          <path d="{{ramps}}" style="fill: none; stroke: #A8F04C; stroke-width: 2.2; vector-effect: non-scaling-stroke; opacity: .85"></path>
+        </svg>
+        <sc-for list="{{bars}}" as="b" hint-placeholder-count="12"><div class="nb" style="box-sizing: border-box; {{b.s}}"></div></sc-for>
+        <div class="ghost" style="left: calc(68.75% + 2px); width: calc(6.25% - 4px); top: 113px"></div>
+        <div class="ghostlab" style="left: calc(68.75% + 2px); top: 92px">click to place G2</div>
+      </div>
+    </div>
+    <div class="sublane" style="height: 46px; margin-top: 8px">
+      <span class="sl">Accent</span>
+      <div class="cells">
+        <sc-for list="{{steps}}" as="s" hint-placeholder-count="16"><div><span class="accbar" style="box-sizing: border-box; {{s.accSt}}"></span></div></sc-for>
+      </div>
+    </div>
+    <div class="sublane" style="height: 30px">
+      <span class="sl">Slide</span>
+      <div class="cells">
+        <sc-for list="{{steps}}" as="s" hint-placeholder-count="16">
+          <div style="align-items: center">
+            <sc-if value="{{s.sld}}" hint-placeholder-val="{{false}}"><span class="sldic"><svg viewBox="0 0 28 14" aria-hidden="true"><path d="M2 12h8l8-10h8"></path></svg></span></sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <div class="pfoot" style="padding-left: 84px">
+      <span>Click to place a note · drag its end onto the next note to slide · <span class="kbd">⇧</span> click to accent</span>
+      <div style="flex: 1"></div>
+      <span style="display: inline-flex; align-items: center; gap: 6px"><span class="dot" style="background: #3FDCEB; box-shadow: 0 0 8px #3FDCEB"></span>Agent edit on step 6</span>
+    </div>
+  </section>
+
+  <div class="glass help" style="position: absolute; left: 12px; right: 12px; top: 852px; height: 36px; border-top: 1px solid var(--line)">
+    <span class="kbd">?</span>
+    <span><b>acid · slide</b> — glides from this note into the next one instead of hitting it again. Slides on accented notes are where the classic 303 squelch comes from.</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["a","b","c"],"default":"a"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const look = this.props.look ?? 'a';
+    const PAT = 'C2!~ C2!~ C3! C2~ . D#2!~ C2~ G2!~ D2!~ . C3!~ . A#1!~ C#2! E2!~ .';
+    const NOTE = { C: 0, 'C#': 1, D: 2, 'D#': 3, E: 4, F: 5, 'F#': 6, G: 7, 'G#': 8, A: 9, 'A#': 10, B: 11 };
+    const LIVE = 10;
+    const AG = 5;
+    const LO = 22;
+    const HI = 39;
+    const toks = PAT.split(' ').map((tok) => {
+      const m = tok.match(/^([A-G]#?)(\d)/);
+      if (!m) return { rest: true };
+      return { rest: false, name: m[1] + m[2], semi: NOTE[m[1]] + 12 * Number(m[2]), acc: tok.includes('!'), sld: tok.includes('~') };
+    });
+    const steps = toks.map((t, i) => {
+      let cls = 'sc' + ((Math.floor(i / 4) % 2 === 0) ? ' g' : '');
+      if (i === LIVE) cls = 'sc live';
+      if (i === AG) cls = 'sc agent';
+      let noteSt = 'border-color: rgba(255,255,255,.1); border-style: dashed; color: #9790AE; background: transparent';
+      if (!t.rest) {
+        noteSt = t.acc
+          ? 'background: rgba(168,240,76,.26); border-color: rgba(168,240,76,.85); color: #F1FFE0'
+          : 'background: rgba(168,240,76,.11); border-color: rgba(168,240,76,.45); color: #D9FBB0';
+      }
+      return {
+        n: i + 1,
+        cls,
+        name: t.rest ? '—' : t.name,
+        noteSt,
+        pos: t.rest ? 0 : Math.round(((t.semi - LO) / (HI - LO)) * 100),
+        acc: !!t.acc,
+        sld: !!t.sld,
+        gate: !t.rest,
+        accCls: 'tg acc' + (t.acc ? ' on' : ''),
+        sldCls: 'tg sld' + (t.sld ? ' on' : ''),
+        gateCls: 'tg gate' + (t.rest ? '' : ' on'),
+        gateTxt: t.rest ? 'REST' : 'NOTE',
+        accSt: t.rest ? 'height: 0' : (t.acc ? 'height: 30px; opacity: 1' : 'height: 12px; opacity: .45')
+      };
+    });
+    const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const keys = [];
+    for (let s = HI; s >= LO; s--) {
+      const nm = NAMES[s % 12];
+      const black = nm.includes('#');
+      const isC = nm === 'C';
+      keys.push({
+        label: isC || s === HI || s === LO ? nm + Math.floor(s / 12) : '',
+        cls: 'key' + (black ? ' blk2' : '') + (isC ? ' c' : ''),
+        rowCls: 'rrow' + (black ? ' blk2' : '') + (isC ? ' c' : '')
+      });
+    }
+    const ROW = 14;
+    const bars = [];
+    let ramps = '';
+    toks.forEach((t, i) => {
+      if (t.rest) return;
+      const top = (HI - t.semi) * ROW;
+      const w = t.sld ? 'calc(6.25% * .75)' : 'calc(6.25% - 4px)';
+      const h = t.acc ? 12 : 8;
+      const off = t.acc ? 1 : 3;
+      let s = `left: calc(${(i * 6.25).toFixed(2)}% + 2px); width: ${w}; top: ${top + off}px; height: ${h}px; background: ${t.acc ? '#A8F04C' : 'rgba(168,240,76,.5)'}`;
+      if (t.acc) s += '; box-shadow: 0 0 10px rgba(168,240,76,.45)';
+      if (i === AG) s += '; box-shadow: 0 0 0 2px #3FDCEB, 0 0 14px rgba(63,220,235,.7)';
+      bars.push({ s });
+      const nx = toks[i + 1];
+      if (t.sld && nx && !nx.rest) {
+        const y1 = top + 7;
+        const y2 = (HI - nx.semi) * ROW + 7;
+        ramps += `M ${i * 100 + 77} ${y1} L ${(i + 1) * 100 + 4} ${y2} `;
+      }
+    });
+    return { look, steps, keys, bars, ramps: ramps.trim() || 'M 0 0' };
+  }
+}
+</script>
+</body>
+</html>

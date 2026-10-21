@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Timeline details</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#07040D}
+a{color:#3FDCEB}a:hover{color:#9FF3FA}
+.app{--bg:#0A0612;--ink:#EEE9F8;--ink2:#B5ADCB;--ink3:#9790AE;--line:rgba(255,255,255,.085);--line2:rgba(255,255,255,.16);--glass:rgba(23,16,39,.56);--glass2:rgba(10,6,18,.45);--blur:22px;--r:16px;--rs:9px;--row:46px;--blobop:.55;--kick:#FF5470;--clap:#FFB547;--hat:#5E8CFF;--ohat:#A3C0FF;--ride:#B79CFF;--acid:#A8F04C;--agent:#3FDCEB;--play:#F7F2FF;position:relative;width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.35}
+.app *{box-sizing:border-box}
+.look-b{--glass:rgba(16,12,27,.86);--glass2:rgba(6,4,12,.6);--blur:8px;--r:10px;--rs:6px;--row:40px;--blobop:.2;--line:rgba(255,255,255,.07)}
+.look-c{--glass:rgba(44,30,78,.32);--glass2:rgba(20,12,36,.35);--blur:40px;--r:22px;--rs:13px;--row:48px;--blobop:.9;--line:rgba(255,255,255,.15)}
+.blob{position:absolute;border-radius:50%;filter:blur(110px);opacity:var(--blobop);pointer-events:none}
+.glass{background:var(--glass);backdrop-filter:blur(var(--blur)) saturate(150%);-webkit-backdrop-filter:blur(var(--blur)) saturate(150%);border:1px solid var(--line);border-radius:var(--r);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 60px rgba(0,0,0,.35)}
+.look-c .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),inset 0 0 0 1px rgba(255,255,255,.04),0 30px 80px rgba(0,0,0,.45)}
+.look-b .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+.muted{color:var(--ink2)}
+.ib{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;min-width:32px;padding:0 9px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);font:600 12px Manrope,system-ui,sans-serif;cursor:pointer;white-space:nowrap}
+.ib:hover{background:rgba(255,255,255,.09)}
+.ib:focus-visible{outline:2px solid var(--play);outline-offset:2px}
+.ib.on{background:rgba(255,255,255,.13);border-color:var(--line2)}
+.ib svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ib.sm{height:26px;min-width:26px;padding:0 6px;font-size:11px}
+.ib.sm svg{width:14px;height:14px}
+.kbd{font:600 10px 'JetBrains Mono',monospace;color:var(--ink3);border:1px solid var(--line2);border-radius:4px;padding:0 4px;line-height:15px}
+.sep{width:1px;height:28px;background:var(--line);flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.transport{position:absolute;left:12px;top:12px;right:12px;height:56px;display:flex;align-items:center;gap:12px;padding:0 12px}
+.play{width:40px;height:40px;border-radius:50%;border:none;background:var(--play);color:#120A1F;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 0 0 4px rgba(247,242,255,.12),0 0 24px rgba(220,200,255,.55);cursor:pointer}
+.play svg{width:18px;height:18px;fill:currentColor}
+.readout{display:flex;flex-direction:column;gap:1px}
+.big{font-size:20px;font-weight:600;line-height:22px}
+.lufs{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);cursor:pointer;font-family:Manrope,system-ui,sans-serif}
+.lufs:hover{background:rgba(255,255,255,.09)}
+.lmeter{position:relative;width:96px;height:6px;border-radius:3px;background:rgba(255,255,255,.1)}
+
+.tl{position:absolute;left:12px;top:80px;width:1064px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .tl{width:1348px}
+.tlbar{height:46px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line)}
+.grid{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
+.row{display:flex;height:var(--row);flex:none;border-bottom:1px solid rgba(255,255,255,.045);padding-right:10px}
+.hdr{width:168px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 0 0;border-right:1px solid var(--line)}
+.hdr .cbar{width:3px;align-self:stretch;margin:6px 4px 6px 0;border-radius:2px}
+.hdr .nm{flex:1;min-width:0;font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ms{width:22px;height:20px;border-radius:5px;border:1px solid var(--line);background:transparent;color:var(--ink2);font:700 10px Manrope,sans-serif;cursor:pointer;padding:0}
+.ms:hover{color:var(--ink);background:rgba(255,255,255,.08)}
+.hmeter{width:4px;height:26px;border-radius:2px;background:rgba(255,255,255,.08);position:relative;overflow:hidden}
+.hmeter i{position:absolute;left:0;right:0;bottom:0;border-radius:2px}
+.lanes{flex:1;display:flex;position:relative;min-width:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.035) 0 1px,transparent 1px 100%);background-size:calc(100% / 18) 100%}
+.cell{min-width:0;padding:5px 1px;display:flex}
+.blk{position:relative;flex:1;min-width:0;border:1px solid;border-radius:7px;padding:4px 6px 4px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;cursor:pointer}
+.look-b .blk{border-radius:4px}
+.look-c .blk{border-radius:11px}
+.blk .bn{font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:22px}
+.glyph{display:flex;align-items:flex-end;gap:1.5px;height:14px}
+.glyph i{flex:1;border-radius:1px;min-width:1px}
+.badge{position:absolute;right:4px;top:3px;font:600 9.5px 'JetBrains Mono',monospace;padding:0 4px;border-radius:4px;background:rgba(0,0,0,.35);color:var(--ink2);line-height:14px}
+.ruler{height:24px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.ruler .lanes{background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.22) 0 1px,transparent 1px 100%);background-size:calc(100% / 36) 5px;background-repeat:repeat-x;background-position:0 100%}
+.rc{min-width:0;font:500 10px 'JetBrains Mono',monospace;color:var(--ink3);padding:4px 0 0 4px;border-left:1px solid rgba(255,255,255,.18)}
+.secrow{height:32px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.sec{min-width:0;display:flex;align-items:center;gap:6px;padding:0 4px 0 7px;margin:4px 1px;border-radius:7px;font-size:11px;font-weight:700;color:var(--ink2);white-space:nowrap;overflow:hidden;background:rgba(255,255,255,.035);cursor:pointer}
+.sec.on{background:rgba(255,255,255,.14);color:var(--ink);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),0 0 18px rgba(220,200,255,.18)}
+.livedot{width:6px;height:6px;border-radius:50%;background:var(--play);box-shadow:0 0 8px var(--play);flex:none}
+.ov{position:absolute;left:168px;right:10px;top:0;bottom:0;pointer-events:none}
+.ph{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--play);box-shadow:0 0 8px rgba(247,242,255,.9),0 0 22px rgba(200,170,255,.55)}
+.ph::before{content:"";position:absolute;top:0;left:-5px;border:6px solid transparent;border-top:8px solid var(--play)}
+.loop{position:absolute;top:0;bottom:0;background:rgba(255,255,255,.035);border-left:1px solid rgba(255,255,255,.4);border-right:1px solid rgba(255,255,255,.4)}
+.loop::before{content:"";position:absolute;left:0;right:0;top:0;height:5px;background:rgba(255,255,255,.55);border-radius:0 0 2px 2px}
+.lane{height:72px}
+.lane .hdr{padding-left:15px;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px}
+.lane svg{position:absolute;inset:6px 0;width:100%;height:calc(100% - 12px);overflow:visible}
+.bp{position:absolute;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#0A0612;border:1.5px solid var(--acid)}
+.bp.ag{border-color:var(--agent);box-shadow:0 0 8px var(--agent)}
+.drop{flex:1;display:flex;padding:10px 10px 10px 178px}
+.dropzone{flex:1;border:1.5px dashed rgba(255,255,255,.12);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--ink3);font-size:12.5px}
+.help{height:36px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-top:1px solid var(--line);font-size:12px;color:var(--ink2)}
+.help b{color:var(--ink);font-weight:700}
+.agent-soft{box-shadow:inset 3px 0 0 var(--agent)}
+
+.chat{position:absolute;left:1088px;top:80px;width:340px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .chat{display:none}
+.rail{display:none;position:absolute;left:1372px;top:80px;width:56px;height:808px;flex-direction:column;align-items:center;gap:6px;padding:10px 0}
+.chat-rail .rail{display:flex}
+.rail .ib{width:40px;height:40px;padding:0;position:relative}
+.pip{position:absolute;top:4px;right:4px;min-width:15px;height:15px;border-radius:8px;background:var(--agent);color:#04161A;font:700 9.5px Manrope,sans-serif;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.chead{height:50px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px 0 14px;border-bottom:1px solid var(--line)}
+.tab{height:28px;padding:0 9px;border-radius:7px;border:none;background:transparent;color:var(--ink2);font:700 12px Manrope,sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.tab.on{background:rgba(255,255,255,.1);color:var(--ink)}
+.tab .n{min-width:16px;height:16px;border-radius:8px;background:var(--agent);color:#04161A;font-size:9.5px;display:inline-flex;align-items:center;justify-content:center}
+.msgs{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:12px;padding:14px}
+.me{align-self:flex-end;max-width:86%;background:rgba(255,255,255,.09);border:1px solid var(--line);border-radius:14px 14px 4px 14px;padding:8px 11px}
+.who{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--agent);margin-bottom:4px}
+.card{border-radius:12px;background:var(--glass2);border:1px solid rgba(63,220,235,.3);overflow:hidden}
+.card-h{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:11.5px;font-weight:700}
+.cl{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 10px;font-size:12px;cursor:pointer}
+.cl:hover{background:rgba(255,255,255,.05)}
+.cl .t{flex:1;min-width:0}
+.cl .v{font-size:10.5px;color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.card-f{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--line)}
+.agentbtn{border-color:rgba(63,220,235,.45);color:#BDF6FB}
+.xb{width:26px;height:26px;border-radius:6px;border:none;background:transparent;color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.xb:hover{background:rgba(255,255,255,.08);color:var(--ink)}
+.xb svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cfoot{flex:none;padding:10px 12px 12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:9px}
+.sw{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;cursor:pointer}
+.sw input{position:absolute;opacity:0;width:1px;height:1px}
+.sw .trk{width:30px;height:17px;border-radius:9px;background:rgba(255,255,255,.14);position:relative;flex:none}
+.sw .trk::after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:var(--ink2)}
+.sw input:checked + .trk{background:var(--agent)}
+.sw input:checked + .trk::after{left:15px;background:#04161A}
+.sw input:focus-visible + .trk{outline:2px solid var(--play);outline-offset:2px}
+.composer{display:flex;align-items:flex-end;gap:8px;border-radius:12px;border:1px solid var(--line2);background:rgba(0,0,0,.25);padding:8px 8px 8px 12px}
+.composer textarea{flex:1;resize:none;border:none;background:transparent;color:var(--ink);font:500 13px Manrope,sans-serif;height:38px;outline:none}
+.composer textarea::placeholder{color:var(--ink3)}
+.send{width:32px;height:32px;border-radius:9px;border:none;background:var(--agent);color:#04161A;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.send svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+.crop{position:absolute;display:flex;flex-direction:column;overflow:hidden}
+.capt{height:42px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line)}
+.capt .tag{font:700 10px 'JetBrains Mono',monospace;color:#120A1F;background:var(--ink);border-radius:5px;padding:1px 6px}
+.capt .tt{font-weight:800;font-size:13px}
+.crop .row{height:38px}
+.crop .lane{height:64px}
+.tip{position:absolute;transform:translateX(-50%);background:#F7F2FF;color:#120A1F;font:600 11px 'JetBrains Mono',monospace;padding:3px 8px;border-radius:6px;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.4);z-index:3}
+.handle{position:absolute;top:2px;width:10px;height:20px;margin-left:-5px;border-radius:4px;background:#F7F2FF;box-shadow:0 0 0 3px rgba(247,242,255,.18)}
+.handle::after{content:"";position:absolute;left:4px;top:5px;width:2px;height:10px;border-left:1px solid #120A1F;border-right:1px solid #120A1F}
+.handle.drag{box-shadow:0 0 0 5px rgba(247,242,255,.28),0 0 16px rgba(247,242,255,.7)}
+.cur{position:absolute;width:20px;height:20px;z-index:4;filter:drop-shadow(0 2px 3px rgba(0,0,0,.6))}
+.cur svg{width:20px;height:20px;fill:#F7F2FF;stroke:#120A1F;stroke-width:1.2;stroke-linejoin:round}
+.menu{position:absolute;width:236px;padding:6px;border-radius:12px;background:rgba(24,16,40,.94);border:1px solid var(--line2);box-shadow:0 20px 50px rgba(0,0,0,.55);z-index:5;display:flex;flex-direction:column;gap:1px}
+.mi{display:flex;align-items:center;gap:9px;width:100%;height:30px;padding:0 9px;border:none;border-radius:7px;background:transparent;color:var(--ink);font:600 12px Manrope,sans-serif;text-align:left;cursor:pointer}
+.mi:hover,.mi.hi{background:rgba(255,255,255,.1)}
+.mi svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mi .k{margin-left:auto}
+.mdiv{height:1px;background:var(--line);margin:4px 2px}
+.clip{position:absolute;top:5px;bottom:5px;border:1px solid;border-radius:7px;padding:4px 8px;font-size:10.5px;font-weight:700;overflow:hidden;white-space:nowrap}
+.clip .rh{position:absolute;top:0;bottom:0;width:6px;background:rgba(255,255,255,.5)}
+.tool{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:rgba(0,0,0,.25);border:1px solid var(--line)}
+.tool button{width:24px;height:22px;border:none;border-radius:5px;background:transparent;color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.tool button.on{background:rgba(255,255,255,.16);color:var(--ink)}
+.tool svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div class="app look-{{look}}" style="height: 1100px">
+  <div class="blob" style="left: -160px; top: 420px; width: 620px; height: 520px; background: #B4237E"></div>
+  <div class="blob" style="left: 520px; top: -220px; width: 720px; height: 460px; background: #3A2BC2"></div>
+  <div class="blob" style="left: 1080px; top: 560px; width: 560px; height: 460px; background: #5B1E9E"></div>
+
+  <!-- (a) playing state -->
+  <section class="crop glass" aria-label="Playing state" style="left: 12px; top: 12px; width: 1416px; height: 340px">
+    <div class="capt">
+      <span class="tag">a</span><span class="tt">Playing</span>
+      <span class="muted" style="font-size: 12px">bars 73–100 · breakdown into the drop · the playing section and its blocks light up</span>
+      <div style="flex: 1"></div>
+      <span class="mono" style="font-size: 12px">84.3</span>
+    </div>
+    <div class="grid">
+      <div class="ruler">
+        <div class="hdr" style="padding-left: 12px"><span class="lbl">Bar</span></div>
+        <div class="lanes" style="background-size: calc(100% / 28) 5px">
+          <sc-for list="{{a.ruler}}" as="r" hint-placeholder-count="7"><div class="rc" style="flex: 4 1 0">{{r.n}}</div></sc-for>
+        </div>
+      </div>
+      <div class="secrow">
+        <div class="hdr" style="padding-left: 12px"><span class="lbl">Sections</span></div>
+        <div class="lanes" style="background-image: none">
+          <sc-for list="{{a.secs}}" as="s" hint-placeholder-count="3">
+            <button class="{{s.cls}}" style="flex: {{s.bars}} 1 0; border: none; font-family: Manrope, sans-serif">
+              <sc-if value="{{s.on}}" hint-placeholder-val="{{false}}"><span class="livedot"></span></sc-if>
+              {{s.name}}
+              <sc-if value="{{s.on}}" hint-placeholder-val="{{false}}"><span class="mono" style="font-size: 10px; color: var(--ink2); font-weight: 500">playing · 81–96</span></sc-if>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+      <sc-for list="{{a.tracks}}" as="t" hint-placeholder-count="5">
+        <div class="row">
+          <div class="hdr">
+            <span class="cbar" style="box-sizing: border-box; {{t.bar}}"></span>
+            <span class="nm">{{t.name}}</span>
+            <button class="ms" aria-label="Mute {{t.name}}">M</button>
+            <button class="ms" aria-label="Solo {{t.name}}">S</button>
+            <span class="hmeter"><i style="box-sizing: border-box; {{t.meter}}"></i></span>
+          </div>
+          <div class="lanes" style="background-size: calc(100% / 7) 100%">
+            <sc-for list="{{t.cells}}" as="c" hint-placeholder-count="3">
+              <div class="cell" style="box-sizing: border-box; {{c.grow}}">
+                <sc-if value="{{c.has}}" hint-placeholder-val="{{true}}">
+                  <div class="blk" style="box-sizing: border-box; {{c.st}}">
+                    <span class="bn">{{c.label}}</span>
+                    <sc-if value="{{c.badge}}" hint-placeholder-val="{{false}}"><span class="badge">{{c.badge}}</span></sc-if>
+                    <span class="glyph" aria-hidden="true">
+                      <sc-for list="{{c.steps}}" as="g" hint-placeholder-count="16"><i style="box-sizing: border-box; {{g.s}}"></i></sc-for>
+                    </span>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+      <div class="ov" aria-hidden="true">
+        <div class="ph" style="left: 41.07%"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- (b) loop range drag -->
+  <section class="crop glass" aria-label="Loop range" style="left: 12px; top: 368px; width: 700px; height: 300px">
+    <div class="capt">
+      <span class="tag">b</span><span class="tt">Loop range</span>
+      <span class="muted" style="font-size: 12px">drag the handles on the ruler</span>
+      <div style="flex: 1"></div>
+      <button class="ib sm on" aria-pressed="true" aria-label="Loop on (L)"><svg viewBox="0 0 24 24"><path d="M17 2l3 3-3 3"></path><path d="M4 11V9a4 4 0 014-4h12"></path><path d="M7 22l-3-3 3-3"></path><path d="M20 13v2a4 4 0 01-4 4H4"></path></svg>Loop <span class="kbd">L</span></button>
+    </div>
+    <div class="grid" style="padding-top: 34px">
+      <div class="ruler" style="height: 26px">
+        <div class="hdr" style="width: 120px; padding-left: 12px"><span class="lbl">Bar</span></div>
+        <div class="lanes" style="background-size: calc(100% / 12) 5px">
+          <sc-for list="{{b.ruler}}" as="r" hint-placeholder-count="6"><div class="rc" style="flex: 8 1 0">{{r.n}}</div></sc-for>
+        </div>
+      </div>
+      <div class="secrow">
+        <div class="hdr" style="width: 120px; padding-left: 12px"><span class="lbl">Sections</span></div>
+        <div class="lanes" style="background-image: none">
+          <sc-for list="{{b.secs}}" as="s" hint-placeholder-count="3">
+            <button class="sec" style="flex: {{s.bars}} 1 0; border: none; font-family: Manrope, sans-serif">{{s.name}}</button>
+          </sc-for>
+        </div>
+      </div>
+      <sc-for list="{{b.tracks}}" as="t" hint-placeholder-count="2">
+        <div class="row">
+          <div class="hdr" style="width: 120px">
+            <span class="cbar" style="box-sizing: border-box; {{t.bar}}"></span>
+            <span class="nm">{{t.name}}</span>
+          </div>
+          <div class="lanes" style="background-size: calc(100% / 6) 100%">
+            <sc-for list="{{t.cells}}" as="c" hint-placeholder-count="3">
+              <div class="cell" style="box-sizing: border-box; {{c.grow}}">
+                <sc-if value="{{c.has}}" hint-placeholder-val="{{true}}">
+                  <div class="blk" style="box-sizing: border-box; {{c.st}}">
+                    <span class="bn">{{c.label}}</span>
+                    <span class="glyph" aria-hidden="true">
+                      <sc-for list="{{c.steps}}" as="g" hint-placeholder-count="16"><i style="box-sizing: border-box; {{g.s}}"></i></sc-for>
+                    </span>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+      <div class="ov" aria-hidden="true" style="left: 120px">
+        <div style="position: absolute; left: 0; width: 33.333%; top: 26px; bottom: 0; background: rgba(5,3,10,.45)"></div>
+        <div style="position: absolute; left: 66.667%; right: 0; top: 26px; bottom: 0; background: rgba(5,3,10,.45)"></div>
+        <div class="loop" style="left: 33.333%; width: 33.333%"></div>
+        <div class="handle" style="left: 33.333%"></div>
+        <div class="handle drag" style="left: 66.667%"></div>
+        <div class="tip" style="left: 66.667%; top: -30px">81–96 · 16 bars</div>
+        <div class="cur" style="left: calc(66.667% + 4px); top: 12px"><svg viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5V13h8v4l5-5-5-5v4H8z"></path></svg></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- (c) automation lanes -->
+  <section class="crop glass" aria-label="Automation lanes" style="left: 728px; top: 368px; width: 700px; height: 300px">
+    <div class="capt">
+      <span class="tag">c</span><span class="tt">Automation lanes</span>
+      <span class="muted" style="font-size: 12px">under the acid row · bars 33–80</span>
+      <div style="flex: 1"></div>
+      <div class="tool" role="group" aria-label="Lane tool">
+        <button aria-label="Select and drag points"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-3 6z"></path></svg></button>
+        <button class="on" aria-label="Pen: draw a curve" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16z"></path></svg></button>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="secrow" style="height: 28px">
+        <div class="hdr" style="width: 140px; padding-left: 12px"><span class="lbl">Sections</span></div>
+        <div class="lanes" style="background-image: none">
+          <sc-for list="{{c.secs}}" as="s" hint-placeholder-count="2">
+            <button class="sec" style="flex: {{s.bars}} 1 0; border: none; font-family: Manrope, sans-serif; margin: 3px 1px">{{s.name}}</button>
+          </sc-for>
+        </div>
+      </div>
+      <div class="row" style="height: 34px">
+        <div class="hdr" style="width: 140px">
+          <span class="cbar" style="background: #A8F04C"></span>
+          <span class="nm">Acid 303</span>
+          <span class="mono muted" style="font-size: 10px">3 lanes</span>
+        </div>
+        <div class="lanes" style="background-size: calc(100% / 6) 100%">
+          <div class="cell" style="flex: 32 1 0"><div class="blk" style="background: rgba(168,240,76,.13); border-color: rgba(168,240,76,.42); color: #A8F04C; justify-content: center"><span class="bn">acid_main</span></div></div>
+          <div class="cell" style="flex: 16 1 0"><div class="blk" style="background: rgba(168,240,76,.13); border-color: rgba(168,240,76,.42); color: #A8F04C; justify-content: center"><span class="bn">acid_main</span></div></div>
+        </div>
+      </div>
+      <sc-for list="{{c.lanes}}" as="ln" hint-placeholder-count="3">
+        <div class="row lane" style="height: 62px">
+          <div class="hdr" style="width: 140px">
+            <span class="lbl" style="color: var(--acid)">↳ {{ln.name}}</span>
+            <span class="mono muted" style="font-size: 10.5px">{{ln.id}}</span>
+          </div>
+          <div class="lanes" style="background-size: calc(100% / 6) 100%">
+            <svg viewBox="0 0 480 100" preserveAspectRatio="none" aria-hidden="true">
+              <polygon points="{{ln.area}}" style="fill: rgba(168,240,76,.09)"></polygon>
+              <polyline points="{{ln.line}}" style="fill: none; stroke: #A8F04C; stroke-width: 1.6; vector-effect: non-scaling-stroke"></polyline>
+              <polyline points="{{ln.pen}}" style="fill: none; stroke: #F7F2FF; stroke-width: 1.8; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke"></polyline>
+            </svg>
+            <sc-for list="{{ln.dots}}" as="d" hint-placeholder-count="4"><span class="bp" style="box-sizing: border-box; {{d.s}}"></span></sc-for>
+            <sc-if value="{{ln.drag}}" hint-placeholder-val="{{false}}">
+              <span class="bp" style="left: 66.667%; top: calc(6px + (100% - 12px) * .455); width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; background: #F7F2FF; border-color: #F7F2FF; box-shadow: 0 0 0 4px rgba(247,242,255,.2), 0 0 12px rgba(247,242,255,.7)"></span>
+              <span class="tip" style="left: 66.667%; top: -6px">bar 64 · 55 %</span>
+            </sc-if>
+            <sc-if value="{{ln.pencur}}" hint-placeholder-val="{{false}}">
+              <span class="cur" style="left: 88%; top: 2px"><svg viewBox="0 0 24 24"><path d="M3 21l1.5-5L16 4.5l3.5 3.5L8 19.5z"></path></svg></span>
+            </sc-if>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- (d) section-locked block and its pattern link -->
+  <section class="crop glass" aria-label="Pattern link" style="left: 12px; top: 684px; width: 700px; height: 404px">
+    <div class="capt">
+      <span class="tag">d</span><span class="tt">One pattern, five blocks</span>
+      <span class="muted" style="font-size: 12px">same tint, same ×5 badge</span>
+    </div>
+    <div class="grid" style="padding-top: 6px">
+      <div class="secrow" style="height: 28px">
+        <div class="hdr" style="width: 104px; padding-left: 12px"><span class="lbl">Sections</span></div>
+        <div class="lanes" style="background-image: none">
+          <sc-for list="{{d.secs}}" as="s" hint-placeholder-count="8">
+            <div class="sec" style="flex: {{s.bars}} 1 0; margin: 3px 1px; font-size: 9.5px; padding: 0 3px">{{s.short}}</div>
+          </sc-for>
+        </div>
+      </div>
+      <sc-for list="{{d.tracks}}" as="t" hint-placeholder-count="2">
+        <div class="row" style="height: 44px">
+          <div class="hdr" style="width: 104px">
+            <span class="cbar" style="box-sizing: border-box; {{t.bar}}"></span>
+            <span class="nm">{{t.name}}</span>
+          </div>
+          <div class="lanes">
+            <sc-for list="{{t.cells}}" as="c" hint-placeholder-count="8">
+              <div class="cell" style="box-sizing: border-box; {{c.grow}}">
+                <sc-if value="{{c.has}}" hint-placeholder-val="{{true}}">
+                  <div class="blk" style="box-sizing: border-box; {{c.st}}">
+                    <span class="bn" style="font-size: 9.5px">{{c.label}}</span>
+                    <sc-if value="{{c.badge}}" hint-placeholder-val="{{false}}"><span class="badge">{{c.badge}}</span></sc-if>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+      <div style="position: absolute; left: 104px; right: 10px; top: 0; bottom: 0; pointer-events: none">
+        <div class="menu" role="menu" aria-label="Block acid_main in build" style="left: 23%; top: 112px; pointer-events: auto">
+          <div style="padding: 4px 9px 6px; display: flex; flex-direction: column; gap: 2px">
+            <span style="font-weight: 800; font-size: 12px; color: #A8F04C">acid_main · build</span>
+            <span class="muted" style="font-size: 11px">Used by 5 blocks. Editing it changes all 5.</span>
+          </div>
+          <div class="mdiv"></div>
+          <button class="mi" role="menuitem"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M12 12l4-4"></path></svg>Open sound<span class="kbd k">↵</span></button>
+          <button class="mi" role="menuitem"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="4" height="12" rx="1"></rect><rect x="10" y="6" width="4" height="12" rx="1"></rect><rect x="17" y="6" width="4" height="12" rx="1"></rect></svg>Open steps<span class="kbd k">dbl-click</span></button>
+          <button class="mi hi" role="menuitem"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="11" height="11" rx="2"></rect><path d="M9 20h9a2 2 0 002-2V9"></path></svg>Make unique<span class="muted k" style="font-size: 11px">acid_main_2</span></button>
+          <button class="mi" role="menuitem"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"></path></svg>Ask about this</button>
+          <div class="mdiv"></div>
+          <button class="mi" role="menuitem"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="8" height="10" rx="1.5"></rect><rect x="13" y="7" width="8" height="10" rx="1.5"></rect></svg>Duplicate section</button>
+        </div>
+        <div class="cur" style="left: 26%; top: 94px"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-3 6z"></path></svg></div>
+      </div>
+    </div>
+    <div class="help" style="margin-top: auto">
+      <span class="kbd">?</span>
+      <span><b>Linked blocks</b> — blocks that share a pattern share notes. Make unique gives this block its own copy.</span>
+    </div>
+  </section>
+
+  <!-- (e) phase 2 free clips -->
+  <section class="crop glass" aria-label="Free clips, phase 2 variation" style="left: 728px; top: 684px; width: 700px; height: 404px">
+    <div class="capt">
+      <span class="tag">e</span><span class="tt">Free clips</span>
+      <span style="font-size: 10.5px; font-weight: 700; color: var(--ink); border: 1px solid var(--line2); border-radius: 5px; padding: 1px 6px">Phase 2 variation</span>
+      <span class="muted" style="font-size: 12px">move, resize, split · not locked to sections</span>
+    </div>
+    <div class="grid">
+      <div class="ruler">
+        <div class="hdr" style="width: 104px; padding-left: 12px"><span class="lbl">Bar</span></div>
+        <div class="lanes" style="background-size: calc(100% / 16) 5px">
+          <sc-for list="{{e.ruler}}" as="r" hint-placeholder-count="8"><div class="rc" style="flex: 8 1 0">{{r.n}}</div></sc-for>
+        </div>
+      </div>
+      <div class="secrow" style="height: 28px">
+        <div class="hdr" style="width: 104px; padding-left: 12px"><span class="lbl">Sections</span></div>
+        <div class="lanes" style="background-image: none">
+          <div class="sec" style="flex: 16 1 0; margin: 3px 1px">intro</div>
+          <div class="sec" style="flex: 16 1 0; margin: 3px 1px">intro_acid</div>
+          <div class="sec" style="flex: 32 1 0; margin: 3px 1px">build</div>
+        </div>
+      </div>
+      <div class="row" style="height: 50px">
+        <div class="hdr" style="width: 104px"><span class="cbar" style="background: #FF5470"></span><span class="nm">Kick</span></div>
+        <div class="lanes" style="background-size: calc(100% / 8) 100%">
+          <div class="clip" style="left: 0%; width: 37.3%; background: rgba(255,84,112,.15); border-color: rgba(255,84,112,.5); color: #FF5470">kick4</div>
+          <div class="clip" style="left: 37.5%; width: 62.3%; background: rgba(255,84,112,.15); border-color: rgba(255,84,112,.5); color: #FF5470">kick4</div>
+          <div style="position: absolute; left: 75%; top: 0; bottom: 0; border-left: 1.5px dashed #F7F2FF"></div>
+          <div class="cur" style="left: calc(75% + 4px); top: 14px"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M8.5 7.5L20 18M8.5 16.5L20 6" style="fill: none; stroke: #F7F2FF; stroke-width: 2"></path></svg></div>
+          <span class="tip" style="left: 75%; top: -2px">split at 49</span>
+        </div>
+      </div>
+      <div class="row" style="height: 50px">
+        <div class="hdr" style="width: 104px"><span class="cbar" style="background: #A8F04C"></span><span class="nm">Acid 303</span></div>
+        <div class="lanes" style="background-size: calc(100% / 8) 100%">
+          <div class="clip" style="left: 18.75%; width: 25%; background: rgba(168,240,76,.15); border-color: rgba(168,240,76,.5); color: #A8F04C">acid_main</div>
+          <div class="clip" style="left: 50%; width: 25%; background: transparent; border: 1px dashed rgba(168,240,76,.45); color: rgba(168,240,76,.6)"></div>
+          <div class="clip" style="left: 43.75%; width: 25%; background: rgba(168,240,76,.3); border-color: #A8F04C; color: #fff; box-shadow: 0 10px 24px rgba(0,0,0,.5); cursor: grabbing">acid_main</div>
+          <div class="cur" style="left: 54%; top: 16px"><svg viewBox="0 0 24 24"><path d="M12 2l3 3h-2v6h6V9l3 3-3 3v-2h-6v6h2l-3 3-3-3h2v-6H5v2l-3-3 3-3v2h6V5H9z"></path></svg></div>
+          <span class="tip" style="left: 56%; top: -2px">29–44</span>
+        </div>
+      </div>
+      <div class="row" style="height: 50px">
+        <div class="hdr" style="width: 104px"><span class="cbar" style="background: #5E8CFF"></span><span class="nm">Closed hat</span></div>
+        <div class="lanes" style="background-size: calc(100% / 8) 100%">
+          <div class="clip" style="left: 0%; width: 50%; background: rgba(94,140,255,.15); border-color: rgba(94,140,255,.5); color: #8FB0FF">hats8</div>
+          <div class="clip" style="left: 71.9%; width: 21.9%; background: rgba(94,140,255,.28); border-color: #5E8CFF; color: #fff">hats8<span class="rh" style="right: 0"></span></div>
+          <div class="cur" style="left: calc(93.8% - 6px); top: 15px"><svg viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5V13h8v4l5-5-5-5v4H8z"></path></svg></div>
+          <span class="tip" style="left: 93.8%; top: -2px">ends 60</span>
+        </div>
+      </div>
+    </div>
+    <div class="help">
+      <span class="kbd">S</span>
+      <span><b>Free clip</b> — drag the middle to move, the edge to resize, press S to split at the cursor.</span>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["a","b","c"],"default":"a"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const look = this.props.look ?? 'a';
+    const SECS = [['intro', 16], ['intro_acid', 16], ['build', 32], ['breakdown', 16], ['drop', 16], ['drop_peak', 16], ['outro', 16], ['outro_drums', 16]];
+    const SHORT = ['intro', 'i·acid', 'build', 'break', 'drop', 'peak', 'outro', 'o·drm'];
+    const PAT = {
+      kick4: 'x.X.x...x...x...',
+      hats8: 'x.X.x.X.x.X.x.X.',
+      open_off: '..x...x...x...x.',
+      clap24: '....x.......x...',
+      acid_main: 'C2!~ C2!~ C3! C2~ . D#2!~ C2~ G2!~ D2!~ . C3!~ . A#1!~ C#2! E2!~ .',
+      acid_jump: 'C2 C3! C2~ C3 . D#3~ D#2 G2! . C2 C3! C2~ A#2~ A#1 C3! F2~'
+    };
+    const NOTE = { C: 0, 'C#': 1, D: 2, 'D#': 3, E: 4, F: 5, 'F#': 6, G: 7, 'G#': 8, A: 9, 'A#': 10, B: 11 };
+    const glyph = (id, rgb) => {
+      const p = PAT[id];
+      if (p.includes(' ')) {
+        return p.split(' ').map((tok) => {
+          const m = tok.match(/^([A-G]#?)(\d)/);
+          if (!m) return { s: 'height: 2px; opacity: 0' };
+          const semi = NOTE[m[1]] + 12 * Number(m[2]) - 22;
+          return { s: `height: 3px; margin-bottom: ${Math.round(semi * 0.6)}px; background: rgb(${rgb}); opacity: ${tok.includes('!') ? 1 : 0.6}` };
+        });
+      }
+      return p.split('').map((ch) => ({
+        s: ch === '.' ? `height: 2px; background: rgb(${rgb}); opacity: .2` : `height: ${ch === 'X' ? 13 : 8}px; background: rgb(${rgb}); opacity: ${ch === 'X' ? 1 : 0.7}`
+      }));
+    };
+    const TR = [
+      { name: 'Kick', rgb: '255,84,112', lvl: 82, pats: ['kick4', 'kick4', 'kick4', null, 'kick4', 'kick4', 'kick4', 'kick4'] },
+      { name: 'Clap', rgb: '255,181,71', lvl: 55, pats: [null, null, 'clap24', null, 'clap24', 'clap24', 'clap24', null] },
+      { name: 'Closed hat', rgb: '94,140,255', lvl: 46, pats: Array(8).fill('hats8') },
+      { name: 'Open hat', rgb: '163,192,255', lvl: 38, pats: [null, null, 'open_off', null, 'open_off', 'open_off', 'open_off', null] },
+      { name: 'Acid 303', rgb: '168,240,76', lvl: 74, pats: [null, 'acid_main', 'acid_main', 'acid_main', 'acid_main', 'acid_jump', 'acid_main', null] }
+    ];
+    const uses = {};
+    TR.forEach((t) => t.pats.forEach((p) => { if (p) uses[p] = (uses[p] || 0) + 1; }));
+    const crop = (a, b, play) => {
+      let st = 1;
+      const out = [];
+      SECS.forEach(([name, bars], i) => {
+        const s = st, e = st + bars - 1;
+        st += bars;
+        const lo = Math.max(s, a), hi = Math.min(e, b);
+        if (lo <= hi) out.push({ i, name, short: SHORT[i], bars: hi - lo + 1, on: i === play, cls: i === play ? 'sec on' : 'sec' });
+      });
+      return out;
+    };
+    const ruler = (a, b, step) => {
+      const r = [];
+      for (let x = a; x <= b; x += step) r.push({ n: x });
+      return r;
+    };
+    const rows = (secs, play, which, opt) => TR.filter((t) => which.includes(t.name)).map((t) => ({
+      name: t.name,
+      bar: `background: rgb(${t.rgb})`,
+      meter: `height: ${t.lvl}%; background: linear-gradient(0deg, rgba(${t.rgb},.55), rgb(${t.rgb}))`,
+      cells: secs.map((s) => {
+        const p = t.pats[s.i];
+        const on = s.i === play;
+        let st = `background: rgba(${t.rgb},.13); border-color: rgba(${t.rgb},.42); color: rgb(${t.rgb})`;
+        if (on) st = `background: rgba(${t.rgb},.30); border-color: rgba(${t.rgb},.95); color: #fff; box-shadow: 0 0 16px rgba(${t.rgb},.38)`;
+        if (opt && opt.link && p === 'acid_main') st = `background: rgba(${t.rgb},.22); border-color: rgba(${t.rgb},.8); color: #fff`;
+        if (opt && opt.link && p === 'acid_main' && s.i === 2) st = `background: rgba(${t.rgb},.32); border-color: #F7F2FF; color: #fff; box-shadow: 0 0 0 1.5px #F7F2FF`;
+        return {
+          grow: `flex: ${s.bars} 1 0`,
+          has: !!p,
+          label: p || '',
+          badge: p && uses[p] > 1 ? `×${uses[p]}` : '',
+          st,
+          steps: p ? glyph(p, t.rgb) : []
+        };
+      })
+    }));
+    const ALL = TR.map((t) => t.name);
+    const aSecs = crop(73, 100, 4);
+    const a = { secs: aSecs, ruler: ruler(73, 100, 4), tracks: rows(aSecs, 4, ALL) };
+    const bSecs = crop(65, 112, -1);
+    const b = { secs: bSecs, ruler: ruler(65, 112, 8), tracks: rows(bSecs, -1, ['Kick', 'Acid 303']) };
+    const Y = (v) => (100 - v * 90 - 5).toFixed(1);
+    const mkLane = (name, id, segs, extra) => {
+      const pts = [];
+      segs.forEach(([b0, v0, b1, v1]) => { pts.push([(b0 - 32) * 10, Y(v0)], [(b1 - 32) * 10, Y(v1)]); });
+      const line = pts.map(([x, y]) => `${x},${y}`).join(' ');
+      return {
+        name, id, line,
+        area: `0,100 ${line} 480,100`,
+        pen: extra.pen || '',
+        drag: !!extra.drag,
+        pencur: !!extra.pen,
+        dots: pts.filter(([x, y]) => !(extra.drag && x === 320 && y === Y(.55))).map(([x, y]) => ({ s: `left: ${(x / 4.8).toFixed(3)}%; top: calc(6px + (100% - 12px) * ${(Number(y) / 100).toFixed(3)})` }))
+      };
+    };
+    const c = {
+      secs: crop(33, 80, -1),
+      lanes: [
+        mkLane('Cutoff', 'acid303.cutoff', [[32, .12, 64, .55], [64, .35, 80, .25]], { drag: true }),
+        mkLane('Resonance', 'acid303.resonance', [[32, .80, 64, .85], [64, .95, 80, .95]], {}),
+        mkLane('Drive', 'dist.drive', [[32, .3125, 64, .5], [64, .3125, 80, .375]], { pen: '330,62 345,55 360,48 372,52 385,40 398,36 410,30 422,33' })
+      ]
+    };
+    const dSecs = crop(1, 144, -1);
+    const d = { secs: dSecs, tracks: rows(dSecs, -1, ['Kick', 'Acid 303'], { link: true }) };
+    const e = { ruler: ruler(1, 64, 8) };
+    return { look, a, b, c, d, e };
+  }
+}
+</script>
+</body>
+</html>
