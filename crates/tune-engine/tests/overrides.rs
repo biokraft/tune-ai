@@ -3,10 +3,15 @@
 
 mod common;
 
-use common::{Event, MINI, compiled, probe_engine, probe_engine_fx, run};
-use tune_dsp::DIST_PARAMS;
+use std::sync::Arc;
+
+use common::{
+    Event, MINI, MIXED, compile_song, compiled, probe_engine, probe_engine_fx, run, variant_of,
+};
 use tune_dsp::acid303::ACID303_PARAMS;
-use tune_engine::ParamTarget;
+use tune_dsp::{DIST_PARAMS, MASTER_GAIN, STRIP_SEND_DELAY};
+use tune_engine::{CompiledSong, Engine, MIX_TRACK, ParamTarget};
+use tune_song::{MasterMode, MixUnit, Song};
 
 /// One bar at 120 BPM and 48 kHz.
 const BAR: u64 = 96_000;
@@ -161,4 +166,116 @@ fn param_target_resolves() {
     assert!(s.param_target(ACID, "kick.tune").is_none());
     assert!(s.param_target(0, "kick.tune").is_some());
     assert!(s.param_target(9, "acid303.cutoff").is_none());
+}
+
+fn bits(x: &[f32]) -> Vec<u32> {
+    x.iter().map(|v| v.to_bits()).collect()
+}
+
+/// The clip variant of `mixed.toml` without its static master gain (so
+/// the master gain sits at 0 dB), then `edit`.
+fn clip_mixed(edit: impl FnOnce(&mut Song)) -> Arc<CompiledSong> {
+    compile_song(&variant_of(MIXED, |s| {
+        s.mix.master = MasterMode::Clip;
+        s.mix.params.shift_remove("master.gain");
+        edit(s);
+    }))
+}
+
+/// Removes the acid's `send.delay` lane, so its static send holds.
+fn drop_send_lane(s: &mut Song) {
+    for section in &mut s.sections {
+        section
+            .automation
+            .retain(|l| !(l.track == "acid" && l.param == "send.delay"));
+    }
+}
+
+const MASTER_GAIN_KNOB: ParamTarget = ParamTarget::Mix {
+    unit: MixUnit::Master,
+    index: MASTER_GAIN,
+};
+
+#[test]
+fn mix_override_and_clear() {
+    let s = clip_mixed(|_| {});
+    let bar = s.clock.bar_start(1);
+    let mut control = Engine::new(s.clone());
+    let mut e = Engine::new(s.clone());
+    assert_eq!(bits(&run(&mut e, bar)), bits(&run(&mut control, bar)));
+
+    // The master stage holds no state in clip mode, so the override is a
+    // plain +12 dB on the pre-clip bus.
+    e.set_override(MIX_TRACK, MASTER_GAIN_KNOB, Some(12.0));
+    assert_eq!(e.overrides_active(), 1);
+    e.reset_meter();
+    control.reset_meter();
+    run(&mut e, bar);
+    run(&mut control, bar);
+    let ratio = e.meter().pre_clip_peak / control.meter().pre_clip_peak;
+    assert!(ratio >= 3.9, "pre-clip peak ratio {ratio}");
+
+    e.set_override(MIX_TRACK, MASTER_GAIN_KNOB, None);
+    assert_eq!(e.overrides_active(), 0);
+    assert_eq!(
+        bits(&run(&mut e, bar)),
+        bits(&run(&mut control, bar)),
+        "static again after the clear"
+    );
+
+    // `clear_overrides` clears a mix override too.
+    e.set_override(MIX_TRACK, MASTER_GAIN_KNOB, Some(12.0));
+    run(&mut e, 100);
+    run(&mut control, 100);
+    e.clear_overrides();
+    assert_eq!(e.overrides_active(), 0);
+    let rest = s.end_sample() - 3 * bar - 100;
+    assert_eq!(bits(&run(&mut e, rest)), bits(&run(&mut control, rest)));
+}
+
+#[test]
+fn strip_override_on_send() {
+    let s = clip_mixed(drop_send_lane);
+    let open = clip_mixed(|s| {
+        drop_send_lane(s);
+        let acid = s.tracks.get_mut("acid").unwrap();
+        acid.params.insert("send.delay".into(), 0.0);
+    });
+    let (acid, send, _) = s.resolve_param("acid", "send.delay").unwrap();
+    assert_eq!(send, ParamTarget::Strip(STRIP_SEND_DELAY));
+    let bar = s.clock.bar_start(1);
+    // Through the first bar of section `b`, where the acid plays.
+    let frames = 3 * bar;
+
+    let mut e = Engine::new(s.clone());
+    e.set_override(acid, send, Some(0.0));
+    assert_eq!(e.overrides_active(), 1);
+    let heard = run(&mut e, frames);
+    assert_eq!(
+        bits(&heard),
+        bits(&run(&mut Engine::new(open), frames)),
+        "the override sounds like the static value"
+    );
+    assert_ne!(
+        bits(&heard),
+        bits(&run(&mut Engine::new(s.clone()), frames)),
+        "the override changes the mix"
+    );
+
+    e.set_override(acid, send, None);
+    assert_eq!(e.overrides_active(), 0);
+    // A seek clears every bus, so what follows depends on the params alone.
+    let mut control = Engine::new(s.clone());
+    e.seek(3);
+    control.seek(3);
+    assert_eq!(
+        bits(&run(&mut e, bar)),
+        bits(&run(&mut control, bar)),
+        "static again"
+    );
+
+    // `clear_overrides` clears a strip override too.
+    e.set_override(acid, send, Some(0.0));
+    e.clear_overrides();
+    assert_eq!(e.overrides_active(), 0);
 }

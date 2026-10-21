@@ -212,14 +212,24 @@ fn same_fx_chain(a: &[CompiledFx], b: &[CompiledFx]) -> bool {
         })
 }
 
+/// Whether two songs build their mix runtimes alike, so one runtime serves
+/// both: the same master mode (the limiter), the same buses, and bit-equal
+/// `clock.samples_per_step` (the delay buffer is sized from it). Params may
+/// differ; the static reset after a swap sets them.
+fn same_mix_build(a: &CompiledSong, b: &CompiledSong) -> bool {
+    a.mix.master == b.mix.master
+        && a.mix.delay.is_some() == b.mix.delay.is_some()
+        && a.mix.reverb.is_some() == b.mix.reverb.is_some()
+        && a.clock.samples_per_step.to_bits() == b.clock.samples_per_step.to_bits()
+}
+
 /// Plays a [`CompiledSong`]: arrangement, automation, mixer, buses and the
 /// master stage.
 pub struct Engine {
     song: Arc<CompiledSong>,
     tracks: Vec<TrackRuntime>,
-    /// The buses and the master stage. A swap keeps it as it is (swaps do
-    /// not rebuild it yet), so it may lack a bus the playing song has; a bus
-    /// the runtime lacks is off.
+    /// The buses and the master stage, built for the playing song (see
+    /// `same_mix_build`); a swap keeps it or takes the update's.
     mix: MixRuntime,
     /// Song sample position of the next sample.
     pos: u64,
@@ -241,6 +251,8 @@ pub struct Engine {
     /// The last applied swap, holding the old song, until it is taken.
     retired: Option<Box<SongUpdate>>,
     swaps_applied: u64,
+    /// Swaps that kept `mix`.
+    mix_swaps_kept: u64,
     /// The generation of the song playing (see [`generation`](Self::generation)).
     generation: u64,
     /// Knob overrides set across all runtimes.
@@ -286,6 +298,7 @@ impl Engine {
             pending: None,
             retired: None,
             swaps_applied: 0,
+            mix_swaps_kept: 0,
             generation: 0,
             overrides_active: 0,
         }
@@ -301,6 +314,11 @@ impl Engine {
     /// - every new track takes the old runtime with the same id and
     ///   instrument kind (keeping the old fx chain if it is built alike, see
     ///   `same_fx_chain`); other tracks get the update's fresh runtimes;
+    /// - the running mix runtime (bus tails, limiter state and mix
+    ///   overrides) stays when the new song builds its mix alike (the same
+    ///   master mode, the same buses and a bit-equal step length); otherwise
+    ///   the update's fresh one takes over and the old one goes back in the
+    ///   retired update;
     /// - the new clock takes over at step `k` (the step index survives a bpm
     ///   change) and static params are re-applied;
     /// - the loop is clamped to the new end, and dropped when it starts at
@@ -312,7 +330,8 @@ impl Engine {
     /// new end; [`seek`](Self::seek) restarts it.
     ///
     /// Knob overrides travel with the runtimes a swap keeps (an fx chain's
-    /// overrides only when the chain is kept). An update made to clear the
+    /// overrides only when the chain is kept, strip overrides with the
+    /// track, mix overrides with the mix runtime). An update made to clear the
     /// overrides clears them all when it lands; an update that replaces such
     /// a pending one inherits that.
     pub fn queue_swap(&mut self, mut update: Box<SongUpdate>) -> Option<Box<SongUpdate>> {
@@ -343,6 +362,12 @@ impl Engine {
     /// Swaps applied since the engine was built.
     pub fn swaps_applied(&self) -> u64 {
         self.swaps_applied
+    }
+
+    /// Swaps that kept the running mix runtime (see
+    /// [`queue_swap`](Self::queue_swap)).
+    pub fn mix_swaps_kept(&self) -> u64 {
+        self.mix_swaps_kept
     }
 
     /// The generation of the song playing: 0 for the song the engine was
@@ -647,6 +672,11 @@ impl Engine {
             u.spare.push(rt);
         }
         std::mem::swap(&mut self.tracks, &mut u.spare);
+        if same_mix_build(&self.song, &u.song) {
+            self.mix_swaps_kept += 1;
+        } else {
+            std::mem::swap(&mut self.mix, &mut u.mix);
+        }
         std::mem::swap(&mut self.song, &mut u.song);
         self.generation = u.generation;
         let clear = u.clear_overrides;
