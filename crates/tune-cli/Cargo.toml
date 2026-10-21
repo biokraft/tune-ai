@@ -19,12 +19,14 @@ path = "src/lib.rs"
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3.5.2"
 hound = "3.5"
+jiff = { version = "=0.2.37", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
 tune-audio = { path = "../tune-audio" }
 tune-dsp = { path = "../tune-dsp" }
 tune-engine = { path = "../tune-engine" }
 tune-song = { path = "../tune-song" }
+tune-studio = { path = "../tune-studio" }
 
 [dev-dependencies]
 assert_cmd = "2"

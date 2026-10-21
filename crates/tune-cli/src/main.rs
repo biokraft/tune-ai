@@ -28,11 +28,25 @@ enum Command {
     Render(RenderArgs),
     /// Play a song through the audio device, reloading it when the file changes.
     Play(PlayArgs),
+    /// Edit song values by path, logged as Claude's edits.
+    Set(SetArgs),
     /// List every instrument and effect parameter.
     Params(JsonArgs),
     /// Render an acid 303 pattern to a stereo 24-bit WAV.
     #[command(name = "render-303")]
     Render303(Render303),
+}
+
+#[derive(Args)]
+struct SetArgs {
+    /// Song file (TOML).
+    song: PathBuf,
+    /// Edits as PATH=VALUE, e.g. tracks.acid.acid303.cutoff=820 (all or nothing).
+    #[arg(required = true, value_name = "PATH=VALUE")]
+    assignments: Vec<String>,
+    /// Print JSON instead of text.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -279,6 +293,7 @@ fn main() -> ExitCode {
             },
             json: a.json,
         }),
+        Command::Set(a) => cmd::set::run(&a.song, &a.assignments, a.json),
         Command::Params(a) => cmd::params::run(a.json),
         Command::Render303(a) => finish(a.json, run(&a)),
     }
