@@ -16,12 +16,15 @@ name = "tune_cli"
 path = "src/lib.rs"
 
 [dependencies]
+axum = { version = "=0.8.9", default-features = false, features = ["http1", "tokio", "ws"] }
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3.5.2"
 hound = "3.5"
 jiff = { version = "=0.2.37", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
+tokio = { version = "=1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tower-http = { version = "=0.6.11", default-features = false, features = ["fs"] }
 tune-audio = { path = "../tune-audio" }
 tune-dsp = { path = "../tune-dsp" }
 tune-engine = { path = "../tune-engine" }
@@ -30,4 +33,7 @@ tune-studio = { path = "../tune-studio" }
 
 [dev-dependencies]
 assert_cmd = "2"
+futures-util = { version = "=0.3.34", default-features = false, features = ["sink", "std"] }
 tempfile = "3"
+tokio-tungstenite = "=0.29.0"
+ureq = "=3.4.2"

@@ -28,6 +28,8 @@ enum Command {
     Render(RenderArgs),
     /// Play a song through the audio device, reloading it when the file changes.
     Play(PlayArgs),
+    /// Serve the studio UI and its protocol over local HTTP and WebSocket.
+    Serve(ServeArgs),
     /// Edit song values by path, logged as Claude's edits.
     Set(SetArgs),
     /// Show the edit log: what the producer and Claude changed.
@@ -37,6 +39,24 @@ enum Command {
     /// Render an acid 303 pattern to a stereo 24-bit WAV.
     #[command(name = "render-303")]
     Render303(Render303),
+}
+
+#[derive(Args)]
+struct ServeArgs {
+    /// Song file (TOML) to open.
+    song: PathBuf,
+    /// Port on 127.0.0.1 (0 picks a free one).
+    #[arg(long, default_value_t = 4580)]
+    port: u16,
+    /// Output device: the default one, or `null` (no sound, for tests).
+    #[arg(long, value_enum, default_value_t = DeviceArg::Default)]
+    device: DeviceArg,
+    /// Built UI to serve.
+    #[arg(long, value_name = "DIR", default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/desktop/dist"))]
+    ui: PathBuf,
+    /// Print JSON events instead of text.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -315,6 +335,16 @@ fn main() -> ExitCode {
                 DeviceArg::Default => cmd::play::Device::Default,
                 DeviceArg::Null => cmd::play::Device::Null,
             },
+            json: a.json,
+        }),
+        Command::Serve(a) => cmd::serve::run(&cmd::serve::Args {
+            song: a.song,
+            port: a.port,
+            device: match a.device {
+                DeviceArg::Default => cmd::serve::Device::Default,
+                DeviceArg::Null => cmd::serve::Device::Null,
+            },
+            ui: a.ui,
             json: a.json,
         }),
         Command::Set(a) => cmd::set::run(&a.song, &a.assignments, a.json),

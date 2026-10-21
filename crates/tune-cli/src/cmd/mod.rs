@@ -11,6 +11,7 @@ pub mod info;
 pub mod params;
 pub mod play;
 pub mod render;
+pub mod serve;
 pub mod set;
 pub mod validate;
 
