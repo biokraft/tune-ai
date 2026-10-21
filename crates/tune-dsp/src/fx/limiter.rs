@@ -3,8 +3,13 @@
 //! running-minimum hold over the lookahead window, moving-average smoothing,
 //! exponential release).
 //!
-//! The detector estimates the inter-sample peak with a 4x interpolator: three
-//! points between each pair of samples, from a 24-tap Blackman-windowed sinc.
+//! The detector estimates the inter-sample peak at 4x: three points between
+//! each pair of samples, each read by two interpolators, keeping the larger.
+//! A 24-tap Blackman-windowed sinc follows the reconstructed waveform. The
+//! 12-tap Hann-windowed sinc of a BS.1770 true-peak meter (the 48-tap, 4x
+//! design of libebur128, which `tune analyze` measures with) can read up to
+//! about 1 dB higher on dense content near Nyquist, such as a distorted 303
+//! under hats, so the limiter answers to it too.
 //! The audio runs [`Limiter::latency`] frames behind the detector, so the
 //! gain has reached its target by the time a peak leaves the delay line.
 //! Below the ceiling the gain is exactly `1.0` and the output is the input,
@@ -40,7 +45,7 @@ pub const MASTER_PARAMS: &[ParamSpec] = &[
         max: -0.1,
         curve: Curve::Linear,
         default: -1.5,
-        help: "The limiter never lets the true peak above this.",
+        help: "The loudest the limiter lets a peak get. Sample peaks stay at or under it; a true-peak meter reads at most about 0.3 dB over it.",
     },
     ParamSpec {
         id: "master.release",
@@ -62,6 +67,11 @@ pub const DETECTOR_DELAY: usize = 12;
 
 /// Taps of each interpolator phase.
 const TAPS: usize = 2 * DETECTOR_DELAY;
+/// Taps of each phase of the meter's interpolator (48 taps at 4x).
+const METER_TAPS: usize = 12;
+/// `hist` index of the meter interpolator's newest tap, which centres it on
+/// the frame `DETECTOR_DELAY` back.
+const METER_OFFSET: usize = DETECTOR_DELAY - METER_TAPS / 2;
 /// Interpolated points between two samples (4x oversampling).
 const PHASES: usize = 3;
 /// Below this distance from 1 the gain snaps to exactly 1.
@@ -88,6 +98,23 @@ fn phase_coeffs(j: usize) -> [f64; TAPS] {
     c
 }
 
+/// Meter interpolator phase `j` (1..=3), for the same point as
+/// [`phase_coeffs`]`(j)`: taps `4i + j` of a 48-tap sinc cut off at
+/// the original Nyquist, under a Hann window over 49 points, rounded to
+/// `f32` like the meter's. Not normalised: the meter's phases are not.
+fn meter_coeffs(j: usize) -> [f64; METER_TAPS] {
+    const N: f64 = 48.0;
+    let mut c = [0.0; METER_TAPS];
+    for (i, ci) in c.iter_mut().enumerate() {
+        let q = (4 * i + j) as f64;
+        let window = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * q / N).cos());
+        let m = (q - N / 2.0) * std::f64::consts::PI / 4.0;
+        let sinc = if m == 0.0 { 1.0 } else { m.sin() / m };
+        *ci = (window * sinc) as f32 as f64;
+    }
+    c
+}
+
 /// Stereo-linked lookahead limiter with a true-peak detector.
 ///
 /// Every ring is allocated in [`Limiter::new`]; `process` never allocates.
@@ -101,6 +128,7 @@ pub struct Limiter {
     /// Release coefficient per frame.
     alpha: f64,
     coeffs: [[f64; TAPS]; PHASES],
+    meter_coeffs: [[f64; METER_TAPS]; PHASES],
     /// Detector input per channel, newest first: `hist[ch][i]` is `x[n - i]`.
     hist: [[f64; TAPS]; 2],
     /// Audio delay lines, `latency()` frames long.
@@ -128,6 +156,7 @@ impl Limiter {
             ceiling: 1.0,
             alpha: 1.0,
             coeffs: [phase_coeffs(1), phase_coeffs(2), phase_coeffs(3)],
+            meter_coeffs: [meter_coeffs(1), meter_coeffs(2), meter_coeffs(3)],
             hist: [[0.0; TAPS]; 2],
             delay_l: vec![0.0; latency],
             delay_r: vec![0.0; latency],
@@ -177,18 +206,23 @@ impl Limiter {
     }
 
     /// Peak estimate for the frame `DETECTOR_DELAY` frames back: its sample
-    /// and the three interpolated points after it, over both channels.
+    /// and the three interpolated points after it, each by both
+    /// interpolators, over both channels.
     #[inline]
     fn detect(&self) -> f64 {
         let mut peak = 0.0f64;
         for h in &self.hist {
             peak = peak.max(h[DETECTOR_DELAY].abs());
-            for c in &self.coeffs {
+            for (c, m) in self.coeffs.iter().zip(&self.meter_coeffs) {
                 let mut y = 0.0;
                 for (ci, xi) in c.iter().zip(h) {
                     y += ci * xi;
                 }
-                peak = peak.max(y.abs());
+                let mut z = 0.0;
+                for (mi, xi) in m.iter().zip(&h[METER_OFFSET..]) {
+                    z += mi * xi;
+                }
+                peak = peak.max(y.abs()).max(z.abs());
             }
         }
         peak
@@ -247,5 +281,57 @@ fn clamp_to(spec: &ParamSpec, v: f64) -> f64 {
         spec.min
     } else {
         v.clamp(spec.min, spec.max)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What a BS.1770 meter built like libebur128 reads at input step `m`:
+    /// the largest of its four 4x phases, `sum_i h[4i + k] * x[m - i]`,
+    /// with the 48 taps written out from that meter's formula.
+    fn meter_reading(x: &[f64], m: usize) -> f64 {
+        let mut h = [0.0f64; 48];
+        for (q, hq) in h.iter_mut().enumerate() {
+            let w = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * q as f64 / 48.0).cos());
+            let a = (q as f64 - 24.0) * std::f64::consts::PI / 4.0;
+            *hq = if a == 0.0 { w } else { w * a.sin() / a } as f32 as f64;
+        }
+        (0..4)
+            .map(|k| (0..12).map(|i| h[4 * i + k] * x[m - i]).sum::<f64>().abs())
+            .fold(0.0, f64::max)
+    }
+
+    /// The detector covers the meter: at every frame its estimate is at
+    /// least what the meter reads over the same quarter-sample points.
+    #[test]
+    fn detector_covers_the_meter() {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut noise = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 52) as f64 - 1.0
+        };
+        let n = 20_000;
+        let l: Vec<f64> = (0..n).map(|_| noise()).collect();
+        let r: Vec<f64> = (0..n).map(|_| noise()).collect();
+        let mut lim = Limiter::new(48000.0);
+        let mut short = 0;
+        for i in 0..n {
+            lim.process(l[i], r[i]);
+            // The detector's centre is DETECTOR_DELAY frames back; the
+            // meter centres its newest phases half its 12 taps back.
+            if i < DETECTOR_DELAY + 12 {
+                continue;
+            }
+            let m = i - (DETECTOR_DELAY - 6);
+            let meter = meter_reading(&l, m).max(meter_reading(&r, m));
+            if lim.detect() < meter * (1.0 - 1e-12) {
+                short += 1;
+            }
+        }
+        assert_eq!(short, 0, "frames where the meter reads above the detector");
     }
 }
