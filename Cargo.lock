@@ -4651,6 +4651,7 @@ dependencies = [
  "rtrb",
  "tempfile",
  "thiserror 2.0.21",
+ "tune-analysis",
  "tune-dsp",
  "tune-song",
 ]
