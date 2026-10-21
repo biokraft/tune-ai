@@ -4,7 +4,9 @@
 
 use tune_dsp::acid303::math::db2amp;
 use tune_dsp::{DrumHit, ParamSpec, STRIP_PARAMS, find_spec};
-use tune_song::{FxSpec, InstrumentKind, PatternSteps, Song};
+use tune_song::{
+    FxSpec, InstrumentKind, MIX_TRACK_ID, MasterMode, MixUnit, PatternSteps, Song, find_mix_param,
+};
 
 use crate::clock::{Clock, track_seed};
 use crate::instrument::Cell;
@@ -20,6 +22,27 @@ pub struct CompiledSong {
     /// One cell per pattern step, indexed like `Song::patterns`.
     pub patterns: Vec<Vec<Cell>>,
     pub sections: Vec<CompiledSection>,
+    pub mix: CompiledMix,
+}
+
+/// The `track` of a lane (or a knob override) aimed at the mix: a mix param
+/// rather than one of a track's.
+pub const MIX_TRACK: usize = usize::MAX;
+
+/// The `[mix]` table resolved: what the master stage does, whom the duckers
+/// follow and the param tables of the buses the song needs.
+#[derive(Clone, Debug)]
+pub struct CompiledMix {
+    pub master: MasterMode,
+    /// Track index of `Song::duck_source`.
+    pub duck_source: Option<usize>,
+    /// The full delay param table in plain units, defaults filled in; `None`
+    /// when no track sends to the delay (`Song::bus_active`).
+    pub delay: Option<Vec<f64>>,
+    /// The full reverb param table, like `delay`.
+    pub reverb: Option<Vec<f64>>,
+    /// The full master param table in plain units, defaults filled in.
+    pub master_params: Vec<f64>,
 }
 
 /// One mixer channel.
@@ -29,6 +52,9 @@ pub struct CompiledTrack {
     pub kind: InstrumentKind,
     /// The full instrument param table in plain units, defaults filled in.
     pub params: Vec<f64>,
+    /// The full strip param table (`STRIP_PARAMS`: sends and ducking) in
+    /// plain units, defaults filled in.
+    pub strip: Vec<f64>,
     pub fx: Vec<CompiledFx>,
     /// Linear gain (`db2amp(gain_db)`).
     pub gain: f64,
@@ -71,13 +97,18 @@ pub struct CompiledLane {
     pub points: Vec<(f64, f64)>,
 }
 
-/// Which parameter of a track a lane (or a knob override) drives.
+/// Which parameter of a track (or of the mix) a lane or a knob override
+/// drives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParamTarget {
     /// Index into the instrument's param table.
     Instrument(usize),
     /// Index into the param table of fx `slot`.
     Fx { slot: usize, index: usize },
+    /// Index into the track's strip table (`STRIP_PARAMS`).
+    Strip(usize),
+    /// Index into the param table of a mix unit; the track is [`MIX_TRACK`].
+    Mix { unit: MixUnit, index: usize },
 }
 
 impl CompiledSong {
@@ -91,13 +122,18 @@ impl CompiledSong {
             .map(|(id, t)| CompiledTrack {
                 id: id.clone(),
                 kind: t.instrument,
-                // Strip params (`send.*`, `duck.*`) share the track's map;
-                // they are not instrument params.
+                // Strip params (`send.*`, `duck.*`) share the track's map.
                 params: fill(
                     t.instrument.params(),
                     t.params
                         .iter()
                         .filter(|(id, _)| !is_strip_only(t.instrument.params(), id)),
+                ),
+                strip: fill(
+                    STRIP_PARAMS,
+                    t.params
+                        .iter()
+                        .filter(|(id, _)| is_strip_only(t.instrument.params(), id)),
                 ),
                 fx: t
                     .fx
@@ -161,11 +197,17 @@ impl CompiledSong {
                     .automation
                     .iter()
                     .map(|lane| {
-                        let track = track_index(&lane.track);
-                        let (target, spec) =
-                            resolve(&tracks[track], &lane.param).unwrap_or_else(|| {
-                                panic!("unknown lane param `{}` in a validated song", lane.param)
-                            });
+                        let unknown =
+                            || panic!("unknown lane param `{}` in a validated song", lane.param);
+                        let (track, target, spec) = if lane.track == MIX_TRACK_ID {
+                            let (target, spec) = resolve_mix(&lane.param).unwrap_or_else(unknown);
+                            (MIX_TRACK, target, spec)
+                        } else {
+                            let track = track_index(&lane.track);
+                            let (target, spec) =
+                                resolve(&tracks[track], &lane.param).unwrap_or_else(unknown);
+                            (track, target, spec)
+                        };
                         CompiledLane {
                             track,
                             target,
@@ -184,6 +226,7 @@ impl CompiledSong {
             })
             .collect();
 
+        let mix = compile_mix(song, &track_index);
         Self {
             name: song.name.clone(),
             clock: Clock::new(song.bpm, sample_rate),
@@ -191,6 +234,7 @@ impl CompiledSong {
             tracks,
             patterns,
             sections,
+            mix,
         }
     }
 
@@ -200,13 +244,31 @@ impl CompiledSong {
     }
 
     /// Resolves `param_id` on track `track` against the instrument table,
-    /// then each fx table in slot order. `None` for an unknown track or id.
+    /// the strip table, then each fx table in slot order. `None` for an
+    /// unknown track or id.
     pub fn param_target(
         &self,
         track: usize,
         param_id: &str,
     ) -> Option<(ParamTarget, &'static ParamSpec)> {
         resolve(self.tracks.get(track)?, param_id)
+    }
+
+    /// Resolves `param_id` on the track with id `track_id`, which may be
+    /// `"mix"` for a mix param: `(track index or MIX_TRACK, target, spec)`.
+    /// `None` for an unknown track or id.
+    pub fn resolve_param(
+        &self,
+        track_id: &str,
+        param_id: &str,
+    ) -> Option<(usize, ParamTarget, &'static ParamSpec)> {
+        if track_id == MIX_TRACK_ID {
+            let (target, spec) = resolve_mix(param_id)?;
+            return Some((MIX_TRACK, target, spec));
+        }
+        let track = self.track_index(track_id)?;
+        let (target, spec) = self.param_target(track, param_id)?;
+        Some((track, target, spec))
     }
 
     /// The sample after the last one of the song.
@@ -235,17 +297,49 @@ fn is_strip_only(table: &'static [ParamSpec], id: &str) -> bool {
     find_spec(STRIP_PARAMS, id).is_ok() && find_spec(table, id).is_err()
 }
 
-/// Resolves a param id against the instrument table, then each fx table in
-/// slot order (the order validation checks them in).
+/// Resolves a param id against the instrument table, the strip table, then
+/// each fx table in slot order (the order validation checks them in).
 fn resolve(track: &CompiledTrack, id: &str) -> Option<(ParamTarget, &'static ParamSpec)> {
     if let Ok((index, spec)) = find_spec(track.kind.params(), id) {
         return Some((ParamTarget::Instrument(index), spec));
+    }
+    if let Ok((index, spec)) = find_spec(STRIP_PARAMS, id) {
+        return Some((ParamTarget::Strip(index), spec));
     }
     track.fx.iter().enumerate().find_map(|(slot, fx)| {
         find_spec(fx.spec.params_table(), id)
             .ok()
             .map(|(index, spec)| (ParamTarget::Fx { slot, index }, spec))
     })
+}
+
+/// Resolves a mix param id (`reverb.size`, `master.gain`).
+fn resolve_mix(id: &str) -> Option<(ParamTarget, &'static ParamSpec)> {
+    find_mix_param(id).map(|(unit, index, spec)| (ParamTarget::Mix { unit, index }, spec))
+}
+
+/// The `[mix]` table of `song` resolved; `track_index` maps a track id to
+/// its index.
+fn compile_mix(song: &Song, track_index: &impl Fn(&str) -> usize) -> CompiledMix {
+    let table = |unit: MixUnit| {
+        let mut params: Vec<f64> = unit.params().iter().map(|s| s.default).collect();
+        for (id, &v) in &song.mix.params {
+            let (u, index, _) = find_mix_param(id)
+                .unwrap_or_else(|| panic!("unknown mix param `{id}` in a validated song"));
+            if u == unit {
+                params[index] = v;
+            }
+        }
+        params
+    };
+    let bus = |unit: MixUnit| song.bus_active(unit).then(|| table(unit));
+    CompiledMix {
+        master: song.mix.master,
+        duck_source: song.duck_source().map(track_index),
+        delay: bus(MixUnit::Delay),
+        reverb: bus(MixUnit::Reverb),
+        master_params: table(MixUnit::Master),
+    }
 }
 
 #[cfg(test)]

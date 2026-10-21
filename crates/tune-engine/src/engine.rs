@@ -8,22 +8,26 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use tune_dsp::ParamSpec;
+use tune_dsp::{ParamSpec, STRIP_PARAMS};
 use tune_song::FxSpec;
 
 use crate::clock::hit_seed;
-use crate::compile::{CompiledFx, CompiledSong, CompiledTrack, ParamTarget};
+use crate::compile::{CompiledFx, CompiledSong, CompiledTrack, MIX_TRACK, ParamTarget};
 use crate::instrument::{Cell, Effect, Instrument, StepCtx};
 use crate::live::SongUpdate;
-use crate::mixer::Meter;
+use crate::mixer::{Meter, MixRuntime, Strip};
 use crate::tracks::{make_effect, make_instrument};
 
 /// The live DSP objects of one track, with its knob overrides.
 pub struct TrackRuntime {
     pub instrument: Box<dyn Instrument>,
     pub fx: Vec<Box<dyn Effect>>,
+    /// Sends and ducking.
+    pub strip: Strip,
     /// One override per instrument param in plain units; `NaN` is none.
     overrides: Vec<f64>,
+    /// One override per strip param, like `overrides`.
+    strip_overrides: Vec<f64>,
     /// One override table per fx slot, like `overrides`. It travels with
     /// the fx chain: a swap that rebuilds the chain drops it.
     fx_overrides: Vec<Vec<f64>>,
@@ -40,7 +44,9 @@ impl TrackRuntime {
                 .iter()
                 .map(|fx| make_effect(&fx.spec, sample_rate))
                 .collect(),
+            strip: Strip::new(sample_rate),
             overrides: vec![f64::NAN; track.params.len()],
+            strip_overrides: vec![f64::NAN; STRIP_PARAMS.len()],
             fx_overrides: track
                 .fx
                 .iter()
@@ -51,10 +57,13 @@ impl TrackRuntime {
         rt
     }
 
-    /// Sets every instrument and fx param to the track's static value.
+    /// Sets every instrument, strip and fx param to the track's static value.
     fn apply_static(&mut self, track: &CompiledTrack) {
         for (index, &plain) in track.params.iter().enumerate() {
             self.instrument.set_param_at(index, plain);
+        }
+        for (index, &plain) in track.strip.iter().enumerate() {
+            self.strip.set_param_at(index, plain);
         }
         for (fx, spec) in self.fx.iter_mut().zip(&track.fx) {
             for (index, &plain) in spec.params.iter().enumerate() {
@@ -63,11 +72,14 @@ impl TrackRuntime {
         }
     }
 
-    /// Sets one param in plain units.
+    /// Sets one param in plain units. A mix target is not the track's and
+    /// is ignored.
     fn set_target(&mut self, target: ParamTarget, plain: f64) {
         match target {
             ParamTarget::Instrument(index) => self.instrument.set_param_at(index, plain),
             ParamTarget::Fx { slot, index } => self.fx[slot].set_param_at(index, plain),
+            ParamTarget::Strip(index) => self.strip.set_param_at(index, plain),
+            ParamTarget::Mix { .. } => {}
         }
     }
 
@@ -82,6 +94,11 @@ impl TrackRuntime {
                 let spec = self.fx.get(slot)?.params().get(index)?;
                 Some((self.fx_overrides.get_mut(slot)?.get_mut(index)?, spec))
             }
+            ParamTarget::Strip(index) => {
+                let spec = STRIP_PARAMS.get(index)?;
+                Some((self.strip_overrides.get_mut(index)?, spec))
+            }
+            ParamTarget::Mix { .. } => None,
         }
     }
 
@@ -90,6 +107,11 @@ impl TrackRuntime {
         for (index, &plain) in self.overrides.iter().enumerate() {
             if !plain.is_nan() {
                 self.instrument.set_param_at(index, plain);
+            }
+        }
+        for (index, &plain) in self.strip_overrides.iter().enumerate() {
+            if !plain.is_nan() {
+                self.strip.set_param_at(index, plain);
             }
         }
         for (fx, table) in self.fx.iter_mut().zip(&self.fx_overrides) {
@@ -110,6 +132,12 @@ impl TrackRuntime {
                 self.instrument.set_param_at(index, track.params[index]);
             }
         }
+        for (index, plain) in self.strip_overrides.iter_mut().enumerate() {
+            if !plain.is_nan() {
+                *plain = f64::NAN;
+                self.strip.set_param_at(index, track.strip[index]);
+            }
+        }
         for ((fx, table), spec) in self
             .fx
             .iter_mut()
@@ -128,11 +156,14 @@ impl TrackRuntime {
     /// How many overrides are set.
     fn overrides_set(&self) -> u32 {
         let set = |table: &[f64]| table.iter().filter(|v| !v.is_nan()).count() as u32;
-        set(&self.overrides) + self.fx_overrides.iter().map(|t| set(t)).sum::<u32>()
+        set(&self.overrides)
+            + set(&self.strip_overrides)
+            + self.fx_overrides.iter().map(|t| set(t)).sum::<u32>()
     }
 
     fn reset(&mut self) {
         self.instrument.reset();
+        self.strip.reset();
         for fx in &mut self.fx {
             fx.reset();
         }
@@ -140,12 +171,15 @@ impl TrackRuntime {
 
     /// A silent stand-in left behind when a swap moves a runtime out of the
     /// old list. Neither building nor dropping it touches the heap: the
-    /// instrument is zero-sized and the fx chain is empty.
+    /// instrument is zero-sized, the fx chain is empty and the strip holds
+    /// no buffers.
     fn placeholder() -> Self {
         Self {
             instrument: Box::new(Vacant),
             fx: Vec::new(),
+            strip: Strip::new(48_000.0),
             overrides: Vec::new(),
+            strip_overrides: Vec::new(),
             fx_overrides: Vec::new(),
         }
     }
@@ -178,10 +212,15 @@ fn same_fx_chain(a: &[CompiledFx], b: &[CompiledFx]) -> bool {
         })
 }
 
-/// Plays a [`CompiledSong`]: arrangement, automation, mixer and master clipper.
+/// Plays a [`CompiledSong`]: arrangement, automation, mixer, buses and the
+/// master stage.
 pub struct Engine {
     song: Arc<CompiledSong>,
     tracks: Vec<TrackRuntime>,
+    /// The buses and the master stage. A swap keeps it as it is (swaps do
+    /// not rebuild it yet), so it may lack a bus the playing song has; a bus
+    /// the runtime lacks is off.
+    mix: MixRuntime,
     /// Song sample position of the next sample.
     pos: u64,
     /// The next step to fire.
@@ -223,7 +262,8 @@ impl Engine {
     }
 
     /// An engine at bar 0 playing `tracks`, one runtime per song track in
-    /// song order. The runtimes are used as they are (not reset).
+    /// song order. The runtimes are used as they are (not reset); the mix
+    /// runtime is built fresh, which allocates: call off the audio thread.
     pub fn from_parts(song: Arc<CompiledSong>, tracks: Vec<TrackRuntime>) -> Self {
         assert_eq!(
             tracks.len(),
@@ -233,6 +273,7 @@ impl Engine {
         Self {
             any_solo: song.tracks.iter().any(|t| t.solo),
             gate_samples: song.clock.gate_samples(),
+            mix: MixRuntime::build(&song),
             song,
             tracks,
             pos: 0,
@@ -314,16 +355,22 @@ impl Engine {
     /// Overrides param `target` of track `track` with `plain` (clamped to the
     /// param's range), or clears the override with `None` (or a NaN), which
     /// sets the param back to its static value; a lane then takes it over
-    /// again from the next sample. An override wins over static params and
-    /// lanes and is applied every sample, before `on_step` (see
+    /// again from the next sample. A mix param takes track [`MIX_TRACK`] and
+    /// a [`ParamTarget::Mix`] target. An override wins over static params
+    /// and lanes and is applied every sample, before `on_step` (see
     /// [`process`](Self::process)). A track or target outside the song is
     /// ignored. Never allocates. Overrides are live-only: offline renders
     /// build their own engine and never see them.
     pub fn set_override(&mut self, track: usize, target: ParamTarget, plain: Option<f64>) {
-        let Some(rt) = self.tracks.get_mut(track) else {
-            return;
+        let slot = match (track, target) {
+            (MIX_TRACK, ParamTarget::Mix { unit, index }) => self.mix.override_slot(unit, index),
+            (MIX_TRACK, _) => None,
+            _ => self
+                .tracks
+                .get_mut(track)
+                .and_then(|rt| rt.override_slot(target)),
         };
-        let Some((slot, spec)) = rt.override_slot(target) else {
+        let Some((slot, spec)) = slot else {
             return;
         };
         let was_set = !slot.is_nan();
@@ -338,15 +385,25 @@ impl Engine {
                 *slot = f64::NAN;
                 if was_set {
                     self.overrides_active -= 1;
-                    let track = &self.song.tracks[track];
-                    let plain = match target {
-                        ParamTarget::Instrument(index) => track.params[index],
-                        ParamTarget::Fx { slot, index } => track.fx[slot].params[index],
-                    };
-                    rt.set_target(target, plain);
+                    self.restore_static(track, target);
                 }
             }
         }
+    }
+
+    /// Sets param `target` of track `track` (or of the mix) back to its
+    /// static value. Both must exist.
+    fn restore_static(&mut self, track: usize, target: ParamTarget) {
+        let tracks = &self.song.tracks;
+        let plain = match target {
+            ParamTarget::Instrument(index) => tracks[track].params[index],
+            ParamTarget::Fx { slot, index } => tracks[track].fx[slot].params[index],
+            ParamTarget::Strip(index) => tracks[track].strip[index],
+            ParamTarget::Mix { unit, index } => {
+                return self.mix.restore(&self.song.mix, unit, index);
+            }
+        };
+        self.tracks[track].set_target(target, plain);
     }
 
     /// Clears every override (see [`set_override`](Self::set_override)).
@@ -357,6 +414,7 @@ impl Engine {
         for (rt, track) in self.tracks.iter_mut().zip(&self.song.tracks) {
             rt.clear_overrides(track);
         }
+        self.mix.clear_overrides(&self.song.mix);
         self.overrides_active = 0;
     }
 
@@ -366,8 +424,8 @@ impl Engine {
     }
 
     /// Jumps to the start of 0-based `bar` (clamped to the song's end) and
-    /// resets every instrument and effect. The loop, meter and knob
-    /// overrides are kept.
+    /// resets every instrument, effect, ducker, bus and the limiter. The
+    /// loop, meter and knob overrides are kept.
     ///
     /// Audio after a seek starts from reset instrument state (silent filters,
     /// envelopes and delay lines), so only the param values match play-through,
@@ -377,6 +435,7 @@ impl Engine {
         for rt in &mut self.tracks {
             rt.reset();
         }
+        self.mix.reset();
         self.step = 16 * u64::from(bar);
         self.pos = self.song.clock.step_start(self.step);
         self.section = section_of(&self.song, self.step);
@@ -403,16 +462,23 @@ impl Engine {
     ///    on the new song.
     /// 1. When finished, write silence.
     /// 2. At a step boundary: wrap at the loop end (nothing is reset); finish
-    ///    at the song end; re-apply static params on a section change (or the
-    ///    first step after `new`/`seek`); apply the section's lanes for this
-    ///    sample; apply the knob overrides; fire `on_step` on every track in
-    ///    order; advance the step. Elsewhere: apply the section's lanes, then
-    ///    the overrides, for this sample. Lanes and overrides run exactly once
+    ///    at the song end; re-apply static params (tracks, strips and mix) on
+    ///    a section change (or the first step after `new`/`seek`); apply the
+    ///    section's lanes for this sample; apply the knob overrides; fire
+    ///    `on_step` on every track in order; if the duck source's cell at
+    ///    this step is a hit (muted or not), trigger every track's ducker;
+    ///    advance the step. Elsewhere: apply the section's lanes, then the
+    ///    overrides, for this sample. Lanes and overrides run exactly once
     ///    per sample (overrides only when one is set), always before the
     ///    tracks' `on_step`, so a hit reads the overridden value.
-    /// 3. Process every track (instrument, then fx in order), write its stem
-    ///    and add it to the master when audible.
-    /// 4. Meter, soft-clip, write, advance the position.
+    /// 3. For every track in song order: instrument, then fx in order, then
+    ///    the ducker (`y`); `l, r = y·gain·pan`; write its stem; when audible
+    ///    (mute and solo), add `l, r` to the master and `y·gain·send` to the
+    ///    input of each built bus.
+    /// 4. Add the delay bus's return, then the reverb bus's, to the master
+    ///    (a bus that is not built is off).
+    /// 5. Master gain; then the soft clipper, or the limiter in limit mode;
+    ///    meter, write, advance the position.
     pub fn process(&mut self, out: &mut [f32]) {
         for frame in out.chunks_exact_mut(2) {
             let (l, r) = self.frame(|_, _, _| {});
@@ -471,12 +537,13 @@ impl Engine {
                 for (rt, track) in self.tracks.iter_mut().zip(&song.tracks) {
                     rt.apply_static(track);
                 }
+                self.mix.apply_static(&song.mix);
                 self.section = section;
                 self.needs_static = false;
             }
-            apply_lanes(song, section, self.pos, &mut self.tracks);
+            apply_lanes(song, section, self.pos, &mut self.tracks, &mut self.mix);
             if self.overrides_active > 0 {
-                apply_overrides(&mut self.tracks);
+                apply_overrides(&mut self.tracks, &mut self.mix);
             }
             let step = self.step;
             // Across the loop wrap the next cell is the loop start's.
@@ -495,29 +562,54 @@ impl Engine {
                 };
                 rt.instrument.on_step(cell_at(song, section, t, step), &ctx);
             }
+            if let Some(source) = song.mix.duck_source
+                && matches!(cell_at(song, section, source, step), Cell::Hit { .. })
+            {
+                for rt in &mut self.tracks {
+                    rt.strip.trigger_duck();
+                }
+            }
             self.step += 1;
         } else {
-            apply_lanes(song, self.section, self.pos, &mut self.tracks);
+            apply_lanes(
+                song,
+                self.section,
+                self.pos,
+                &mut self.tracks,
+                &mut self.mix,
+            );
             if self.overrides_active > 0 {
-                apply_overrides(&mut self.tracks);
+                apply_overrides(&mut self.tracks, &mut self.mix);
             }
         }
 
         let (mut ml, mut mr) = (0.0, 0.0);
+        let (mut delay_in, mut reverb_in) = (0.0, 0.0);
+        let (has_delay, has_reverb) = (self.mix.has_delay(), self.mix.has_reverb());
         for (t, (rt, track)) in self.tracks.iter_mut().zip(&song.tracks).enumerate() {
             let mut y = rt.instrument.process();
             for fx in &mut rt.fx {
                 y = fx.process(y);
             }
-            let l = y * track.gain * track.pan_gains.0;
-            let r = y * track.gain * track.pan_gains.1;
+            // `y·gain·pan` evaluates as `(y·gain)·pan`, as it always has.
+            let y = rt.strip.duck(y) * track.gain;
+            let l = y * track.pan_gains.0;
+            let r = y * track.pan_gains.1;
             stem(t, l, r);
             if !track.mute && (!self.any_solo || track.solo) {
                 ml += l;
                 mr += r;
+                let (send_delay, send_reverb) = rt.strip.sends();
+                if has_delay {
+                    delay_in += y * send_delay;
+                }
+                if has_reverb {
+                    reverb_in += y * send_reverb;
+                }
             }
         }
-        let (cl, cr) = self.meter.clip_frame(ml, mr);
+        self.mix.add_returns(&mut ml, &mut mr, delay_in, reverb_in);
+        let (cl, cr) = self.mix.master(song.mix.master, &mut self.meter, ml, mr);
         self.pos += 1;
         (cl as f32, cr as f32)
     }
@@ -560,7 +652,12 @@ impl Engine {
         let clear = u.clear_overrides;
         self.retired = Some(update);
         self.swaps_applied += 1;
-        self.overrides_active = self.tracks.iter().map(TrackRuntime::overrides_set).sum();
+        self.overrides_active = self
+            .tracks
+            .iter()
+            .map(TrackRuntime::overrides_set)
+            .sum::<u32>()
+            + self.mix.overrides_set();
         if clear {
             self.clear_overrides();
         }
@@ -650,15 +747,22 @@ fn cell_at(song: &CompiledSong, section: usize, t: usize, step: u64) -> &Cell {
     }
 }
 
-/// Applies every override of every track.
-fn apply_overrides(tracks: &mut [TrackRuntime]) {
+/// Applies every override of every track and of the mix.
+fn apply_overrides(tracks: &mut [TrackRuntime], mix: &mut MixRuntime) {
     for rt in tracks {
         rt.apply_overrides();
     }
+    mix.apply_overrides();
 }
 
 /// Applies every lane of `section` at song sample `pos`.
-fn apply_lanes(song: &CompiledSong, section: usize, pos: u64, tracks: &mut [TrackRuntime]) {
+fn apply_lanes(
+    song: &CompiledSong,
+    section: usize,
+    pos: u64,
+    tracks: &mut [TrackRuntime],
+    mix: &mut MixRuntime,
+) {
     let s = &song.sections[section];
     if s.lanes.is_empty() {
         return;
@@ -667,7 +771,10 @@ fn apply_lanes(song: &CompiledSong, section: usize, pos: u64, tracks: &mut [Trac
     let x = pos.saturating_sub(start) as f64 / (16.0 * song.clock.samples_per_step);
     for lane in &s.lanes {
         let plain = lane.spec.to_plain(lane_value(&lane.points, x));
-        tracks[lane.track].set_target(lane.target, plain);
+        match lane.target {
+            ParamTarget::Mix { unit, index } => mix.set_target(unit, index, plain),
+            target => tracks[lane.track].set_target(target, plain),
+        }
     }
 }
 
