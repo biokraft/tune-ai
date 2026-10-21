@@ -29,7 +29,7 @@ impl Failure {
         }
     }
 
-    fn at(file: &Path, e: &SongError) -> Self {
+    pub(crate) fn at(file: &Path, e: &SongError) -> Self {
         Self {
             file: Some(file.display().to_string()),
             line: e.line,
@@ -38,7 +38,7 @@ impl Failure {
         }
     }
 
-    fn to_json(&self) -> Value {
+    pub(crate) fn to_json(&self) -> Value {
         json!({
             "file": self.file,
             "line": self.line,
@@ -47,7 +47,7 @@ impl Failure {
         })
     }
 
-    fn to_text(&self) -> String {
+    pub(crate) fn to_text(&self) -> String {
         match (&self.file, self.line, self.column) {
             (Some(f), Some(l), Some(c)) => format!("{f}:{l}:{c}: {}", self.message),
             (Some(f), Some(l), None) => format!("{f}:{l}: {}", self.message),

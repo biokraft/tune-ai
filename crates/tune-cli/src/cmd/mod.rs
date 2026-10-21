@@ -8,6 +8,7 @@ use crate::report::{Failure, load_failures};
 
 pub mod info;
 pub mod params;
+pub mod play;
 pub mod render;
 pub mod validate;
 
