@@ -10,7 +10,9 @@ mod common;
 use common::{MINI, compiled};
 use tune_engine::{RenderOptions, render};
 
-const FIRST_ACID: &str = include_str!("../../../songs/first-acid/song.toml");
+/// `songs/first-acid` as it was before the mixer existed, frozen so the pin
+/// guards the engine while the live song keeps changing.
+const FIRST_ACID: &str = include_str!("../../tune-song/tests/fixtures/first-acid-v1.toml");
 
 /// What a whole-song render with stems is pinned by.
 #[derive(Debug, PartialEq)]
