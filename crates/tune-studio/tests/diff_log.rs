@@ -246,3 +246,38 @@ fn entry_json_shape() {
     let back: EditEntry = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
     assert_eq!(back, e);
 }
+
+const MIXED: &str = include_str!("../../tune-song/tests/fixtures/mixed.toml");
+
+#[test]
+fn diff_reports_mix_changes() {
+    let mut d = SongDoc::parse(MIXED).unwrap();
+    d.set(&path("tracks.acid.send.delay"), &json!(-10)).unwrap();
+    d.set(&path("mix.delay.feedback"), &json!(55)).unwrap();
+    d.set(&path("mix.master"), &json!("clip")).unwrap();
+    assert_eq!(
+        diff_songs(&song(MIXED), d.song()),
+        vec![
+            change("mix.master", json!("limit"), json!("clip")),
+            change("mix.delay.feedback", json!(40), json!(55)),
+            change("tracks.acid.send.delay", json!(-12), json!(-10)),
+        ]
+    );
+
+    // The effective duck source moves with the explicit key, and a mix
+    // param dropped from the file shows its default.
+    let text = MIXED
+        .replacen(
+            "master = \"limit\"\n",
+            "master = \"limit\"\nduck_source = \"hat\"\n",
+            1,
+        )
+        .replacen("\"reverb.size\" = 30, ", "", 1);
+    assert_eq!(
+        diff_songs(&song(MIXED), &song(&text)),
+        vec![
+            change("mix.duck_source", json!("kick"), json!("hat")),
+            change("mix.reverb.size", json!(30), json!(25)),
+        ]
+    );
+}

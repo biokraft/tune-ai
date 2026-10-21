@@ -52,6 +52,10 @@ const FLUSH_RETRY: Duration = Duration::from_secs(1);
 const RELEASE_GUARD: Duration = Duration::from_millis(200);
 
 /// What the studio tells every subscriber.
+// Events are few (a state per change, a playhead 30 times a second), so the
+// size of the state variant costs nothing; boxing it would change the public
+// variant.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
@@ -589,10 +593,7 @@ impl Actor {
 
     /// A knob moving: heard at once, written never (until the release).
     fn drag(&mut self, track: String, param: String, value: f64) -> Result<Value, StudioError> {
-        let path = SongPath::TrackParam {
-            track: track.clone(),
-            param: param.clone(),
-        };
+        let path = SongPath::param(&track, &param);
         if effective_value(self.core()?.song(), &path).is_none() {
             return Err(EditError::NoSuchTarget(path.to_string()).into());
         }
@@ -987,10 +988,10 @@ fn watch(path: &Path, tx: Sender<Msg>, epoch: u64) -> Result<SongWatcher, Studio
     Ok(watcher)
 }
 
-/// The track index and param target of `track`'s `param` in `song`.
+/// The track index (or `MIX_TRACK` for the `mix` pseudo-track) and param
+/// target of `track`'s `param` in `song`.
 fn param_target(song: &CompiledSong, track: &str, param: &str) -> Option<(usize, ParamTarget)> {
-    let index = song.track_index(track)?;
-    let (target, _) = song.param_target(index, param)?;
+    let (index, target, _) = song.resolve_param(track, param)?;
     Some((index, target))
 }
 

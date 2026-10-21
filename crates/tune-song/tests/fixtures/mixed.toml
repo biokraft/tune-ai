@@ -1,0 +1,66 @@
+# Shared fixture: mini plus the Plan 5 mixer (eq, sends, ducking, buses, limiter, ride).
+[song]
+name = "mixed"
+bpm = 120
+seed = 7
+
+[mix]
+master = "limit"
+params = { "delay.feedback" = 40, "reverb.size" = 30, "master.gain" = 6 }
+
+[tracks.kick]
+instrument = "kick"
+gain_db = -3
+
+[tracks.acid]
+instrument = "acid303"
+params = { "acid303.cutoff" = 500, "acid303.resonance" = 70, "send.delay" = -12, "send.reverb" = -18, "duck.depth" = 6 }
+fx = [{ type = "distortion", mode = "soft", params = { "dist.drive" = 12 } }, { type = "eq", params = { "eq.low_cut" = 85 } }]
+
+[tracks.hat]
+instrument = "hat_closed"
+gain_db = -10
+pan = 0.3
+params = { "send.reverb" = -20 }
+
+[tracks.ride]
+instrument = "ride"
+gain_db = -14
+
+[patterns.k4]
+track = "kick"
+steps = "x...x...x...X..."
+
+[patterns.a1]
+track = "acid"
+steps = "C2 C2! C3~ C2 . D#2 C2~ G2!"
+
+[patterns.h]
+track = "hat"
+steps = "..x...x...x...x."
+
+[patterns.r]
+track = "ride"
+steps = "x.x.x.x.x.x.x.x."
+
+[[sections]]
+name = "a"
+bars = 2
+play = { kick = "k4", hat = "h", ride = "r" }
+
+[[sections]]
+name = "b"
+bars = 2
+play = { kick = "k4", acid = "a1", hat = "h" }
+
+[[sections.automation]]
+param = "acid.acid303.cutoff"
+points = [[0, 0.1], [2, 0.8]]
+
+[[sections.automation]]
+param = "acid.send.delay"
+points = [[0, 0.5], [2, 1.0]]
+
+[[sections.automation]]
+param = "mix.reverb.size"
+points = [[0, 0.2], [2, 0.6]]

@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { stripParams } from "../test-fixtures";
 import { TrackStrip } from "./TrackStrip";
 
 const track = { id: "acid", gain_db: 0, pan: 0, mute: false, solo: false };
@@ -29,5 +30,54 @@ describe("TrackStrip", () => {
     fireEvent.pointerUp(gain, { clientY: 280, pointerId: 1 });
     expect(onMix).toHaveBeenCalledTimes(1);
     expect(onMix.mock.calls[0]![0]).toHaveProperty("gain_db");
+  });
+
+  it("renders send knobs when strip given", () => {
+    render(<TrackStrip track={track} onMix={vi.fn()} strip={stripParams} />);
+    for (const name of ["Delay", "Reverb", "Duck"]) {
+      expect(screen.getByRole("slider", { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("slider", { name: "Duck release" })).toBeNull();
+  });
+  it("send knob release calls onParam(id, v, true)", () => {
+    const onParam = vi.fn();
+    render(<TrackStrip track={track} onMix={vi.fn()} strip={stripParams} onParam={onParam} />);
+    const send = screen.getByRole("slider", { name: "Delay" });
+    fireEvent.pointerDown(send, { clientY: 300, pointerId: 1 });
+    fireEvent.pointerMove(send, { clientY: 280, pointerId: 1 });
+    expect(onParam).toHaveBeenLastCalledWith("send.delay", expect.any(Number), false);
+    fireEvent.pointerUp(send, { clientY: 280, pointerId: 1 });
+    expect(onParam).toHaveBeenLastCalledWith("send.delay", expect.any(Number), true);
+  });
+  it("no strip, no send knobs", () => {
+    render(<TrackStrip track={track} onMix={vi.fn()} />);
+    expect(screen.queryByRole("slider", { name: "Delay" })).toBeNull();
+    expect(screen.queryByRole("slider", { name: "Duck" })).toBeNull();
+  });
+  it("send knobs carry the lane badge when automated", () => {
+    render(
+      <TrackStrip
+        track={track}
+        onMix={vi.fn()}
+        strip={stripParams}
+        automated={(id) => id === "send.reverb"}
+      />,
+    );
+    const badge = (name: string) =>
+      within(screen.getByRole("slider", { name })).queryByTestId("knob-lane");
+    expect(badge("Reverb")).toBeInTheDocument();
+    expect(badge("Delay")).toBeNull();
+  });
+  it("send knobs report focus to onHelp", () => {
+    const onHelp = vi.fn();
+    render(<TrackStrip track={track} onMix={vi.fn()} strip={stripParams} onHelp={onHelp} />);
+    act(() => screen.getByRole("slider", { name: "Duck" }).focus());
+    expect(onHelp).toHaveBeenCalledWith(expect.objectContaining({ id: "duck.depth" }));
+  });
+  it("leaves out the duck knob, with the reason, when the track cannot duck", () => {
+    render(<TrackStrip track={track} onMix={vi.fn()} strip={stripParams} noDuck="Duck source" />);
+    expect(screen.queryByRole("slider", { name: "Duck" })).toBeNull();
+    expect(screen.getByRole("slider", { name: "Delay" })).toBeInTheDocument();
+    expect(screen.getByText("Duck source")).toBeInTheDocument();
   });
 });

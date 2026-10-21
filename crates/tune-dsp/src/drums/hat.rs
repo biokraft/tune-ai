@@ -75,22 +75,60 @@ pub const HAT_OPEN_PARAMS: &[ParamSpec] = &[
     },
 ];
 
+/// User-facing parameters of the [`Hat`] ride.
+pub const RIDE_PARAMS: &[ParamSpec] = &[
+    ParamSpec {
+        id: "ride.tone",
+        label: "Tone",
+        unit: "Hz",
+        min: 2000.0,
+        max: 10000.0,
+        curve: Curve::Exponential,
+        default: 4500.0,
+        help: "Brightness of the ride. Lower is darker and washier.",
+    },
+    ParamSpec {
+        id: "ride.decay",
+        label: "Decay",
+        unit: "ms",
+        min: 300.0,
+        max: 3000.0,
+        curve: Curve::Exponential,
+        default: 1200.0,
+        help: "How long the ride rings. A long ride glues the 16ths together.",
+    },
+    ParamSpec {
+        id: "ride.metal",
+        label: "Metal",
+        unit: "%",
+        min: 0.0,
+        max: 100.0,
+        curve: Curve::Linear,
+        default: 75.0,
+        help: "Blend of metallic ring and plain noise.",
+    },
+];
+
 /// Which hat a [`Hat`] voice is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HatKind {
     Closed,
     Open,
+    Ride,
 }
 
 const METAL_FREQS: [f64; 6] = [205.3, 304.4, 369.6, 522.7, 540.0, 800.0];
+const RIDE_FREQS: [f64; 6] = [338.7, 502.3, 609.8, 862.5, 891.0, 1320.0];
 /// Fixed makeup gains. Measured default peaks (50 seeds): closed 0.84, open 0.82 at 1.0.
 const CLOSED_MAKEUP: f64 = 1.0;
 const OPEN_MAKEUP: f64 = 1.0;
+/// Default peaks over seeds 1..=50 measure 0.499..0.715 at 1.0; at 1.3 they lie in 0.649..0.929.
+const RIDE_MAKEUP: f64 = 1.3;
 const ACCENT_TONE_RATIO: f64 = 1.25;
 /// Stop rendering once the envelope is below this (-120 dB).
 const SILENCE_AMP: f64 = 1e-6;
 
-/// Synthesized closed or open hi-hat voice.
+/// Synthesized closed hat, open hat or ride voice.
 #[derive(Clone, Debug)]
 pub struct Hat {
     kind: HatKind,
@@ -136,6 +174,7 @@ impl Hat {
         match self.kind {
             HatKind::Closed => HAT_CLOSED_PARAMS,
             HatKind::Open => HAT_OPEN_PARAMS,
+            HatKind::Ride => RIDE_PARAMS,
         }
     }
 
@@ -160,16 +199,21 @@ impl Hat {
             self.active = false;
             return 0.0;
         }
+        let freqs = match self.kind {
+            HatKind::Closed | HatKind::Open => METAL_FREQS,
+            HatKind::Ride => RIDE_FREQS,
+        };
         let mut bank = 0.0;
-        for (phase, freq) in self.phases.iter_mut().zip(METAL_FREQS) {
+        for (phase, freq) in self.phases.iter_mut().zip(freqs) {
             bank += if *phase < 0.5 { 1.0 } else { -1.0 };
             *phase = (*phase + freq / self.sample_rate).fract();
         }
-        bank /= METAL_FREQS.len() as f64;
+        bank /= freqs.len() as f64;
         let src = self.metal * bank + (1.0 - self.metal) * self.noise.sample();
         let makeup = match self.kind {
             HatKind::Closed => CLOSED_MAKEUP,
             HatKind::Open => OPEN_MAKEUP,
+            HatKind::Ride => RIDE_MAKEUP,
         };
         let mut y = self.filter.get_sample(src) * amp * makeup;
         if self.accent {
@@ -218,12 +262,12 @@ impl Hat {
             plain.clamp(spec.min, spec.max)
         };
         match spec.id {
-            "hat_closed.tone" | "hat_open.tone" => {
+            "hat_closed.tone" | "hat_open.tone" | "ride.tone" => {
                 self.tone = plain;
                 self.apply_tone();
             }
-            "hat_closed.decay" | "hat_open.decay" => self.decay_s = plain / 1000.0,
-            "hat_closed.metal" | "hat_open.metal" => self.metal = plain / 100.0,
+            "hat_closed.decay" | "hat_open.decay" | "ride.decay" => self.decay_s = plain / 1000.0,
+            "hat_closed.metal" | "hat_open.metal" | "ride.metal" => self.metal = plain / 100.0,
             id => unreachable!("hat param id `{id}` has no setter"),
         }
     }

@@ -5,9 +5,11 @@ import {
   TransportBar,
   type ArrangementProps,
   type DrumRow,
+  type ParamSpecView,
+  type SectionView,
   type TransportBarProps,
 } from "@tune/ui";
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import type { Command, SongView, StudioState, TrackView } from "../client/protocol";
 import {
   acidSection,
@@ -26,7 +28,9 @@ import type { HighlightKind, StudioStore, StudioView } from "../store/studioStor
 import { usePlayheadPosition, usePlayheadStep, useStudioSelector } from "../store/useStudio";
 import { FileErrorBanner, LostBanner, MessageBanner } from "./Banners";
 import { ChangeNotice, hasChangeNotice } from "./ChangeNotice";
+import { MixPanel } from "./MixPanel";
 import { Panel303 } from "./Panel303";
+import { useParamDrag } from "./useParamDrag";
 
 export type StudioScreenProps = {
   view: StudioView & { state: StudioState & { song: SongView } };
@@ -176,12 +180,13 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
           highlights={highlights}
           send={store.send}
         />
-        <aside aria-label="Mixer" className="flex flex-col gap-3">
-          <h2 className="font-label text-lg leading-none text-silkscreen/80">Mixer</h2>
-          {song.tracks.map((t) => (
-            <MixerStrip key={t.id} track={t} fire={fire} />
-          ))}
-        </aside>
+        <Mixer
+          song={song}
+          highlights={highlights}
+          automatedIn={automatedIn}
+          fire={fire}
+          send={store.send}
+        />
       </div>
 
       <DrumSection song={song} section={section} highlights={highlights} fire={fire} />
@@ -219,17 +224,83 @@ const LiveArrangement = memo(function LiveArrangement({
   return <Arrangement {...rest} playhead={step !== null ? step / STEPS_PER_BAR : cursorBar} />;
 });
 
+type MixerProps = {
+  song: SongView;
+  highlights: Map<string, HighlightKind>;
+  automatedIn: number | null;
+  fire(cmd: Command): void;
+  send(cmd: Command): Promise<unknown>;
+};
+
+/** The channel strips and the effects panel; one help line serves every knob in the column. */
+function Mixer({ song, highlights, automatedIn, fire, send }: MixerProps) {
+  const [help, setHelp] = useState<ParamSpecView | null>(null);
+  const lanes = automatedIn === null ? undefined : song.sections[automatedIn]?.lanes;
+  return (
+    <aside aria-label="Mixer" className="flex flex-col gap-3">
+      <h2 className="font-label text-lg leading-none text-silkscreen/80">Mixer</h2>
+      {song.tracks.map((t) => (
+        <MixerStrip
+          key={t.id}
+          track={t}
+          noDuck={whyNoDuck(song.mix.duck_source, t.id)}
+          fire={fire}
+          send={send}
+          highlights={highlights}
+          lanes={lanes}
+          onHelp={setHelp}
+        />
+      ))}
+      <MixPanel
+        song={song}
+        highlights={highlights}
+        automatedIn={automatedIn}
+        send={send}
+        help={help}
+        onHelp={setHelp}
+      />
+    </aside>
+  );
+}
+
+/**
+ * Why `track` gets no duck knob: the duck source would duck itself, and without a source nothing
+ * ducks. Validation refuses both, so a drag would be heard but its release never written.
+ */
+function whyNoDuck(source: string | null, track: string): string | null {
+  if (source === null) return "No kick";
+  return source === track ? "Duck source" : null;
+}
+
 /** One mixer channel; re-renders only when its track changes. */
 const MixerStrip = memo(function MixerStrip({
   track,
+  noDuck,
   fire,
+  send,
+  highlights,
+  lanes,
+  onHelp,
 }: {
   track: TrackView;
+  noDuck: string | null;
   fire(cmd: Command): void;
+  send(cmd: Command): Promise<unknown>;
+  highlights: Map<string, HighlightKind>;
+  lanes: SectionView["lanes"] | undefined;
+  onHelp(spec: ParamSpecView | null): void;
 }) {
+  const drag = useParamDrag(track.id, send, track.strip);
+  const strip = track.strip.map((p) => ({ ...p, value: drag.valueOf(p) }));
   return (
     <TrackStrip
       track={track}
+      strip={strip}
+      onParam={(id, v, commit) => (commit ? drag.commit(id, v) : drag.change(id, v))}
+      onHelp={onHelp}
+      noDuck={noDuck}
+      automated={(id) => lanes?.some((l) => l.track === track.id && l.param === id) ?? false}
+      highlight={(id) => highlights.get(`tracks.${track.id}.${id}`) ?? null}
       onMix={(patch) =>
         fire({
           cmd: "set_track_mix",

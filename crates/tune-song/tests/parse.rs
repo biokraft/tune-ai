@@ -6,7 +6,8 @@ use tune_dsp::DistortionMode;
 use tune_dsp::acid303::AcidPattern;
 use tune_dsp::drums::DrumPattern;
 use tune_song::{
-    FxSpec, InstrumentKind, LoadError, PatternSteps, Song, SongError, load_song, parse_song,
+    FxSpec, InstrumentKind, LoadError, MasterMode, Mix, MixUnit, PatternSteps, Song, SongError,
+    load_song, parse_song,
 };
 
 const MINI: &str = include_str!("fixtures/mini.toml");
@@ -66,7 +67,9 @@ fn parses_mini() {
         ]
     );
     assert_eq!(acid.fx.len(), 1);
-    let FxSpec::Distortion { mode, params } = &acid.fx[0];
+    let FxSpec::Distortion { mode, params } = &acid.fx[0] else {
+        panic!("expected distortion")
+    };
     assert_eq!(*mode, DistortionMode::Soft);
     assert_eq!(params.get("dist.drive"), Some(&12.0));
     assert_eq!(params.len(), 1);
@@ -131,6 +134,7 @@ fn instrument_kind_names_round_trip() {
         InstrumentKind::Clap,
         InstrumentKind::HatClosed,
         InstrumentKind::HatOpen,
+        InstrumentKind::Ride,
     ] {
         assert_eq!(InstrumentKind::from_name(kind.name()), Some(kind));
         assert_eq!(kind.is_drum(), kind != InstrumentKind::Acid303);
@@ -361,4 +365,405 @@ fn load_song_invalid_error() {
         Err(LoadError::Invalid(errors)) => assert!(messages(&errors).contains("bpm")),
         other => panic!("expected LoadError::Invalid, got {other:?}"),
     }
+}
+
+#[test]
+fn ride_track_parses() {
+    let src = MINI
+        .replacen(
+            "[patterns.k4]",
+            "[tracks.ride]\ninstrument = \"ride\"\nparams = { \"ride.decay\" = 2000 }\n\n[patterns.r]\ntrack = \"ride\"\nsteps = \"x.x.x.x.x.x.x.x.\"\n\n[patterns.k4]",
+            1,
+        )
+        .replacen("play = { kick = \"k4\", hat = \"h\" }", "play = { kick = \"k4\", hat = \"h\", ride = \"r\" }", 1);
+    let song = parse_song(&src).unwrap_or_else(|e| panic!("{e:?}"));
+    let ride = &song.tracks["ride"];
+    assert_eq!(ride.instrument, InstrumentKind::Ride);
+    assert_eq!(ride.params["ride.decay"], 2000.0);
+    assert_eq!(InstrumentKind::ALL.len(), 6);
+    assert_eq!(InstrumentKind::ALL[5], InstrumentKind::Ride);
+
+    let bad = src.replacen("\"ride.decay\" = 2000", "\"ride.nope\" = 1", 1);
+    let errors = parse_song(&bad).unwrap_err();
+    let text = messages(&errors);
+    assert!(
+        text.contains("unknown parameter `ride.nope` for ride"),
+        "{text}"
+    );
+    assert!(text.contains("ride.tone"), "{text}");
+}
+
+const MIXED: &str = include_str!("fixtures/mixed.toml");
+
+fn must_parse(src: &str) -> Song {
+    parse_song(src).unwrap_or_else(|e| panic!("must parse: {}\n{src}", messages(&e)))
+}
+
+#[test]
+fn mixed_fixture_parses() {
+    let song = must_parse(MIXED);
+    assert_eq!(song.mix.master, MasterMode::Limit);
+    assert_eq!(song.mix.duck_source, None);
+    assert_eq!(song.duck_source(), Some("kick"));
+    let mix: Vec<(&str, f64)> = song
+        .mix
+        .params
+        .iter()
+        .map(|(k, v)| (k.as_str(), *v))
+        .collect();
+    assert_eq!(
+        mix,
+        [
+            ("delay.feedback", 40.0),
+            ("reverb.size", 30.0),
+            ("master.gain", 6.0)
+        ]
+    );
+
+    let acid = &song.tracks["acid"];
+    assert_eq!(acid.params["send.delay"], -12.0);
+    assert_eq!(acid.params["send.reverb"], -18.0);
+    assert_eq!(acid.params["duck.depth"], 6.0);
+    assert_eq!(acid.params["acid303.cutoff"], 500.0);
+    let types: Vec<&str> = acid.fx.iter().map(FxSpec::type_name).collect();
+    assert_eq!(types, ["distortion", "eq"]);
+    let FxSpec::Eq { params } = &acid.fx[1] else {
+        panic!("expected eq")
+    };
+    assert_eq!(params.get("eq.low_cut"), Some(&85.0));
+    assert_eq!(params.len(), 1);
+    assert_eq!(song.tracks["hat"].params["send.reverb"], -20.0);
+    assert_eq!(song.tracks["ride"].instrument, InstrumentKind::Ride);
+
+    let lanes: Vec<(&str, &str)> = song.sections[1]
+        .automation
+        .iter()
+        .map(|l| (l.track.as_str(), l.param.as_str()))
+        .collect();
+    assert_eq!(
+        lanes,
+        [
+            ("acid", "acid303.cutoff"),
+            ("acid", "send.delay"),
+            ("mix", "reverb.size")
+        ]
+    );
+
+    assert!(song.bus_active(MixUnit::Delay));
+    assert!(song.bus_active(MixUnit::Reverb));
+    assert!(song.bus_active(MixUnit::Master));
+}
+
+#[test]
+fn mini_has_default_mix() {
+    let song = mini();
+    assert_eq!(song.mix, Mix::default());
+    assert!(song.mix.is_default());
+    assert_eq!(song.mix.master, MasterMode::Clip);
+    assert!(!song.bus_active(MixUnit::Delay));
+    assert!(!song.bus_active(MixUnit::Reverb));
+    assert!(song.bus_active(MixUnit::Master));
+    assert_eq!(song.duck_source(), Some("kick"));
+}
+
+#[test]
+fn mix_names_round_trip() {
+    for mode in MasterMode::ALL {
+        assert_eq!(MasterMode::from_name(mode.name()), Some(mode));
+    }
+    assert_eq!(MasterMode::from_name("loud"), None);
+    let names: Vec<&str> = MixUnit::ALL.iter().map(|u| u.name()).collect();
+    assert_eq!(names, ["delay", "reverb", "master"]);
+    for unit in MixUnit::ALL {
+        for (i, spec) in unit.params().iter().enumerate() {
+            assert!(spec.id.starts_with(&format!("{}.", unit.name())));
+            let (u, index, found) = tune_song::find_mix_param(spec.id).unwrap();
+            assert_eq!((u, index, found.id), (unit, i, spec.id));
+        }
+    }
+    assert!(tune_song::find_mix_param("delay.fedback").is_none());
+    assert!(tune_song::find_mix_param("send.delay").is_none());
+    assert_eq!(tune_song::MIX_TRACK_ID, "mix");
+}
+
+#[test]
+fn lane_only_send_is_active() {
+    let src = swap(
+        "param = \"acid.acid303.cutoff\"",
+        "param = \"acid.send.delay\"",
+    );
+    let song = must_parse(&src);
+    assert!(!song.tracks["acid"].params.contains_key("send.delay"));
+    assert_eq!(song.sections[1].automation[0].param, "send.delay");
+    assert!(song.bus_active(MixUnit::Delay));
+    assert!(!song.bus_active(MixUnit::Reverb));
+}
+
+/// `(line, column, message)` of every error, in the order reported.
+fn positioned(src: &str) -> Vec<(usize, usize, String)> {
+    let errors = parse_song(src).expect_err("expected errors");
+    errors
+        .into_iter()
+        .map(|e| (e.line.unwrap(), e.column.unwrap(), e.message))
+        .collect()
+}
+
+/// 1-based column of `needle` on 1-based `line` of `src`, counted in chars.
+fn col(src: &str, line: usize, needle: &str) -> usize {
+    let l = src.lines().nth(line - 1).unwrap();
+    l[..l
+        .find(needle)
+        .unwrap_or_else(|| panic!("`{needle}` not on line {line}"))]
+        .chars()
+        .count()
+        + 1
+}
+
+/// Review Focus 3: every new rule reports at the offending value with
+/// line:col. Three files, because `duck_source` is one key (a duplicate stops
+/// parsing) and a self-duck needs the kick to be the source.
+#[test]
+fn mix_errors_have_positions() {
+    let mix_known = "delay.time, delay.feedback, delay.low_cut, delay.high_cut, delay.width, \
+                     reverb.size, reverb.damp, reverb.pre_delay, reverb.low_cut, reverb.width, \
+                     master.gain, master.ceiling, master.release";
+    let src = r#"[song]
+name = "errs"
+bpm = 120
+
+[mix]
+master = "loud"
+loudness = 3
+params = { "delay.fedback" = 40, "delay.feedback" = 95 }
+
+[tracks.kick]
+instrument = "kick"
+params = { "duck.depth" = 6 }
+
+[tracks.acid]
+instrument = "acid303"
+params = { "send.chorus" = -12 }
+fx = [{ type = "eq", mode = "soft" }]
+
+[patterns.a1]
+track = "acid"
+steps = "C2"
+
+[[sections]]
+name = "a"
+bars = 2
+play = { acid = "a1" }
+
+[[sections.automation]]
+param = "mix.delay.fedback"
+points = [[0, 0.1]]
+"#;
+    let acid_known: Vec<&str> = InstrumentKind::Acid303
+        .params()
+        .iter()
+        .chain(tune_dsp::STRIP_PARAMS)
+        .map(|s| s.id)
+        .collect();
+    let expected = vec![
+        (
+            6,
+            col(src, 6, "\"loud\""),
+            "unknown master mode `loud` (expected clip or limit)".to_owned(),
+        ),
+        (
+            7,
+            1,
+            "unknown field `loudness` in [mix], expected one of `master`, `duck_source`, `params`"
+                .to_owned(),
+        ),
+        (
+            8,
+            col(src, 8, "\"delay.fedback\""),
+            format!("unknown parameter `delay.fedback` for mix (known: {mix_known})"),
+        ),
+        (
+            8,
+            col(src, 8, "95"),
+            "value 95 for `delay.feedback` is out of range 0..=90".to_owned(),
+        ),
+        (
+            12,
+            col(src, 12, "6 }"),
+            "track `kick` is the duck source and cannot duck itself".to_owned(),
+        ),
+        (
+            16,
+            col(src, 16, "\"send.chorus\""),
+            format!(
+                "unknown parameter `send.chorus` for acid303 (known: {})",
+                acid_known.join(", ")
+            ),
+        ),
+        (17, col(src, 17, "\"soft\""), "eq has no mode".to_owned()),
+        (
+            29,
+            col(src, 29, "\"mix.delay.fedback\""),
+            format!("unknown parameter `delay.fedback` for mix (known: {mix_known})"),
+        ),
+    ];
+    assert_eq!(positioned(src), expected);
+
+    let unknown = swap("seed = 7\n", "seed = 7\n\n[mix]\nduck_source = \"kik\"\n");
+    let line = unknown.lines().position(|l| l.contains("kik")).unwrap() + 1;
+    assert_eq!(
+        positioned(&unknown),
+        [(
+            line,
+            col(&unknown, line, "\"kik\""),
+            "unknown track `kik`".to_owned()
+        )]
+    );
+
+    let melodic = swap("seed = 7\n", "seed = 7\n\n[mix]\nduck_source = \"acid\"\n");
+    let line = melodic
+        .lines()
+        .position(|l| l.contains("duck_source"))
+        .unwrap()
+        + 1;
+    assert_eq!(
+        positioned(&melodic),
+        [(
+            line,
+            col(&melodic, line, "\"acid\""),
+            "duck_source `acid` must be a drum track (ducking follows its hits)".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn duck_needs_a_source() {
+    const NEEDS: &str =
+        "`duck.depth` needs a kick to follow: add a kick track or set duck_source in [mix]";
+    let src = swap("instrument = \"kick\"", "instrument = \"clap\"").replacen(
+        "\"acid303.accent\" = 55",
+        "\"acid303.accent\" = 55, \"duck.depth\" = 6",
+        1,
+    );
+    let line = src.lines().position(|l| l.contains("duck.depth")).unwrap() + 1;
+    assert_eq!(
+        positioned(&src),
+        [(line, col(&src, line, "6 }"), NEEDS.to_owned())]
+    );
+
+    // A lane on `duck.depth` needs a source too.
+    let lane = swap("instrument = \"kick\"", "instrument = \"clap\"").replacen(
+        "param = \"acid.acid303.cutoff\"",
+        "param = \"acid.duck.depth\"",
+        1,
+    );
+    let line = lane.lines().position(|l| l.contains("duck.depth")).unwrap() + 1;
+    assert_eq!(
+        positioned(&lane),
+        [(line, col(&lane, line, "\"acid.duck"), NEEDS.to_owned())]
+    );
+
+    // Depth 0 is off and needs nothing.
+    let off = swap("instrument = \"kick\"", "instrument = \"clap\"").replacen(
+        "\"acid303.accent\" = 55",
+        "\"acid303.accent\" = 55, \"duck.depth\" = 0",
+        1,
+    );
+    assert_eq!(must_parse(&off).duck_source(), None);
+}
+
+#[test]
+fn explicit_duck_source_wins() {
+    let src = swap("seed = 7\n", "seed = 7\n\n[mix]\nduck_source = \"hat\"\n").replacen(
+        "[tracks.hat]",
+        "[tracks.kick2]\ninstrument = \"kick\"\n\n[tracks.hat]",
+        1,
+    );
+    let song = must_parse(&src);
+    assert_eq!(song.mix.duck_source.as_deref(), Some("hat"));
+    assert_eq!(song.duck_source(), Some("hat"));
+    assert_eq!(song.mix.master, MasterMode::Clip);
+    assert!(!song.mix.is_default());
+}
+
+#[test]
+fn second_eq_is_rejected() {
+    let src = swap(
+        "fx = [{ type = \"distortion\", mode = \"soft\", params = { \"dist.drive\" = 12 } }]",
+        "fx = [{ type = \"eq\" }, { type = \"eq\", params = { \"eq.low_cut\" = 85 } }]",
+    );
+    let all = messages(&parse_song(&src).unwrap_err());
+    assert!(all.contains("track `acid` may have only one eq"), "{all}");
+
+    let lane = swap(
+        "fx = [{ type = \"distortion\", mode = \"soft\", params = { \"dist.drive\" = 12 } }]",
+        "fx = [{ type = \"eq\" }]",
+    )
+    .replacen(
+        "param = \"acid.acid303.cutoff\"",
+        "param = \"acid.eq.mid_gain\"",
+        1,
+    );
+    let song = must_parse(&lane);
+    assert_eq!(
+        song.tracks["acid"].fx,
+        [FxSpec::Eq {
+            params: Default::default()
+        }]
+    );
+    assert_eq!(song.sections[1].automation[0].param, "eq.mid_gain");
+}
+
+/// Review Focus 3: a lane on the duck source's own `duck.depth` would make
+/// it duck itself, just like a static depth.
+#[test]
+fn duck_lane_on_source_is_self_duck() {
+    let src = swap(
+        "param = \"acid.acid303.cutoff\"",
+        "param = \"kick.duck.depth\"",
+    );
+    let line = src.lines().position(|l| l.contains("kick.duck")).unwrap() + 1;
+    assert_eq!(
+        positioned(&src),
+        [(
+            line,
+            col(&src, line, "\"kick.duck"),
+            "track `kick` is the duck source and cannot duck itself".to_owned()
+        )]
+    );
+
+    // With another source named, the kick may duck.
+    let other = src.replacen(
+        "seed = 7\n",
+        "seed = 7\n\n[mix]\nduck_source = \"hat\"\n",
+        1,
+    );
+    assert_eq!(must_parse(&other).duck_source(), Some("hat"));
+}
+
+/// An invalid explicit `duck_source` reports only itself: no self-duck error
+/// is derived from it, for a static depth or a lane.
+#[test]
+fn invalid_duck_source_drives_no_self_duck() {
+    const NOT_DRUM: &str = "duck_source `acid` must be a drum track (ducking follows its hits)";
+    let named = swap("seed = 7\n", "seed = 7\n\n[mix]\nduck_source = \"acid\"\n");
+    let line = named
+        .lines()
+        .position(|l| l.contains("duck_source"))
+        .unwrap()
+        + 1;
+    let expected = [(line, col(&named, line, "\"acid\""), NOT_DRUM.to_owned())];
+
+    let depth = named.replacen(
+        "\"acid303.accent\" = 55",
+        "\"acid303.accent\" = 55, \"duck.depth\" = 6",
+        1,
+    );
+    assert_eq!(positioned(&depth), expected);
+
+    let lane = named.replacen(
+        "param = \"acid.acid303.cutoff\"",
+        "param = \"acid.duck.depth\"",
+        1,
+    );
+    assert_eq!(positioned(&lane), expected);
 }

@@ -49,6 +49,8 @@ export function formatValue(spec: ParamSpecView, plain: number): string {
       const text = plain.toFixed(1);
       return `${text === "-0.0" ? "0.0" : text} dB`;
     }
+    case "16ths":
+      return Number.isInteger(plain) ? `${plain}/16` : `${plain.toFixed(2)}/16`;
     case "":
       return plain.toFixed(2);
     default:

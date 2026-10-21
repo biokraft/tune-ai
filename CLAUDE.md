@@ -6,7 +6,7 @@ and lock-free live playback) driven through the `tune` CLI.
 
 ## Layout
 
-- `crates/tune-dsp` - DSP library (`param`, `acid303/*`, `drums/*`, `fx/*`). No Tauri, UI,
+- `crates/tune-dsp` - DSP library (`param`, `acid303/*`, `drums/*`, `fx/*`: eq, delay, reverb, duck, limiter). No Tauri, UI,
   MCP, `cc` or `open303-ref` dependencies (`open303-ref` only as a dev-dependency).
 - `crates/tune-song` - song file model: parse, validate (positional errors),
   canonical write, file watcher. Headless.
@@ -42,10 +42,17 @@ Songs are TOML files, `songs/<name>/song.toml`. Loop:
 2. `tune validate <song> --json`. Errors carry `line` and `column`; fix them all.
 3. `tune info <song> --json` for the section, bar and time map.
 4. `tune render <song> --bars A..B --json --out scratch/x.wav` for the passage
-   in question. Read `peak_dbfs` and `pre_clip_peak_dbfs`. The soft
-   clipper starts shaping at -6 dBFS; a pre-clip peak above -1 dBFS means it
-   is limiting hard, so lower gains. Text mode prints `warning:` only in that
-   case and `note:` when only the -6 dBFS knee is crossed (both on stderr).
+   in question. Read `master` (`clip` or `limit`), `peak_dbfs`,
+   `pre_clip_peak_dbfs` and `max_reduction_db`. In clip mode (the default)
+   the soft clipper starts shaping at -6 dBFS; a pre-clip peak above -1 dBFS
+   means it is limiting hard, so lower gains. Text mode prints `warning:
+   master clipper engaged on N samples` only in that case and `note: soft
+   clipper shaped N samples` when only the -6 dBFS knee is crossed (stderr).
+   That knee note/warning is clip mode only. In limit mode the text line ends
+   "limiter reduced peaks by R dB" instead of the pre-clip peak,
+   `max_reduction_db` is R (0 in clip mode), and stderr gets `note: limiter
+   reduced peaks by up to R dB` for R > 0, or `warning: ... lower
+   mix.master.gain` for R > 9.
 
 Notation:
 
@@ -58,6 +65,40 @@ Notation:
   `points = [[bar_offset, normalized_0_to_1], ...]`; offset 0 is the section
   start.
 - `tune params --json` is the source of param ids, ranges and units.
+
+### Mixing
+
+Signal flow, fixed: instrument -> fx (distortion, eq) -> duck -> gain/pan ->
+sends -> delay and reverb buses -> master gain -> clip or limit.
+
+- Strip params live in the track's `params` table: `send.delay`, `send.reverb`
+  (dB, -60 = off), `duck.depth` (dB), `duck.release` (ms). EQ is an fx entry:
+  `fx = [{ type = "eq", params = { "eq.low_cut" = 85 } }]`
+  (`eq.{low_cut,mid_freq,mid_gain,mid_q,high_gain,high_cut}`).
+- `[mix]` holds the master mode, the duck source and the shared bus params
+  (`delay.*`, `reverb.*`, `master.*`):
+
+  ```toml
+  [mix]
+  master = "limit"            # "clip" (default, soft clipper) or "limit"
+  duck_source = "kick"        # optional; default = the first kick track
+  params = { "delay.feedback" = 40, "reverb.size" = 30, "master.gain" = 6 }
+  ```
+
+- Lanes: `<track>.send.delay` (delay throws), `<track>.duck.depth`,
+  `mix.<param id>` (e.g. `param = "mix.reverb.size"`).
+- A delay/reverb bus is built only if some track sets `send.delay` /
+  `send.reverb` explicitly (even at -60) or a lane drives it. Ducking follows
+  the source's hits even if it is muted; no hits, no ducking.
+- `master = "limit"` is for loud masters; `master.ceiling` defaults to -1.5 dB.
+  Its 84-frame lookahead (1.75 ms at 48 kHz) is not compensated.
+- A studio send knob on a track with no static send and no lane is silent
+  until released. Stems carry dry tracks only (no buses, no limiter); in limit
+  mode they run 84 frames (the lookahead) ahead of the mix.
+- A hot reload keeps the reverb tail and the limiter. Only a bpm change or a
+  delay bus appearing or going restarts the delay (its echoes stop). A
+  master-mode switch crossfades clipper and limiter over 10 ms, with no silent
+  frames.
 
 Every command takes `--json`; exit code 2 means failure. `tune play` is for the
 producer: it plays through the speakers and reloads the file when it changes.
@@ -87,7 +128,9 @@ are the final judge.
    (never look up its path), then compare our drop with it. Give exactly one of `--ref <name>` or a
    reference path (`tune compare <song> <path>`). The compare PNG is 1600x1712:
    ours on top, the reference below, same frequency axis and colour scale.
-6. Change the song (`tune set`), re-render, repeat.
+6. For -8..-6 LUFS, set `master = "limit"` and raise `mix.master.gain`; keep
+   `max_reduction_db` under about 9.
+7. Change the song (`tune set`), re-render, repeat.
 
 Input is a song file (rendered in memory) or audio (WAV, MP3, FLAC, AAC; at
 most 2 channels). `--song <song> --from-bar N` maps an audio file onto a song's
@@ -151,6 +194,11 @@ The producer may have the studio (app or browser) open on the same song.
   | `tracks.<t>.gain_db` / `pan` / `mute` / `solo` | dB / -1 to 1 / bool / bool |
   | `tracks.<t>.<param id>` | plain value in the param's unit, e.g. `tracks.acid.acid303.cutoff=820`, `tracks.acid.dist.drive=18` |
   | `tracks.<t>.dist.mode` | `soft`, `hard` or `overdrive` |
+  | `tracks.<t>.send.delay` / `send.reverb` / `duck.depth` / `duck.release` | dB / dB / dB / ms |
+  | `tracks.<t>.eq.<name>` | `low_cut`, `mid_freq`, `mid_gain`, `mid_q`, `high_gain`, `high_cut`; the track needs an `eq` fx entry |
+  | `mix.<param id>` | `delay.*`, `reverb.*`, `master.gain` / `ceiling` / `release`, e.g. `mix.master.gain=6` |
+  | `mix.master` | `clip` or `limit` |
+  | `mix.duck_source` | track id; empty = first kick |
   | `patterns.<p>.steps` | the pattern in notation, quoted |
   | `sections[<i>].bars` / `name` | integer / string; `<i>` is 0-based |
   | `sections[<i>].play.<t>` | pattern id, or empty to stop that track there |

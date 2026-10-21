@@ -205,6 +205,56 @@
                 "explicit": false
               }
             ],
+            "strip": [
+              {
+                "id": "send.delay",
+                "label": "Delay",
+                "unit": "dB",
+                "min": -60.0,
+                "max": 0.0,
+                "curve": "linear",
+                "default": -60.0,
+                "help": "How much of this track goes to the shared dotted-eighth delay. -60 is off.",
+                "value": -60.0,
+                "explicit": false
+              },
+              {
+                "id": "send.reverb",
+                "label": "Reverb",
+                "unit": "dB",
+                "min": -60.0,
+                "max": 0.0,
+                "curve": "linear",
+                "default": -60.0,
+                "help": "How much goes to the shared reverb. -60 is off.",
+                "value": -60.0,
+                "explicit": false
+              },
+              {
+                "id": "duck.depth",
+                "label": "Duck",
+                "unit": "dB",
+                "min": 0.0,
+                "max": 24.0,
+                "curve": "linear",
+                "default": 0.0,
+                "help": "How far this track dips on every kick, so the kick punches through. 0 is off.",
+                "value": 0.0,
+                "explicit": false
+              },
+              {
+                "id": "duck.release",
+                "label": "Duck release",
+                "unit": "ms",
+                "min": 20.0,
+                "max": 400.0,
+                "curve": "exponential",
+                "default": 80.0,
+                "help": "How fast the track comes back after the dip. 50-100 ms suits a 303.",
+                "value": 80.0,
+                "explicit": false
+              }
+            ],
             "fx": []
           },
           {
@@ -324,6 +374,56 @@
                 "explicit": false
               }
             ],
+            "strip": [
+              {
+                "id": "send.delay",
+                "label": "Delay",
+                "unit": "dB",
+                "min": -60.0,
+                "max": 0.0,
+                "curve": "linear",
+                "default": -60.0,
+                "help": "How much of this track goes to the shared dotted-eighth delay. -60 is off.",
+                "value": -60.0,
+                "explicit": false
+              },
+              {
+                "id": "send.reverb",
+                "label": "Reverb",
+                "unit": "dB",
+                "min": -60.0,
+                "max": 0.0,
+                "curve": "linear",
+                "default": -60.0,
+                "help": "How much goes to the shared reverb. -60 is off.",
+                "value": -60.0,
+                "explicit": false
+              },
+              {
+                "id": "duck.depth",
+                "label": "Duck",
+                "unit": "dB",
+                "min": 0.0,
+                "max": 24.0,
+                "curve": "linear",
+                "default": 0.0,
+                "help": "How far this track dips on every kick, so the kick punches through. 0 is off.",
+                "value": 0.0,
+                "explicit": false
+              },
+              {
+                "id": "duck.release",
+                "label": "Duck release",
+                "unit": "ms",
+                "min": 20.0,
+                "max": 400.0,
+                "curve": "exponential",
+                "default": 80.0,
+                "help": "How fast the track comes back after the dip. 50-100 ms suits a 303.",
+                "value": 80.0,
+                "explicit": false
+              }
+            ],
             "fx": [
               {
                 "kind": "distortion",
@@ -416,6 +516,56 @@
                 "default": 40.0,
                 "help": "Blend of metallic ring and plain noise. More metal sounds like a real cymbal.",
                 "value": 40.0,
+                "explicit": false
+              }
+            ],
+            "strip": [
+              {
+                "id": "send.delay",
+                "label": "Delay",
+                "unit": "dB",
+                "min": -60.0,
+                "max": 0.0,
+                "curve": "linear",
+                "default": -60.0,
+                "help": "How much of this track goes to the shared dotted-eighth delay. -60 is off.",
+                "value": -60.0,
+                "explicit": false
+              },
+              {
+                "id": "send.reverb",
+                "label": "Reverb",
+                "unit": "dB",
+                "min": -60.0,
+                "max": 0.0,
+                "curve": "linear",
+                "default": -60.0,
+                "help": "How much goes to the shared reverb. -60 is off.",
+                "value": -60.0,
+                "explicit": false
+              },
+              {
+                "id": "duck.depth",
+                "label": "Duck",
+                "unit": "dB",
+                "min": 0.0,
+                "max": 24.0,
+                "curve": "linear",
+                "default": 0.0,
+                "help": "How far this track dips on every kick, so the kick punches through. 0 is off.",
+                "value": 0.0,
+                "explicit": false
+              },
+              {
+                "id": "duck.release",
+                "label": "Duck release",
+                "unit": "ms",
+                "min": 20.0,
+                "max": 400.0,
+                "curve": "exponential",
+                "default": 80.0,
+                "help": "How fast the track comes back after the dip. 50-100 ms suits a 303.",
+                "value": 80.0,
                 "explicit": false
               }
             ],
@@ -554,7 +704,179 @@
               }
             ]
           }
-        ]
+        ],
+        "mix": {
+          "master": "clip",
+          "masters": [
+            "clip",
+            "limit"
+          ],
+          "duck_source": "kick",
+          "delay": [
+            {
+              "id": "delay.time",
+              "label": "Time",
+              "unit": "16ths",
+              "min": 1.0,
+              "max": 8.0,
+              "curve": "linear",
+              "default": 3.0,
+              "help": "Echo spacing in 16th notes. 3 is the dotted eighth that makes acid lines roll; 2 is an eighth, 4 a beat.",
+              "value": 3.0,
+              "explicit": false
+            },
+            {
+              "id": "delay.feedback",
+              "label": "Feedback",
+              "unit": "%",
+              "min": 0.0,
+              "max": 90.0,
+              "curve": "linear",
+              "default": 35.0,
+              "help": "How many repeats. Above 70 % the echoes pile up.",
+              "value": 35.0,
+              "explicit": false
+            },
+            {
+              "id": "delay.low_cut",
+              "label": "Low cut",
+              "unit": "Hz",
+              "min": 20.0,
+              "max": 2000.0,
+              "curve": "exponential",
+              "default": 250.0,
+              "help": "Keeps the repeats out of the kick's low end. 20 Hz is off.",
+              "value": 250.0,
+              "explicit": false
+            },
+            {
+              "id": "delay.high_cut",
+              "label": "High cut",
+              "unit": "Hz",
+              "min": 1000.0,
+              "max": 20000.0,
+              "curve": "exponential",
+              "default": 6000.0,
+              "help": "Darkens each repeat, so echoes sit behind the dry line. 20 kHz is off.",
+              "value": 6000.0,
+              "explicit": false
+            },
+            {
+              "id": "delay.width",
+              "label": "Width",
+              "unit": "%",
+              "min": 0.0,
+              "max": 100.0,
+              "curve": "linear",
+              "default": 100.0,
+              "help": "0 echoes in the middle; 100 bounces left and right (ping-pong).",
+              "value": 100.0,
+              "explicit": false
+            }
+          ],
+          "reverb": [
+            {
+              "id": "reverb.size",
+              "label": "Size",
+              "unit": "%",
+              "min": 0.0,
+              "max": 100.0,
+              "curve": "linear",
+              "default": 25.0,
+              "help": "Room size: how long the tail rings. Keep it small so the groove stays tight.",
+              "value": 25.0,
+              "explicit": false
+            },
+            {
+              "id": "reverb.damp",
+              "label": "Damp",
+              "unit": "%",
+              "min": 0.0,
+              "max": 100.0,
+              "curve": "linear",
+              "default": 50.0,
+              "help": "Darkens the tail, like a room with soft walls.",
+              "value": 50.0,
+              "explicit": false
+            },
+            {
+              "id": "reverb.pre_delay",
+              "label": "Pre-delay",
+              "unit": "ms",
+              "min": 0.0,
+              "max": 100.0,
+              "curve": "linear",
+              "default": 0.0,
+              "help": "Gap before the tail starts, so the dry hit stays clear.",
+              "value": 0.0,
+              "explicit": false
+            },
+            {
+              "id": "reverb.low_cut",
+              "label": "Low cut",
+              "unit": "Hz",
+              "min": 20.0,
+              "max": 2000.0,
+              "curve": "exponential",
+              "default": 400.0,
+              "help": "Keeps the tail out of the low end. 20 Hz is off.",
+              "value": 400.0,
+              "explicit": false
+            },
+            {
+              "id": "reverb.width",
+              "label": "Width",
+              "unit": "%",
+              "min": 0.0,
+              "max": 100.0,
+              "curve": "linear",
+              "default": 100.0,
+              "help": "0 is a mono tail; 100 spreads it wide.",
+              "value": 100.0,
+              "explicit": false
+            }
+          ],
+          "master_params": [
+            {
+              "id": "master.gain",
+              "label": "Master gain",
+              "unit": "dB",
+              "min": -12.0,
+              "max": 24.0,
+              "curve": "linear",
+              "default": 0.0,
+              "help": "Drives the whole mix into the master stage. With the limiter, this is the loudness knob.",
+              "value": 0.0,
+              "explicit": false
+            },
+            {
+              "id": "master.ceiling",
+              "label": "Ceiling",
+              "unit": "dB",
+              "min": -6.0,
+              "max": -0.1,
+              "curve": "linear",
+              "default": -1.5,
+              "help": "The loudest the limiter lets a peak get. Sample peaks stay at or under it; a true-peak meter reads at most about 0.3 dB over it.",
+              "value": -1.5,
+              "explicit": false
+            },
+            {
+              "id": "master.release",
+              "label": "Release",
+              "unit": "ms",
+              "min": 10.0,
+              "max": 500.0,
+              "curve": "exponential",
+              "default": 100.0,
+              "help": "How fast the limiter lets go. Short is louder but pumps; long is smoother.",
+              "value": 100.0,
+              "explicit": false
+            }
+          ],
+          "delay_active": false,
+          "reverb_active": false
+        }
       },
       "playing": false,
       "cursor_bar": 0,

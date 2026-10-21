@@ -11,6 +11,9 @@ use tune_song::{Song, parse_song};
 /// The shared `mini` fixture.
 pub const MINI: &str = include_str!("../../../tune-song/tests/fixtures/mini.toml");
 
+/// The shared `mixed` fixture: `mini` plus the mixer.
+pub const MIXED: &str = include_str!("../../../tune-song/tests/fixtures/mixed.toml");
+
 /// Parses `src` (which must be valid) and compiles it at the song's rate
 /// (48 kHz by default).
 pub fn compiled(src: &str) -> Arc<CompiledSong> {
@@ -23,6 +26,27 @@ pub fn song(src: &str) -> Song {
 
 pub fn compile_song(song: &Song) -> Arc<CompiledSong> {
     Arc::new(CompiledSong::new(song, song.sample_rate.unwrap_or(48_000)))
+}
+
+/// `src` changed by `edit`, checked by a write and re-parse.
+pub fn variant_of(src: &str, edit: impl FnOnce(&mut Song)) -> Song {
+    let mut s = song(src);
+    edit(&mut s);
+    parse_song(&s.to_toml()).unwrap_or_else(|e| panic!("variant does not validate: {e:?}"))
+}
+
+/// Removes the lane on `track`'s `param` from every section.
+pub fn drop_lane(s: &mut Song, track: &str, param: &str) {
+    for section in &mut s.sections {
+        section
+            .automation
+            .retain(|l| !(l.track == track && l.param == param));
+    }
+}
+
+/// The bit patterns of `x`, for bitwise comparisons.
+pub fn bits(x: &[f32]) -> Vec<u32> {
+    x.iter().map(|v| v.to_bits()).collect()
 }
 
 /// One recorded call on a probe, in call order. `sample` is the number of

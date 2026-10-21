@@ -9,3 +9,12 @@ license = "MIT"
 
 [workspace.lints.clippy]
 all = "warn"
+
+# Packed debuginfo (a .dSYM per binary on macOS) instead of the default
+# unpacked, which leaves every codegen unit's object file in target/*/deps
+# and never removes the stale ones after an incremental rebuild. They grew
+# past 200k files there, and macOS slows FSEvents watcher registration in
+# proportion to the entries next to the running executable, which made
+# every song open in the studio tests take seconds.
+[profile.dev]
+split-debuginfo = "packed"

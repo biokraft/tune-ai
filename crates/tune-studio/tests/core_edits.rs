@@ -584,3 +584,166 @@ fn command_serde_form() {
     let undo: Command = serde_json::from_value(json!({"cmd": "undo"})).unwrap();
     assert_eq!(undo, Command::Undo);
 }
+
+// ----- the mixer -----
+
+const MIXED: &str = include_str!("../../tune-song/tests/fixtures/mixed.toml");
+
+/// A temp dir holding `text` as `song.toml`.
+fn song_with(text: &str) -> Song {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("song.toml");
+    fs::write(&path, text).expect("write song");
+    Song { _dir: dir, path }
+}
+
+#[test]
+fn set_param_on_mix_commits() {
+    let s = song();
+    let mut core = open(&s);
+    let t0 = Instant::now();
+    let reverb = Command::SetParam {
+        track: "mix".into(),
+        param: "reverb.size".into(),
+        value: 42.0,
+        commit: true,
+    };
+    let changes = core.apply_edit(&reverb, t0).unwrap();
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    assert_eq!(changes[0].path.to_string(), "mix.reverb.size");
+    assert_eq!((&changes[0].old, &changes[0].new), (&json!(25), &json!(42)));
+    assert_eq!(core.song().mix.params["reverb.size"], 42.0);
+
+    core.flush().unwrap();
+    let text = disk(&s);
+    assert!(
+        text.contains("[mix]\nparams = { \"reverb.size\" = 42 }\n"),
+        "{text}"
+    );
+    let logged: Vec<_> = log(&s).iter().map(entry_summary).collect();
+    assert_eq!(
+        logged,
+        [(
+            Source::Human,
+            "mix.reverb.size".to_owned(),
+            json!(25),
+            json!(42)
+        )]
+    );
+
+    // A strip knob on a track goes to the track's params.
+    let send = Command::SetParam {
+        track: "hat".into(),
+        param: "send.reverb".into(),
+        value: -20.0,
+        commit: true,
+    };
+    let changes = core.apply_edit(&send, t0).unwrap();
+    assert_eq!(changes[0].path.to_string(), "tracks.hat.send.reverb");
+    assert_eq!(core.song().tracks["hat"].params["send.reverb"], -20.0);
+
+    // An unknown mix id is refused.
+    let bad = Command::SetParam {
+        track: "mix".into(),
+        param: "reverb.sise".into(),
+        value: 1.0,
+        commit: true,
+    };
+    assert!(matches!(
+        core.apply_edit(&bad, t0),
+        Err(StudioError::Edit(EditError::UnknownParam { .. }))
+    ));
+}
+
+#[test]
+fn mix_lane_is_automated() {
+    let s = song_with(MIXED);
+    let core = open(&s);
+    // Section b (bars 2..4) has the lane `mix.reverb.size`.
+    assert!(!core.is_automated("mix", "reverb.size", 1));
+    assert!(core.is_automated("mix", "reverb.size", 2));
+    assert!(core.is_automated("mix", "reverb.size", 3));
+    assert!(!core.is_automated("mix", "delay.feedback", 2));
+    assert!(core.is_automated("acid", "send.delay", 2));
+    assert!(!core.is_automated("hat", "send.delay", 2));
+}
+
+#[test]
+fn view_describes_the_mix() {
+    let s = song_with(MIXED);
+    let view = open(&s).view();
+
+    let acid = view.tracks.iter().find(|t| t.id == "acid").unwrap();
+    let strip: Vec<_> = acid
+        .strip
+        .iter()
+        .map(|p| (p.id.as_str(), p.value, p.explicit))
+        .collect();
+    assert_eq!(
+        strip,
+        [
+            ("send.delay", -12.0, true),
+            ("send.reverb", -18.0, true),
+            ("duck.depth", 6.0, true),
+            ("duck.release", 80.0, false),
+        ]
+    );
+    assert!(
+        acid.params.iter().all(|p| p.id.starts_with("acid303.")),
+        "strip ids stay out of the instrument params"
+    );
+    let eq = &acid.fx[1];
+    assert_eq!(eq.kind, "eq");
+    assert_eq!(eq.mode, "");
+    assert!(eq.modes.is_empty());
+    assert_eq!(
+        (eq.params[0].id.as_str(), eq.params[0].value),
+        ("eq.low_cut", 85.0)
+    );
+
+    let ride = view.tracks.iter().find(|t| t.id == "ride").unwrap();
+    assert!(
+        ride.strip
+            .iter()
+            .all(|p| !p.explicit && p.value == p.default)
+    );
+
+    let mix = &view.mix;
+    assert_eq!(mix.master, "limit");
+    assert_eq!(mix.masters, ["clip", "limit"]);
+    assert_eq!(mix.duck_source.as_deref(), Some("kick"));
+    let ids = |ps: &[tune_studio::ParamView]| -> Vec<String> {
+        ps.iter().map(|p| p.id.clone()).collect()
+    };
+    assert_eq!(
+        ids(&mix.delay),
+        [
+            "delay.time",
+            "delay.feedback",
+            "delay.low_cut",
+            "delay.high_cut",
+            "delay.width"
+        ]
+    );
+    assert_eq!(ids(&mix.reverb)[0], "reverb.size");
+    assert_eq!(
+        ids(&mix.master_params),
+        ["master.gain", "master.ceiling", "master.release"]
+    );
+    assert_eq!((mix.delay[1].value, mix.delay[1].explicit), (40.0, true));
+    assert_eq!((mix.delay[0].value, mix.delay[0].explicit), (3.0, false));
+    assert_eq!(mix.reverb[0].value, 30.0);
+    assert_eq!(mix.master_params[0].value, 6.0);
+    assert!(mix.delay_active && mix.reverb_active);
+
+    // The mini song: the default mix, no buses, no duck source but the kick.
+    let s = song();
+    let view = open(&s).view();
+    assert_eq!(view.mix.master, "clip");
+    assert_eq!(view.mix.duck_source.as_deref(), Some("kick"));
+    assert!(!view.mix.delay_active && !view.mix.reverb_active);
+    assert!(view.mix.delay.iter().all(|p| !p.explicit));
+    let json = serde_json::to_value(&view).unwrap();
+    assert_eq!(json["mix"]["masters"], json!(["clip", "limit"]));
+    assert_eq!(json["tracks"][0]["strip"][0]["id"], "send.delay");
+}
