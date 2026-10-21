@@ -7,27 +7,14 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use serde_json::{Value, json};
+use tune_audio::output;
 use tune_engine::{CompiledSong, live};
 use tune_song::{Reload, SongError, SongWatcher};
 
 use super::{load, sample_rate};
-use crate::audio::{Output, Running, start_null};
 use crate::report::{Failure, finish, parse_bar_range};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Device {
-    Default,
-    Null,
-}
-
-impl Device {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::Null => "null",
-        }
-    }
-}
+pub use tune_audio::Device;
 
 pub struct Args {
     pub song: PathBuf,
@@ -87,19 +74,14 @@ pub fn run(a: &Args) -> ExitCode {
     };
 
     // The device decides the rate; the song compiles at it.
-    let (output, rate, note) = match a.device {
-        Device::Null => (None, sample_rate(&song), None),
-        Device::Default => match Output::default_device(sample_rate(&song)) {
-            Ok(o) => {
-                let rate = o.sample_rate();
-                let note = o.note.clone();
-                (Some(o), rate, note)
-            }
-            Err(m) => return fail(a.json, m),
-        },
+    let mut out = output(a.device);
+    let wanted = sample_rate(&song);
+    let rate = match out.sample_rate(wanted) {
+        Ok(r) => r,
+        Err(m) => return fail(a.json, m),
     };
-    if let Some(n) = note {
-        eprintln!("{n}");
+    if rate != wanted {
+        eprintln!("note: playing at {rate} Hz (song asks {wanted})");
     }
 
     let compiled = Arc::new(CompiledSong::new(&song, rate));
@@ -119,12 +101,9 @@ pub fn run(a: &Args) -> ExitCode {
         Err(e) => return fail(a.json, format!("cannot watch `{}`: {e}", a.song.display())),
     };
 
-    let _running: Running = match output {
-        Some(o) => match o.start(processor) {
-            Ok(r) => r,
-            Err(m) => return fail(a.json, m),
-        },
-        None => start_null(processor),
+    let _running = match out.start(processor) {
+        Ok(r) => r,
+        Err(m) => return fail(a.json, m),
     };
 
     emit(
@@ -148,6 +127,9 @@ pub fn run(a: &Args) -> ExitCode {
 
     let mut seen_swaps = controller.swaps_applied();
     loop {
+        if out.device_lost() {
+            return fail(a.json, "audio device lost");
+        }
         if stop.load(Ordering::Relaxed) {
             let bar = controller.bar() + 1;
             emit(

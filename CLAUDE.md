@@ -13,7 +13,9 @@ and lock-free live playback) driven through the `tune` CLI.
 - `crates/tune-engine` - compiles a song and renders it: offline (`render`) or
   live (`live`, lock-free swap for hot reload). Headless.
 - `crates/tune-cli` - the `tune` binary: `validate`, `info`, `params`,
-  `render`, `play`, `render-303`. `cpal` and `ctrlc` live only here.
+  `render`, `play`, `render-303`. `ctrlc` lives only here.
+- `crates/tune-audio` - audio output (`AudioOut`): `cpal` default device and a
+  `null` device. `cpal` lives only here.
 - `songs/<name>/song.toml` - committed songs. Renders go to `scratch/` or
   `songs/*/renders/` (gitignored).
 - `crates/open303-ref` - dev-only C++ reference build used for parity tests.

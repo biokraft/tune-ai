@@ -17,11 +17,11 @@ path = "src/lib.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-cpal = "0.18.2"
 ctrlc = "3.5.2"
 hound = "3.5"
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
+tune-audio = { path = "../tune-audio" }
 tune-dsp = { path = "../tune-dsp" }
 tune-engine = { path = "../tune-engine" }
 tune-song = { path = "../tune-song" }
