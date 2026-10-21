@@ -201,8 +201,10 @@ fn mix(
 
 /// Who `duck.depth` follows, as far as the raw file tells.
 enum Duck<'a> {
-    /// `[mix] duck_source` is set (valid or not; a bad one has its own error).
-    Explicit(&'a At<String>),
+    /// `[mix] duck_source` is set: the track when it names a drum track,
+    /// `None` when it is invalid (it has its own error, and nothing else is
+    /// derived from it).
+    Explicit(Option<&'a str>),
     /// The first kick track, if any.
     FirstKick(Option<&'a str>),
 }
@@ -210,7 +212,13 @@ enum Duck<'a> {
 impl<'a> Duck<'a> {
     fn of(raw: &'a RawSong, shapes: &IndexMap<&'a str, TrackShape>) -> Self {
         match raw.mix.as_ref().and_then(|m| m.duck_source.as_ref()) {
-            Some(src) => Self::Explicit(src),
+            Some(src) => Self::Explicit(
+                shapes
+                    .get(src.value.as_str())
+                    .and_then(|s| s.kind)
+                    .is_some_and(InstrumentKind::is_drum)
+                    .then_some(src.value.as_str()),
+            ),
             None => Self::FirstKick(
                 shapes
                     .iter()
@@ -223,8 +231,7 @@ impl<'a> Duck<'a> {
     /// The track that ducks the others, when there is one.
     fn source(&self) -> Option<&'a str> {
         match self {
-            Self::Explicit(src) => Some(src.value.as_str()),
-            Self::FirstKick(kick) => *kick,
+            Self::Explicit(source) | Self::FirstKick(source) => *source,
         }
     }
 
@@ -232,13 +239,26 @@ impl<'a> Duck<'a> {
     fn missing(&self) -> bool {
         matches!(self, Self::FirstKick(None))
     }
+
+    /// The error for `duck.depth` > 0 (or a lane on it) on `track`, if any.
+    fn depth_error(&self, track: &str) -> Option<String> {
+        if self.missing() {
+            Some(NO_DUCK_SOURCE.to_owned())
+        } else if self.source() == Some(track) {
+            Some(format!(
+                "track `{track}` is the duck source and cannot duck itself"
+            ))
+        } else {
+            None
+        }
+    }
 }
 
 const NO_DUCK_SOURCE: &str =
     "`duck.depth` needs a kick to follow: add a kick track or set duck_source in [mix]";
 
 /// Every explicit `duck.depth` above 0 needs a source, and the source may
-/// not duck itself.
+/// not duck itself. Lanes on `duck.depth` follow the same rules (see [`lane`]).
 fn check_duck_depths(raw: &RawSong, duck: &Duck<'_>, errors: &mut Errors) {
     let depth = &STRIP_PARAMS[STRIP_DUCK_DEPTH];
     for (id, t) in &raw.tracks {
@@ -247,16 +267,8 @@ fn check_duck_depths(raw: &RawSong, duck: &Duck<'_>, errors: &mut Errors) {
             if param.value != depth.id || v.value <= 0.0 || depth.check(v.value).is_err() {
                 continue;
             }
-            if duck.missing() {
-                errors.at(&v.span, NO_DUCK_SOURCE);
-            } else if duck.source() == Some(id.value.as_str()) {
-                errors.at(
-                    &v.span,
-                    format!(
-                        "track `{}` is the duck source and cannot duck itself",
-                        id.value
-                    ),
-                );
+            if let Some(message) = duck.depth_error(&id.value) {
+                errors.at(&v.span, message);
             }
         }
     }
@@ -274,7 +286,7 @@ fn check_id(id: &At<String>, what: &str, errors: &mut Errors) {
             &id.span,
             format!("{what} id `{}` may only contain a-z, 0-9 and _", id.value),
         );
-    } else if what == "track" && id.value == "mix" {
+    } else if what == "track" && id.value == MIX_TRACK_ID {
         // Stems are written as `<id>.wav`; `mix.wav` is the master.
         errors.at(
             &id.span,
@@ -598,9 +610,9 @@ fn lane(
     if let (Some((track, param)), Some(p)) = (&target, &raw.param)
         && track != MIX_TRACK_ID
         && param == STRIP_PARAMS[STRIP_DUCK_DEPTH].id
-        && duck.missing()
+        && let Some(message) = duck.depth_error(track)
     {
-        errors.at(&p.span, NO_DUCK_SOURCE);
+        errors.at(&p.span, message);
     }
 
     let points = raw.points.as_ref()?;
