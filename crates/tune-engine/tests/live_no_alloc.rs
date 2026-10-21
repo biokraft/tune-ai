@@ -1,5 +1,6 @@
 //! Proves `LiveProcessor::process` neither allocates nor frees memory, even
-//! across blocks that apply a swap, a seek, a loop wrap and the song end.
+//! across blocks that apply a swap, a seek, a loop wrap, the song end and
+//! knob overrides.
 //!
 //! A counting global allocator counts every allocation, reallocation and
 //! deallocation made while the thread-local "audio" flag is set. The flag is
@@ -14,7 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::{MINI, compile_song, compiled, song};
 use tune_dsp::DistortionMode;
-use tune_engine::{LiveProcessor, live};
+use tune_engine::{LiveProcessor, ParamTarget, live};
 use tune_song::{FxSpec, InstrumentKind, Track};
 
 struct Counting;
@@ -155,6 +156,31 @@ fn process_never_allocates_or_frees() {
     audio(&mut p, &mut out, STEP, 512);
     assert!(ctl.finished());
     assert_eq!(ctl.swaps_applied(), 3);
+    assert_eq!(ctl.collect_garbage(), 1);
+
+    // Overrides: set two, clear one, carry one across a swap that rebuilds
+    // the fx chain, then a swap that clears them.
+    let cutoff = ParamTarget::Instrument(2);
+    let drive = ParamTarget::Fx { slot: 0, index: 0 };
+    // `two_bars` is playing and finished; bar 1 is its last.
+    ctl.seek(1).unwrap();
+    ctl.set_override(1, cutoff, Some(2000.0)).unwrap();
+    ctl.set_override(1, drive, Some(30.0)).unwrap();
+    audio(&mut p, &mut out, 1000, 512);
+    assert_eq!(ctl.overrides_active(), 2);
+    ctl.set_override(1, drive, None).unwrap();
+    audio(&mut p, &mut out, 1000, 512);
+    assert_eq!(ctl.overrides_active(), 1);
+    ctl.set_override(1, drive, Some(30.0)).unwrap();
+    ctl.swap(b.clone()).unwrap();
+    audio(&mut p, &mut out, STEP, 512);
+    assert_eq!(ctl.swaps_applied(), 4);
+    assert_eq!(ctl.overrides_active(), 1);
+    assert_eq!(ctl.collect_garbage(), 1);
+    ctl.swap_clearing_overrides(a.clone()).unwrap();
+    audio(&mut p, &mut out, STEP, 512);
+    assert_eq!(ctl.swaps_applied(), 5);
+    assert_eq!(ctl.overrides_active(), 0);
     assert_eq!(ctl.collect_garbage(), 1);
 
     assert_eq!(
