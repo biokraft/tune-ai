@@ -1,18 +1,27 @@
-import { useSyncExternalStore } from "react";
 import type { SongView, StudioState } from "./client/protocol";
 import { LostBanner, MessageBanner } from "./screens/Banners";
 import { OpenSongScreen } from "./screens/OpenSongScreen";
 import { StudioScreen } from "./screens/StudioScreen";
 import type { StudioStore } from "./store/studioStore";
+import { sameButPlayhead, StudioStoreContext, useStudioSelector } from "./store/useStudio";
 
 const hasSong = (s: StudioState | null): s is StudioState & { song: SongView } =>
   s !== null && s.path !== null && s.song !== null;
 
+const everything = <T,>(v: T) => v;
+
 export default function App({ store }: { store: StudioStore }) {
-  const view = useSyncExternalStore(store.subscribe, store.get);
+  // Playhead ticks do not re-render the app; the components that show the playhead read it.
+  const view = useStudioSelector(store, everything, sameButPlayhead);
   const { state } = view;
 
-  if (hasSong(state)) return <StudioScreen view={{ ...view, state }} store={store} />;
+  if (hasSong(state)) {
+    return (
+      <StudioStoreContext.Provider value={store}>
+        <StudioScreen view={{ ...view, state }} store={store} />
+      </StudioStoreContext.Provider>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-chassis text-silkscreen">

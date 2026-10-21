@@ -104,6 +104,22 @@ describe("createStudioStore", () => {
     expect(store.get().playhead).toEqual({ step: 37, bar: 2, beat: 1 });
   });
 
+  it("a playhead event that changes nothing notifies no one", () => {
+    const client = new FakeClient();
+    const store = createStudioStore(client);
+    const tick = { event: "playhead", step: 37, bar: 2, beat: 1, playing: true } as const;
+    client.emit(tick);
+    const before = store.get();
+    let notified = 0;
+    store.subscribe(() => (notified += 1));
+    client.emit({ ...tick });
+    client.emit({ ...tick });
+    expect(notified).toBe(0);
+    expect(store.get()).toBe(before);
+    client.emit({ ...tick, step: 38 });
+    expect(notified).toBe(1);
+  });
+
   it("select clamps to the song's sections", () => {
     const client = new FakeClient();
     const store = createStudioStore(client);
