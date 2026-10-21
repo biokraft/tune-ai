@@ -11,7 +11,15 @@ const steps: AcidStep[] = Array.from({ length: 16 }, (_, i) => ({
 
 function setup(extra = {}) {
   const onChange = vi.fn();
-  render(<AcidStepSequencer steps={steps} playingStep={null} onChange={onChange} {...extra} />);
+  render(
+    <AcidStepSequencer
+      patternId="a"
+      steps={steps}
+      playingStep={null}
+      onChange={onChange}
+      {...extra}
+    />,
+  );
   return { onChange };
 }
 
@@ -51,7 +59,7 @@ describe("AcidStepSequencer", () => {
       { note: 5, accent: false, slide: false },
       { note: 125, accent: false, slide: false },
     ];
-    render(<AcidStepSequencer steps={edge} playingStep={null} onChange={onChange} />);
+    render(<AcidStepSequencer patternId="a" steps={edge} playingStep={null} onChange={onChange} />);
     fireEvent.keyDown(screen.getByRole("button", { name: "Step 1 note" }), {
       key: "ArrowDown",
       shiftKey: true,
@@ -104,12 +112,14 @@ describe("AcidStepSequencer", () => {
   it("rest toggle round trip", () => {
     const onChange = vi.fn();
     const { rerender } = render(
-      <AcidStepSequencer steps={steps} playingStep={null} onChange={onChange} />,
+      <AcidStepSequencer patternId="a" steps={steps} playingStep={null} onChange={onChange} />,
     );
     fireEvent.keyDown(screen.getByRole("button", { name: "Step 1 note" }), { key: "r" });
     expect(onChange).toHaveBeenLastCalledWith(0, { note: null, accent: false, slide: false });
     const rested = steps.map((s, i) => (i === 0 ? { ...s, note: null } : s));
-    rerender(<AcidStepSequencer steps={rested} playingStep={null} onChange={onChange} />);
+    rerender(
+      <AcidStepSequencer patternId="a" steps={rested} playingStep={null} onChange={onChange} />,
+    );
     fireEvent.keyDown(screen.getByRole("button", { name: "Step 1 note" }), { key: "Delete" });
     expect(onChange).toHaveBeenLastCalledWith(0, { note: 36, accent: false, slide: false });
   });
@@ -132,7 +142,7 @@ describe("AcidStepSequencer", () => {
 
   it("playing step is lit", () => {
     const { container } = render(
-      <AcidStepSequencer steps={steps} playingStep={3} onChange={() => {}} />,
+      <AcidStepSequencer patternId="a" steps={steps} playingStep={3} onChange={() => {}} />,
     );
     const cols = container.querySelectorAll("[data-step]");
     expect(cols[3]).toHaveAttribute("data-playing", "true");
@@ -179,5 +189,18 @@ describe("AcidStepSequencer", () => {
     fireEvent.keyDown(screen.getByRole("button", { name: "Step 1 note" }), { key: "x" });
     document.removeEventListener("keydown", seen);
     expect(seen).toHaveBeenCalledTimes(1);
+  });
+
+  it("forgets remembered notes when the pattern changes", () => {
+    const onChange = vi.fn();
+    const mk = (note: number | null) => [{ note, accent: false, slide: false }];
+    const { rerender } = render(
+      <AcidStepSequencer patternId="a" steps={mk(40)} playingStep={null} onChange={onChange} />,
+    );
+    rerender(
+      <AcidStepSequencer patternId="b" steps={mk(null)} playingStep={null} onChange={onChange} />,
+    );
+    fireEvent.keyDown(screen.getByRole("button", { name: "Step 1 note" }), { key: "r" });
+    expect(onChange).toHaveBeenLastCalledWith(0, { note: 36, accent: false, slide: false });
   });
 });

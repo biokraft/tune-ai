@@ -6,6 +6,8 @@ import { noteName, PITCH_CLASSES, type AcidStep } from "../lib/notes";
 export type { AcidStep } from "../lib/notes";
 
 export type AcidStepSequencerProps = {
+  /** Identifies the pattern shown; the last-note memory resets when it changes. */
+  patternId: string;
   steps: AcidStep[];
   /** Pattern-relative index of the sounding step. */
   playingStep: number | null;
@@ -107,6 +109,7 @@ function Piano({ step, lastNote, onPick, onClose }: PianoProps) {
 }
 
 export function AcidStepSequencer({
+  patternId,
   steps,
   playingStep,
   highlighted,
@@ -116,6 +119,11 @@ export function AcidStepSequencer({
   const lastNotes = useRef<Map<number, number>>(new Map());
   const [open, setOpen] = useState<number | null>(null);
 
+  const seenPattern = useRef(patternId);
+  if (seenPattern.current !== patternId) {
+    seenPattern.current = patternId;
+    lastNotes.current.clear();
+  }
   steps.forEach((s, i) => {
     if (s.note !== null) lastNotes.current.set(i, s.note);
   });
