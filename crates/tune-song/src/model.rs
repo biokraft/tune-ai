@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use tune_dsp::acid303::{ACID303_PARAMS, AcidPattern};
 use tune_dsp::{
     CLAP_PARAMS, DIST_PARAMS, DistortionMode, DrumPattern, HAT_CLOSED_PARAMS, HAT_OPEN_PARAMS,
-    KICK_PARAMS, ParamSpec,
+    KICK_PARAMS, ParamSpec, RIDE_PARAMS,
 };
 
 /// A whole song: header, tracks, patterns and the arrangement.
@@ -48,16 +48,18 @@ pub enum InstrumentKind {
     Clap,
     HatClosed,
     HatOpen,
+    Ride,
 }
 
 impl InstrumentKind {
     /// Every kind, in the order error messages list them.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Acid303,
         Self::Kick,
         Self::Clap,
         Self::HatClosed,
         Self::HatOpen,
+        Self::Ride,
     ];
 
     /// The `instrument` value in a song file; also the prefix of its param ids.
@@ -68,6 +70,7 @@ impl InstrumentKind {
             Self::Clap => "clap",
             Self::HatClosed => "hat_closed",
             Self::HatOpen => "hat_open",
+            Self::Ride => "ride",
         }
     }
 
@@ -84,6 +87,7 @@ impl InstrumentKind {
             Self::Clap => CLAP_PARAMS,
             Self::HatClosed => HAT_CLOSED_PARAMS,
             Self::HatOpen => HAT_OPEN_PARAMS,
+            Self::Ride => RIDE_PARAMS,
         }
     }
 

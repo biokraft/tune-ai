@@ -136,6 +136,7 @@ pub fn make_instrument(kind: InstrumentKind, sample_rate: f64) -> Box<dyn Instru
         InstrumentKind::Clap => Box::new(Clap::new(sample_rate)),
         InstrumentKind::HatClosed => Box::new(Hat::new(HatKind::Closed, sample_rate)),
         InstrumentKind::HatOpen => Box::new(Hat::new(HatKind::Open, sample_rate)),
+        InstrumentKind::Ride => Box::new(Hat::new(HatKind::Ride, sample_rate)),
     }
 }
 
