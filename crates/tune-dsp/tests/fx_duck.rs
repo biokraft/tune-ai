@@ -1,7 +1,10 @@
 //! Behaviour of the grid-locked kick ducker and the strip params.
 
-use tune_dsp::fx::{Ducker, SEND_OFF_DB, STRIP_PARAMS, send_gain};
-use tune_dsp::{db2amp, find_spec};
+use tune_dsp::fx::{
+    Ducker, SEND_OFF_DB, STRIP_DUCK_DEPTH, STRIP_DUCK_RELEASE, STRIP_PARAMS, STRIP_SEND_DELAY,
+    STRIP_SEND_REVERB, send_gain,
+};
+use tune_dsp::{Curve, db2amp, find_spec};
 
 const SR: f64 = 48000.0;
 
@@ -89,4 +92,90 @@ fn strip_params_are_listed() {
         ["send.delay", "send.reverb", "duck.depth", "duck.release"]
     );
     assert!(find_spec(STRIP_PARAMS, "duck.release").is_ok());
+}
+
+#[test]
+fn envelope_shape_at_quarter_points() {
+    let k = db2amp(-6.0);
+    let dip = |e: f64| 1.0 - (1.0 - k) * e;
+    let mut d = make(6.0, 100.0);
+    d.trigger();
+    let g = run(&mut d, 96 + 4800 + 1);
+    assert_eq!(g[0], 1.0);
+    assert!((g[24] - dip(0.25)).abs() < 1e-12);
+    assert!((g[72] - dip(0.75)).abs() < 1e-12);
+    let c = std::f64::consts::PI / 4.0;
+    assert!((g[96 + 1200] - dip(0.5 * (1.0 + c.cos()))).abs() < 1e-12);
+    assert!((g[96 + 3600] - dip(0.5 * (1.0 - c.cos()))).abs() < 1e-12);
+}
+
+#[test]
+fn retrigger_during_attack_continues_from_current_value() {
+    let k = db2amp(-6.0);
+    let mut d = make(6.0, 100.0);
+    d.trigger();
+    run(&mut d, 48);
+    d.trigger();
+    let g = run(&mut d, 100);
+    // e0 = 0.5 at frame 48; 48 frames into the new attack: 0.5 + 0.5 * 0.5.
+    assert!((g[0] - (1.0 - (1.0 - k) * 0.5)).abs() < 1e-12);
+    assert!((g[48] - (1.0 - (1.0 - k) * 0.75)).abs() < 1e-12);
+    assert!((g[96] - k).abs() < 1e-12);
+}
+
+#[test]
+fn strip_param_specs_are_pinned() {
+    let want = [
+        (
+            "send.delay",
+            "Delay",
+            "dB",
+            -60.0,
+            0.0,
+            Curve::Linear,
+            -60.0,
+        ),
+        (
+            "send.reverb",
+            "Reverb",
+            "dB",
+            -60.0,
+            0.0,
+            Curve::Linear,
+            -60.0,
+        ),
+        ("duck.depth", "Duck", "dB", 0.0, 24.0, Curve::Linear, 0.0),
+        (
+            "duck.release",
+            "Duck release",
+            "ms",
+            20.0,
+            400.0,
+            Curve::Exponential,
+            80.0,
+        ),
+    ];
+    assert_eq!(STRIP_PARAMS.len(), want.len());
+    for (p, w) in STRIP_PARAMS.iter().zip(want) {
+        assert_eq!(p.id, w.0);
+        assert_eq!(p.label, w.1);
+        assert_eq!(p.unit, w.2);
+        assert_eq!(p.min, w.3);
+        assert_eq!(p.max, w.4);
+        assert!(p.curve == w.5, "{}", p.id);
+        assert_eq!(p.default, w.6);
+    }
+    assert_eq!(STRIP_PARAMS[STRIP_SEND_DELAY].id, "send.delay");
+    assert_eq!(STRIP_PARAMS[STRIP_SEND_REVERB].id, "send.reverb");
+    assert_eq!(STRIP_PARAMS[STRIP_DUCK_DEPTH].id, "duck.depth");
+    assert_eq!(STRIP_PARAMS[STRIP_DUCK_RELEASE].id, "duck.release");
+    assert_eq!(
+        (
+            STRIP_SEND_DELAY,
+            STRIP_SEND_REVERB,
+            STRIP_DUCK_DEPTH,
+            STRIP_DUCK_RELEASE
+        ),
+        (0, 1, 2, 3)
+    );
 }
