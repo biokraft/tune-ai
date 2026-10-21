@@ -274,6 +274,10 @@ impl LiveProcessor {
         // (which would free memory on the audio thread).
         let pushed = self.garbage.push(update);
         debug_assert!(pushed.is_ok(), "garbage queue full");
+        if let Err(update) = pushed {
+            // Never free on the audio thread: leaking beats a dealloc here.
+            std::mem::forget(update);
+        }
     }
 }
 
