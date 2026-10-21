@@ -83,8 +83,8 @@ are the final judge.
    curve: a drop should be louder and brighter than its breakdown. A
    `nothing changes here` entry in a section's `notes` is a problem.
 5. `tune compare <song> --bars <drop> --ref <name> [--ref-seconds A..B] --png --json`.
-   Find the reference's drop first with `tune analyze <ref path> --png`, then
-   compare our drop with it. Give exactly one of `--ref <name>` or a
+   Find the reference's drop first with `tune analyze --ref <name> --png`
+   (never look up its path), then compare our drop with it. Give exactly one of `--ref <name>` or a
    reference path (`tune compare <song> <path>`). The compare PNG is 1600x1712:
    ours on top, the reference below, same frequency axis and colour scale.
 6. Change the song (`tune set`), re-render, repeat.

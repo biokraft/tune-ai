@@ -51,9 +51,22 @@ enum Command {
 }
 
 #[derive(Args)]
+#[command(group(
+    clap::ArgGroup::new("input_source")
+        .required(true)
+        .multiple(false)
+        .args(["input", "ref_name"])
+))]
 struct AnalyzeArgs {
     /// Song file (TOML, rendered in memory) or audio file (WAV, MP3, FLAC, AAC).
-    input: PathBuf,
+    input: Option<PathBuf>,
+    /// A reference by name, from `tune refs`, instead of INPUT.
+    #[arg(
+        long = "ref",
+        value_name = "NAME",
+        conflicts_with_all = ["bars", "sections", "song", "from_bar"]
+    )]
+    ref_name: Option<String>,
     /// Bars to analyse, 1-based and inclusive, e.g. 33..64 (default: all).
     #[arg(long, value_name = "A..B")]
     bars: Option<String>,
@@ -424,6 +437,7 @@ fn main() -> ExitCode {
         }),
         Command::Analyze(a) => cmd::analyze::run(&cmd::analyze::Args {
             input: a.input,
+            ref_name: a.ref_name,
             bars: a.bars,
             sections: a.sections,
             song: a.song,

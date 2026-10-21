@@ -533,3 +533,53 @@ fn compare_usage_puts_ours_first() {
         "{usage}"
     );
 }
+
+#[test]
+fn analyze_by_ref_name() {
+    let dir = ref_dir();
+    std::fs::write(
+        dir.path().join("tune.local.toml"),
+        "[refs]\nr = \"~/ref.wav\"\n",
+    )
+    .unwrap();
+    let run = |args: &[&str]| {
+        tune(dir.path())
+            .env("HOME", dir.path())
+            .arg("analyze")
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let out = run(&["--ref", "r", "--png", "--json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json_of(&out.stdout);
+    assert_eq!(v["source"]["path"], "~/ref.wav");
+    assert_eq!(v["source"]["ref_name"], "r");
+    assert_eq!(v["png"], "scratch/r.png");
+    assert!(dir.path().join("scratch/r.png").is_file());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    for d in dir_strings(dir.path()) {
+        assert!(!stdout.contains(&d), "home path leaked: {stdout}");
+    }
+    let text = String::from_utf8(run(&["--ref", "r"]).stdout).unwrap();
+    assert!(text.starts_with("r: 0:10.0, 48000 Hz, stereo"), "{text}");
+
+    // A file analysed by path has no ref name.
+    let v = analyze_json(dir.path(), &["ref.wav"]);
+    assert_eq!(v["source"]["ref_name"], Value::Null);
+
+    // Exactly one of INPUT and --ref; an unknown name lists the known ones.
+    assert_eq!(run(&["ref.wav", "--ref", "r"]).status.code(), Some(2));
+    assert_eq!(run(&[]).status.code(), Some(2));
+    let out = run(&["--ref", "x", "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    let msg = json_of(&out.stdout)["errors"][0]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(msg.contains("no reference named `x`; known: r"), "{msg}");
+}
