@@ -141,6 +141,12 @@ fn check_id(id: &At<String>, what: &str, errors: &mut Errors) {
             &id.span,
             format!("{what} id `{}` may only contain a-z, 0-9 and _", id.value),
         );
+    } else if what == "track" && id.value == "mix" {
+        // Stems are written as `<id>.wav`; `mix.wav` is the master.
+        errors.at(
+            &id.span,
+            "track id `mix` is reserved (`mix.wav` is the master render)".to_owned(),
+        );
     }
 }
 
