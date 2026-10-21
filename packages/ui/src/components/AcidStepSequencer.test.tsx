@@ -152,6 +152,7 @@ describe("AcidStepSequencer", () => {
   it("marks highlighted columns", () => {
     const { container } = render(
       <AcidStepSequencer
+        patternId="p"
         steps={steps}
         playingStep={null}
         highlighted={new Set([2])}
