@@ -1125,17 +1125,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06bdbd8cfc056b8d2e2e85f29b56a3bdbecb527cef81eb39e3e7b98af4652770"
 
 [[package]]
+name = "tune-audio"
+version = "0.1.0"
+dependencies = [
+ "cpal",
+ "tune-engine",
+ "tune-song",
+]
+
+[[package]]
 name = "tune-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap",
- "cpal",
  "ctrlc",
  "hound",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tune-audio",
  "tune-dsp",
  "tune-engine",
  "tune-song",
