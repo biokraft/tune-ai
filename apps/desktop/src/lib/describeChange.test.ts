@@ -25,8 +25,7 @@ describe("describeChange on the mixer", () => {
   it("falls back to the path for an unknown mix path", () => {
     expect(change("mix.nonsense", 1, 2)).toBe("mix nonsense 1 → 2");
   });
-  it("says the mix table was created or removed", () => {
-    expect(change("mix", null, {})).toBe("Mix settings added");
-    expect(change("mix", {}, null)).toBe("Mix settings removed");
+  it("has no sentence for a bare mix path, which the studio never sends", () => {
+    expect(change("mix", null, {})).toBe("mix");
   });
 });

@@ -84,7 +84,6 @@ export function describeChange(c: Change, song: SongView | null): string {
     }
   }
 
-  if (c.path === "mix") return c.old === null ? "Mix settings added" : "Mix settings removed";
   const mix = MIX.exec(c.path);
   if (mix) {
     const rest = mix[1]!;
