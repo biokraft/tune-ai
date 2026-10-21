@@ -22,6 +22,10 @@ function findParam(song: SongView | null, track: string, id: string): ParamView 
   );
 }
 
+/** Whether `id` is a strip param (send or duck) of `track`. */
+const isStrip = (song: SongView | null, track: string, id: string) =>
+  song?.tracks.find((x) => x.id === track)?.strip.some((p) => p.id === id) ?? false;
+
 /** A shared-mix param by id (`delay.feedback`), with the label it carries in a sentence. */
 function findMixParam(
   song: SongView | null,
@@ -80,6 +84,7 @@ export function describeChange(c: Change, song: SongView | null): string {
     }
   }
 
+  if (c.path === "mix") return c.old === null ? "Mix settings added" : "Mix settings removed";
   const mix = MIX.exec(c.path);
   if (mix) {
     const rest = mix[1]!;
@@ -109,7 +114,8 @@ export function describeChange(c: Change, song: SongView | null): string {
     const p = findParam(song, t, rest);
     if (!p) return `${t} ${rest} ${span(c.old, c.new)}`;
     const label = sentenceCase(p.label);
-    const named = implied(song, t) ? label : `${t} ${label}`;
+    // A send is never implied: "Delay" alone would read like the delay bus.
+    const named = implied(song, t) && !isStrip(song, t, rest) ? label : `${t} ${label}`;
     return `${named} ${span(c.old, c.new, p.unit)}`;
   }
 
