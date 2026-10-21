@@ -142,6 +142,19 @@ fn decode_wav(path: &Path) -> Result<Audio, AnalysisError> {
     Audio::from_interleaved(spec.sample_rate, spec.channels, &samples)
 }
 
+/// A stream must keep one sample rate and channel count from first packet to last.
+fn check_format(
+    rate: u32,
+    chans: u16,
+    packet_rate: u32,
+    packet_chans: u16,
+) -> Result<(), &'static str> {
+    if rate != packet_rate || chans != packet_chans {
+        return Err("audio format changed mid-stream");
+    }
+    Ok(())
+}
+
 fn decode_symphonia(path: &Path) -> Result<Audio, AnalysisError> {
     let file = File::open(path).map_err(|e| open_err(path, e))?;
     let stream = MediaSourceStream::new(Box::new(file), Default::default());
@@ -173,7 +186,9 @@ fn decode_symphonia(path: &Path) -> Result<Audio, AnalysisError> {
         let packet = match format.next_packet() {
             Ok(p) => p,
             Err(SymError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(SymError::ResetRequired) => break,
+            Err(SymError::ResetRequired) => {
+                return Err(decode_err(path, "stream requires a decoder reset"));
+            }
             Err(e) => return Err(decode_err(path, e)),
         };
         if packet.track_id() != track_id {
@@ -185,13 +200,15 @@ fn decode_symphonia(path: &Path) -> Result<Audio, AnalysisError> {
             Err(e) => return Err(decode_err(path, e)),
         };
         let spec = *decoded.spec();
+        let packet_chans = spec.channels.count() as u16;
         if rate == 0 {
             rate = spec.rate;
-            chans = spec.channels.count() as u16;
+            chans = packet_chans;
             if chans > 2 {
                 return Err(AnalysisError::Channels(chans));
             }
         }
+        check_format(rate, chans, spec.rate, packet_chans).map_err(|m| decode_err(path, m))?;
         if buf
             .as_ref()
             .is_none_or(|b| b.capacity() < decoded.capacity() * chans as usize)
@@ -206,4 +223,22 @@ fn decode_symphonia(path: &Path) -> Result<Audio, AnalysisError> {
         return Err(decode_err(path, "no audio frames"));
     }
     Audio::from_interleaved(rate, chans, &samples)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_format;
+
+    #[test]
+    fn format_change_is_rejected() {
+        assert!(check_format(48000, 2, 48000, 2).is_ok());
+        assert_eq!(
+            check_format(48000, 2, 44100, 2),
+            Err("audio format changed mid-stream")
+        );
+        assert_eq!(
+            check_format(48000, 2, 48000, 1),
+            Err("audio format changed mid-stream")
+        );
+    }
 }
