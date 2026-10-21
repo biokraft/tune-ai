@@ -32,6 +32,7 @@ fn map4() -> BarMap {
     BarMap {
         first_bar: 0,
         bar_frames: (0..=4).map(|i| i * BAR).collect(),
+        partial_end: false,
         sections: vec![
             SectionSpan {
                 name: "intro".into(),

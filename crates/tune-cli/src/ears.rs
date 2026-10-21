@@ -23,6 +23,9 @@ pub struct Input {
     pub png_name: String,
     /// `{kind: "song"|"file", path, name, bars: [a, b] | null, sample_rate, channels, seconds}`.
     pub source: Value,
+    /// Things the reader should know about the input, e.g. audio past the
+    /// song's end that was left out.
+    pub notes: Vec<String>,
 }
 
 fn fail(message: impl Into<String>) -> Vec<Failure> {
@@ -44,6 +47,7 @@ pub fn bar_map(song: &CompiledSong, range: Range<u32>) -> BarMap {
         bar_frames: (range.start..=range.end)
             .map(|b| (song.clock.bar_start(b) - base) as usize)
             .collect(),
+        partial_end: false,
         sections: song
             .sections
             .iter()
@@ -135,6 +139,7 @@ fn load_song_input(path: &Path, bars: Option<&str>) -> Result<Input, Vec<Failure
         stem,
         png_name,
         source,
+        notes: Vec::new(),
     })
 }
 
@@ -167,6 +172,7 @@ fn load_file_input(
             png_name: stem.clone(),
             stem,
             source,
+            notes: Vec::new(),
         });
     };
 
@@ -195,6 +201,16 @@ fn load_file_input(
         last += 1;
     }
     let held = first..last;
+    // Audio past the song's last bar has no bar to map onto. A few frames of
+    // codec padding are normal; a tenth of a second or more is worth a note.
+    let song_end = (compiled.clock.bar_start(total) - base) as usize;
+    let mut notes = Vec::new();
+    let past = frames.saturating_sub(song_end) as f64 / f64::from(sr);
+    if past >= 0.1 {
+        notes.push(format!(
+            "the file runs {past:.1} s past the song's last bar; that audio is ignored (check --from-bar)"
+        ));
+    }
     let range = match bars {
         Some(s) => {
             let r = parse_bar_range(s, u32::MAX).map_err(fail)?;
@@ -216,6 +232,7 @@ fn load_file_input(
     let audio = audio.slice(lo..hi);
     let mut map = bar_map(&compiled, range.clone());
     let end = audio.frames();
+    map.partial_end = map.bar_frames.last().is_some_and(|&f| f > end);
     for f in &mut map.bar_frames {
         *f = (*f).min(end);
     }
@@ -236,6 +253,7 @@ fn load_file_input(
         stem,
         png_name,
         source,
+        notes,
     })
 }
 

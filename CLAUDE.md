@@ -91,7 +91,9 @@ are the final judge.
 
 Input is a song file (rendered in memory) or audio (WAV, MP3, FLAC, AAC; at
 most 2 channels). `--song <song> --from-bar N` maps an audio file onto a song's
-bars. Failures exit 2 with a message.
+bars; audio past the song's last bar is left out with an entry in `notes`
+(`note:` on stderr in text mode), and a section cut by the file's end is
+`partial`. Failures exit 2 with a message.
 
 | Key | Meaning |
 | --- | --- |

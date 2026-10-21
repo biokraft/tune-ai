@@ -16,6 +16,9 @@ pub struct BarMap {
     pub first_bar: u32,
     /// Frame of each bar start from `first_bar` on, plus the end (len = bars + 1).
     pub bar_frames: Vec<usize>,
+    /// The audio ends inside the last bar of `bar_frames`, so the section
+    /// holding that bar is partial.
+    pub partial_end: bool,
     /// The whole song's sections; analysis clips them to the audio.
     pub sections: Vec<SectionSpan>,
 }
@@ -69,7 +72,7 @@ pub fn analyze_sections(audio: &Audio, map: &BarMap) -> Result<Vec<SectionReport
             name: span.name.clone(),
             start_bar: cs + 1,
             end_bar: ce,
-            partial: cs != span.start_bar || ce != end,
+            partial: cs != span.start_bar || ce != end || (ce == last && map.partial_end),
             integrated_lufs: loud.integrated_lufs,
             short_term_max_lufs: loud.short_term_max_lufs,
             delta_lu: None,
