@@ -105,7 +105,8 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
       {state.file_errors.length > 0 && <FileErrorBanner errors={state.file_errors} />}
       {view.message && <MessageBanner message={view.message} onDismiss={store.dismissMessage} />}
 
-      <header className="border-b border-black/40 px-6 py-3">
+      {/* Sticky, so play state and Claude's change notice stay in view over the drum grid. */}
+      <header className="sticky top-0 z-30 border-b border-black/40 bg-chassis px-6 py-3">
         <LiveTransport
           cursorBar={state.cursor_bar}
           playing={state.playing}
