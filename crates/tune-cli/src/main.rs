@@ -2,7 +2,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
+use serde_json::json;
+use tune_cli::cmd;
 use tune_cli::render::{RenderSpec, Sweep, render_acid, write_wav};
+use tune_cli::report::{Failure, Success, dbfs, finish};
 use tune_dsp::DistortionMode;
 use tune_dsp::acid303::{AcidPattern, PatternError};
 
@@ -15,9 +18,31 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Check a song file and summarise it.
+    Validate(SongArgs),
+    /// Show a song's sections and tracks.
+    Info(SongArgs),
+    /// List every instrument and effect parameter.
+    Params(JsonArgs),
     /// Render an acid 303 pattern to a stereo 24-bit WAV.
     #[command(name = "render-303")]
     Render303(Render303),
+}
+
+#[derive(Args)]
+struct JsonArgs {
+    /// Print JSON instead of text.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct SongArgs {
+    /// Song file (TOML).
+    song: PathBuf,
+    /// Print JSON instead of text.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -48,6 +73,9 @@ struct Render303 {
     dist: Option<DistortionMode>,
     #[arg(long)]
     out: PathBuf,
+    /// Print JSON instead of text.
+    #[arg(long)]
+    json: bool,
 }
 
 fn parse_mode(s: &str) -> Result<DistortionMode, String> {
@@ -151,7 +179,11 @@ fn build_spec(a: &Render303) -> Result<RenderSpec, String> {
     })
 }
 
-fn run(a: &Render303) -> Result<(), String> {
+fn run(a: &Render303) -> Result<Success, Vec<Failure>> {
+    run_inner(a).map_err(|m| vec![Failure::msg(m)])
+}
+
+fn run_inner(a: &Render303) -> Result<Success, String> {
     let spec = build_spec(a)?;
     let samples = render_acid(&spec).map_err(|e| e.to_string())?;
     if spec.distortion.is_none() && spec.params.iter().any(|(id, _)| id.starts_with("dist.")) {
@@ -160,25 +192,29 @@ fn run(a: &Render303) -> Result<(), String> {
     write_wav(&a.out, &samples, spec.sample_rate).map_err(|e| e.to_string())?;
     let peak = samples.iter().fold(0.0_f32, |m, x| m.max(x.abs()));
     let secs = samples.len() as f64 / f64::from(spec.sample_rate);
-    println!(
-        "rendered {secs:.2}s, peak {:.1} dBFS",
-        20.0 * f64::from(peak).log10()
-    );
+    let peak_db = 20.0 * f64::from(peak).log10();
     let clipped = samples.iter().filter(|x| x.abs() > 1.0).count();
+    let mut text = format!("rendered {secs:.2}s, peak {peak_db:.1} dBFS");
     if clipped > 0 {
-        println!("warning: {clipped} samples clipped");
+        text.push_str(&format!("\nwarning: {clipped} samples clipped"));
     }
-    Ok(())
+    Ok(Success {
+        text,
+        json: json!({
+            "file": a.out.display().to_string(),
+            "seconds": secs,
+            "peak_dbfs": dbfs(f64::from(peak)),
+            "clipped_samples": clipped,
+        }),
+    })
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let Command::Render303(args) = cli.command;
-    match run(&args) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(msg) => {
-            eprintln!("error: {msg}");
-            ExitCode::from(2)
-        }
+    match cli.command {
+        Command::Validate(a) => cmd::validate::run(&a.song, a.json),
+        Command::Info(a) => cmd::info::run(&a.song, a.json),
+        Command::Params(a) => cmd::params::run(a.json),
+        Command::Render303(a) => finish(a.json, run(&a)),
     }
 }
