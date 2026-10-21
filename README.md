@@ -70,6 +70,26 @@ http://127.0.0.1:4580/.
 Each edit is logged to `edits.jsonl` next to the song (local, gitignored);
 `tune changes <song>` lists it.
 
+## Analyse a render
+
+`tune analyze` measures loudness, frequency balance and brightness and draws a
+spectrogram; `tune compare` sets a render against a reference track. Both take
+a song file or an audio file (WAV, MP3, FLAC, AAC). PNGs go to `scratch/`.
+
+```sh
+tune analyze songs/first-acid/song.toml --sections --png
+tune analyze songs/first-acid/song.toml --bars 33..64 --png
+tune analyze ~/Music/reference.mp3 --png
+tune compare songs/first-acid/song.toml ~/Music/reference.mp3 --bars 33..64 --ref-seconds 90..150 --png
+```
+
+Put INPUT before `--png` (or write `--png=PATH`). To refer to a reference by
+name, add `[refs]` `name = "~/Music/reference.mp3"` to `tune.local.toml` in the
+repo root (gitignored), or drop files into `refs/`, then
+`tune compare songs/first-acid/song.toml --ref name`. `tune refs` lists what is
+configured. The numbers are hints; trust your ears. Reference tracks, PNGs and
+the local config never go into git.
+
 ## Hear the 303
 
 ```sh
