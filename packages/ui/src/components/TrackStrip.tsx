@@ -14,6 +14,10 @@ export type TrackStripProps = {
   /** Live while dragging (commit false), written on release (commit true). */
   onParam?(id: string, value: number, commit: boolean): void;
   highlight?(id: string): Highlight;
+  /** The strip param is automated in the current section (a release there is not written). */
+  automated?(id: string): boolean;
+  /** Called with the spec on focus and with null on blur (drives a help strip). */
+  onHelp?(spec: ParamSpecView | null): void;
 };
 
 /** The strip params that get a knob on the channel, in panel order. */
@@ -44,7 +48,15 @@ const toggle = cn(
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-silkscreen",
 );
 
-export function TrackStrip({ track, onMix, strip, onParam, highlight }: TrackStripProps) {
+export function TrackStrip({
+  track,
+  onMix,
+  strip,
+  onParam,
+  highlight,
+  automated,
+  onHelp,
+}: TrackStripProps) {
   // Live values while a knob is held; cleared on commit so the prop takes over again.
   const [gain, setGain] = useState<number | null>(null);
   const [pan, setPan] = useState<number | null>(null);
@@ -113,6 +125,8 @@ export function TrackStrip({ track, onMix, strip, onParam, highlight }: TrackStr
                   size="sm"
                   value={spec.value}
                   highlight={highlight?.(id) ?? null}
+                  automated={automated?.(id) ?? false}
+                  onHelp={onHelp}
                   onChange={(v) => onParam?.(id, v, false)}
                   onCommit={(v) => onParam?.(id, v, true)}
                 />

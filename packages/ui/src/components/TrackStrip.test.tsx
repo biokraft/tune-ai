@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { stripParams } from "../test-fixtures";
 import { TrackStrip } from "./TrackStrip";
@@ -53,5 +53,25 @@ describe("TrackStrip", () => {
     render(<TrackStrip track={track} onMix={vi.fn()} />);
     expect(screen.queryByRole("slider", { name: "Delay" })).toBeNull();
     expect(screen.queryByRole("slider", { name: "Duck" })).toBeNull();
+  });
+  it("send knobs carry the lane badge when automated", () => {
+    render(
+      <TrackStrip
+        track={track}
+        onMix={vi.fn()}
+        strip={stripParams}
+        automated={(id) => id === "send.reverb"}
+      />,
+    );
+    const badge = (name: string) =>
+      within(screen.getByRole("slider", { name })).queryByTestId("knob-lane");
+    expect(badge("Reverb")).toBeInTheDocument();
+    expect(badge("Delay")).toBeNull();
+  });
+  it("send knobs report focus to onHelp", () => {
+    const onHelp = vi.fn();
+    render(<TrackStrip track={track} onMix={vi.fn()} strip={stripParams} onHelp={onHelp} />);
+    act(() => screen.getByRole("slider", { name: "Duck" }).focus());
+    expect(onHelp).toHaveBeenCalledWith(expect.objectContaining({ id: "duck.depth" }));
   });
 });
