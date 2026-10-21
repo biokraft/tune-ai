@@ -1,0 +1,49 @@
+# tune-studio fixture: the tune-song mini song plus comments that edits must keep.
+
+[song]
+name = "mini"
+bpm = 120
+seed = 7
+
+# the body
+[tracks.kick]
+instrument = "kick"
+gain_db = -3 # headroom
+
+# the squelch
+[tracks.acid]
+instrument = "acid303"
+params = { "acid303.cutoff" = 500, "acid303.resonance" = 70, "acid303.env_mod" = 50, "acid303.decay" = 400, "acid303.accent" = 55 }
+fx = [{ type = "distortion", mode = "soft", params = { "dist.drive" = 12 } }]
+
+[tracks.hat]
+instrument = "hat_closed"
+gain_db = -10
+pan = 0.3
+
+[patterns.k4]
+track = "kick"
+steps = "x...x...x...X..."
+
+[patterns.a1]
+track = "acid"
+steps = "C2 C2! C3~ C2 . D#2 C2~ G2!"
+
+[patterns.h]
+track = "hat"
+steps = "..x...x...x...x."
+
+[[sections]]
+name = "a"
+bars = 2
+play = { kick = "k4", hat = "h" }
+
+# acid enters
+[[sections]]
+name = "b"
+bars = 2
+play = { kick = "k4", acid = "a1", hat = "h" }
+
+[[sections.automation]]
+param = "acid.acid303.cutoff"
+points = [[0, 0.1], [2, 0.8]]

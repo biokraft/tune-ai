@@ -1106,6 +1106,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
@@ -1181,6 +1182,19 @@ dependencies = [
  "thiserror 2.0.21",
  "toml",
  "tune-dsp",
+]
+
+[[package]]
+name = "tune-studio"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml_edit",
+ "tune-dsp",
+ "tune-song",
 ]
 
 [[package]]
