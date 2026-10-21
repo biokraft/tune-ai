@@ -363,7 +363,7 @@ impl Actor {
         match cmd {
             Command::ListSongs => self.list_songs(),
             Command::OpenSong { path } => {
-                let path = self.songs_root.join(path);
+                let path = self.under_root(&path)?;
                 self.open(&path)?;
                 self.emit_state();
                 Ok(Value::Null)
@@ -412,6 +412,33 @@ impl Actor {
             .collect();
         songs.sort();
         Ok(json!(songs))
+    }
+
+    /// Resolves a client's song path against the songs root and refuses
+    /// one that leads outside it (through `..`, an absolute path or a
+    /// symlink). Gives the canonical path.
+    fn under_root(&self, path: &str) -> Result<PathBuf, StudioError> {
+        let root = fs::canonicalize(&self.songs_root).map_err(|e| {
+            StudioError::Io(format!(
+                "cannot read the songs root {}: {e}",
+                self.songs_root.display()
+            ))
+        })?;
+        let joined = self.songs_root.join(path);
+        match fs::canonicalize(&joined) {
+            Ok(full) if full.starts_with(&root) => Ok(full),
+            Ok(_) => Err(StudioError::OutsideRoot(path.to_owned())),
+            // Say "outside" for a missing file outside the root too, so a
+            // client cannot probe what exists there.
+            Err(e) => {
+                let normal = normalize(&joined);
+                if normal.starts_with(normalize(&self.songs_root)) || normal.starts_with(&root) {
+                    Err(StudioError::Io(format!("cannot open {path}: {e}")))
+                } else {
+                    Err(StudioError::OutsideRoot(path.to_owned()))
+                }
+            }
+        }
     }
 
     /// Opens `path` in place of the current song (whose pending edits are
@@ -885,6 +912,22 @@ fn param_target(song: &CompiledSong, track: &str, param: &str) -> Option<(usize,
     Some((index, target))
 }
 
+/// `path` with `.` and `..` resolved by name alone (no filesystem access).
+fn normalize(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// `bars` clamped to a song of `total` bars; `None` once empty.
 fn clamp_loop(bars: Option<[u32; 2]>, total: u32) -> Option<[u32; 2]> {
     let [start, end] = bars?;
@@ -908,6 +951,15 @@ mod tests {
         assert_eq!(clamp_loop(Some([3, 3]), 4), None);
         assert_eq!(clamp_loop(Some([3, 1]), 4), None);
         assert_eq!(clamp_loop(None, 4), None);
+    }
+
+    #[test]
+    fn normalize_resolves_dots_by_name() {
+        assert_eq!(
+            normalize(Path::new("/r/songs/../../x/./song.toml")),
+            Path::new("/x/song.toml")
+        );
+        assert_eq!(normalize(Path::new("a/./b/../c")), Path::new("a/c"));
     }
 
     #[test]
