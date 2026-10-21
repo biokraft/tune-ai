@@ -151,6 +151,16 @@ describe("Arrangement", () => {
     expect(overlay).toHaveClass("z-10");
   });
 
+  it("labels each row with the track id and instrument", () => {
+    setup([sec("a", 0, 16)]);
+    const heads = screen.getAllByRole("rowheader");
+    expect(heads).toHaveLength(2);
+    expect(heads[0]).toHaveTextContent("acid");
+    expect(heads[0]).toHaveTextContent("acid303");
+    expect(heads[1]).toHaveTextContent("drums");
+    expect(screen.getByRole("rowgroup", { name: "Tracks" })).toHaveClass("sticky", "left-0");
+  });
+
   it("playhead x", () => {
     setup([sec("a", 0, 16)], { playhead: 4.5 });
     expect(screen.getByTestId("playhead")).toHaveAttribute("x1", "54");
