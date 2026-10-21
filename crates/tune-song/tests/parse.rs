@@ -712,3 +712,58 @@ fn second_eq_is_rejected() {
     );
     assert_eq!(song.sections[1].automation[0].param, "eq.mid_gain");
 }
+
+/// Review Focus 3: a lane on the duck source's own `duck.depth` would make
+/// it duck itself, just like a static depth.
+#[test]
+fn duck_lane_on_source_is_self_duck() {
+    let src = swap(
+        "param = \"acid.acid303.cutoff\"",
+        "param = \"kick.duck.depth\"",
+    );
+    let line = src.lines().position(|l| l.contains("kick.duck")).unwrap() + 1;
+    assert_eq!(
+        positioned(&src),
+        [(
+            line,
+            col(&src, line, "\"kick.duck"),
+            "track `kick` is the duck source and cannot duck itself".to_owned()
+        )]
+    );
+
+    // With another source named, the kick may duck.
+    let other = src.replacen(
+        "seed = 7\n",
+        "seed = 7\n\n[mix]\nduck_source = \"hat\"\n",
+        1,
+    );
+    assert_eq!(must_parse(&other).duck_source(), Some("hat"));
+}
+
+/// An invalid explicit `duck_source` reports only itself: no self-duck error
+/// is derived from it, for a static depth or a lane.
+#[test]
+fn invalid_duck_source_drives_no_self_duck() {
+    const NOT_DRUM: &str = "duck_source `acid` must be a drum track (ducking follows its hits)";
+    let named = swap("seed = 7\n", "seed = 7\n\n[mix]\nduck_source = \"acid\"\n");
+    let line = named
+        .lines()
+        .position(|l| l.contains("duck_source"))
+        .unwrap()
+        + 1;
+    let expected = [(line, col(&named, line, "\"acid\""), NOT_DRUM.to_owned())];
+
+    let depth = named.replacen(
+        "\"acid303.accent\" = 55",
+        "\"acid303.accent\" = 55, \"duck.depth\" = 6",
+        1,
+    );
+    assert_eq!(positioned(&depth), expected);
+
+    let lane = named.replacen(
+        "param = \"acid.acid303.cutoff\"",
+        "param = \"acid.duck.depth\"",
+        1,
+    );
+    assert_eq!(positioned(&lane), expected);
+}
