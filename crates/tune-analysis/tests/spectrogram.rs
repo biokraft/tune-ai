@@ -58,14 +58,14 @@ fn png_size_and_determinism() {
     assert_eq!(a, b);
     let (w, h, _) = decode(&a);
     assert_eq!((w, h), (WIDTH, PANEL_HEIGHT));
-    assert_eq!((w, h), (1600, 816));
+    assert_eq!((w, h), (1600, 856));
 }
 
 #[test]
 fn sine_brightest_at_its_row() {
     let img = decode(&spectrogram_png(&tone(-30.0), "tone", None)).2;
     let target = freq_to_y(1000.0);
-    let best = (48..688u32)
+    let best = (64..704u32)
         .max_by_key(|&y| (luma(px(&img, 800, y)), u32::MAX - y))
         .unwrap();
     assert!(
@@ -105,7 +105,7 @@ fn section_boundary_drawn() {
     let x = x_of_frame(map.bar_frames[2], audio.frames());
     assert_eq!(px(&img, x, 60), BOUNDARY);
     assert_eq!(px(&img, x + 1, 60), BOUNDARY);
-    assert_eq!(px(&img, x, 750), BOUNDARY);
+    assert_eq!(px(&img, x, 780), BOUNDARY);
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn compare_png_stacks_two_panels() {
     let b = tone(-30.0);
     let bytes = compare_png((&a, "ours", None), (&b, "ref"));
     let (w, h, _) = decode(&bytes);
-    assert_eq!((w, h), (1600, 1632));
+    assert_eq!((w, h), (1600, 1712));
 }
 
 /// Writes `<workspace>/scratch/sweep.png` for a human (or Claude) to read.
