@@ -106,7 +106,7 @@ bars; audio past the song's last bar is left out with an entry in `notes`
 | `low_end` | `kick_region_db` (20-90 Hz) vs `bass_region_db` (90-250 Hz), `ratio_db` = kick - bass |
 | `stereo.low_correlation` | L/R correlation below 120 Hz; 0.9 or more = mono low end |
 | `stereo.side_to_mid_db` | stereo width |
-| `brightness.*` | spectral centroid: `median_hz`, `p10_hz`, `p90_hz`, `profile_hz`; `range_oct` = how far the filter moves |
+| `brightness.*` | whole-mix spectral centroid: `median_hz`, `p10_hz`, `p90_hz`, `profile_hz`; `range_oct` = log2(p90 / p10), how far the centroid moves. It tracks a filter sweep only where the 303 dominates the mix; under a loud kick it barely moves (0.17 oct across a 400-960 Hz cutoff ramp in the first session) |
 | `series` | 1 s grid: `short_term_lufs`, `centroid_hz` |
 | `sections[]` | `integrated_lufs`, `short_term_max_lufs`, `delta_lu`, `bands`, `centroid_median_hz`, `notes` |
 | `deltas`, `verdicts` (compare) | ours minus reference, plus one plain-language line each |
