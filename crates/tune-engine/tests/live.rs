@@ -1,12 +1,12 @@
 mod common;
 
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use common::{MINI, compile_song, compiled, song};
 use tune_dsp::DistortionMode;
 use tune_engine::{
-    CompiledSong, LiveError, LiveProcessor, ParamTarget, RenderOptions, live, render,
+    AudioOut, CompiledSong, LiveError, LiveProcessor, ParamTarget, RenderOptions, live, render,
 };
 use tune_song::FxSpec;
 
@@ -527,4 +527,52 @@ fn rejected_swap_keeps_generation() {
         1,
         "no swap was sent, so none is awaited"
     );
+}
+
+/// An output fixed at one rate that plays one block on start and captures it.
+struct CaptureOut {
+    rate: u32,
+    frames: usize,
+    captured: Arc<Mutex<Vec<f32>>>,
+}
+
+impl AudioOut for CaptureOut {
+    fn sample_rate(&mut self, _wanted: u32) -> Result<u32, String> {
+        Ok(self.rate)
+    }
+
+    fn start(&mut self, mut processor: LiveProcessor) -> Result<Box<dyn Send>, String> {
+        if processor.sample_rate() != self.rate {
+            return Err(format!("expected {} Hz", self.rate));
+        }
+        let mut out = vec![0.0f32; 2 * self.frames];
+        processor.process(&mut out);
+        *self.captured.lock().unwrap() = out;
+        Ok(Box::new(processor))
+    }
+}
+
+#[test]
+fn audio_out_drives_the_processor() {
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let mut device: Box<dyn AudioOut> = Box::new(CaptureOut {
+        rate: 48_000,
+        frames: 512,
+        captured: captured.clone(),
+    });
+    let rate = device.sample_rate(44_100).unwrap();
+    assert_eq!(rate, 48_000, "the device's rate, not the wanted one");
+    let a = Arc::new(CompiledSong::new(&song(MINI), rate));
+    let (ctl, p) = live(a.clone(), 0, None);
+    let handle = device.start(p).unwrap();
+    assert_eq!(ctl.position(), 512);
+    assert_bits(
+        &captured.lock().unwrap(),
+        frames(&render_bars(&a, 0, 1), 0..512),
+    );
+    drop(handle);
+
+    let other = Arc::new(CompiledSong::new(&song(MINI), 44_100));
+    let (_ctl, p) = live(other, 0, None);
+    assert!(device.start(p).is_err());
 }

@@ -296,6 +296,20 @@ impl LiveController {
     }
 }
 
+/// An audio device that plays a [`LiveProcessor`]. The engine crate holds
+/// only this seam; device code (`cpal` or a null output) implements it
+/// elsewhere.
+pub trait AudioOut: Send {
+    /// The rate the device will run at, given the rate the song `wanted`.
+    /// It may differ; compile the song at the returned rate before
+    /// [`live`].
+    fn sample_rate(&mut self, wanted: u32) -> Result<u32, String>;
+
+    /// Moves `processor` into the device's callback and starts output.
+    /// Dropping the returned handle stops it.
+    fn start(&mut self, processor: LiveProcessor) -> Result<Box<dyn Send>, String>;
+}
+
 /// The realtime half, owned by the audio callback. `process` never
 /// allocates, frees, locks or blocks.
 pub struct LiveProcessor {
@@ -390,5 +404,6 @@ mod tests {
         send::<LiveProcessor>();
         send::<LiveController>();
         send::<Box<SongUpdate>>();
+        send::<Box<dyn AudioOut>>();
     }
 }

@@ -20,7 +20,7 @@ pub use compile::{
 };
 pub use engine::{Engine, TrackRuntime};
 pub use instrument::{Cell, Effect, Instrument, StepCtx};
-pub use live::{LiveController, LiveError, LiveProcessor, SongUpdate, live};
+pub use live::{AudioOut, LiveController, LiveError, LiveProcessor, SongUpdate, live};
 pub use mixer::{CLIP_CEILING, CLIP_KNEE, Meter, pan_gains, soft_clip};
 pub use offline::{RenderError, RenderOptions, RenderReport, Rendered, render, render_to_files};
 pub use tracks::{AcidTrack, make_effect, make_instrument};
