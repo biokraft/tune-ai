@@ -8,17 +8,22 @@ import type { StudioClient } from "./StudioClient";
  * not buffer events, so the host's first state can go out before `listen` is registered; the
  * store asks for it with `get_state`, and calls wait until every listener is in place so that
  * answer is never older than the events that follow it.
+ *
+ * Tauri runs `invoke`s concurrently, so calls are chained: each starts once the one before it
+ * settled. A throttled live knob value can then never overtake the release that follows it.
  */
 export function createTauriClient(): StudioClient {
   /** Resolves once every `listen` made so far is registered (or failed). */
   let listening: Promise<unknown> = Promise.resolve();
+  /** Settles once the last call made so far has settled; never rejects. */
+  let last: Promise<unknown> = Promise.resolve();
   return {
     call<T = unknown>(cmd: Command): Promise<T> {
-      return listening
-        .then(() => invoke<T>("studio", { command: cmd }))
-        .catch((e: unknown) => {
-          throw e instanceof Error ? e : new Error(String(e));
-        });
+      const run = Promise.all([last, listening]).then(() => invoke<T>("studio", { command: cmd }));
+      last = run.catch(() => {});
+      return run.catch((e: unknown) => {
+        throw e instanceof Error ? e : new Error(String(e));
+      });
     },
     subscribe(h) {
       let off: UnlistenFn | null = null;
