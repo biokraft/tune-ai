@@ -7,11 +7,46 @@ TB-303 emulation, rendered through the `tune` CLI.
 
 - `crates/tune-dsp` - DSP library (`param`, `acid303/*`, `fx/*`). No Tauri, UI,
   MCP, `cc` or `open303-ref` dependencies (`open303-ref` only as a dev-dependency).
-- `crates/tune-cli` - the `tune` binary (`render.rs`, clap CLI).
+- `crates/tune-song` - song file model: parse, validate (positional errors),
+  canonical write, file watcher. Headless.
+- `crates/tune-engine` - compiles a song and renders it: offline (`render`) or
+  live (`live`, lock-free swap for hot reload). Headless.
+- `crates/tune-cli` - the `tune` binary: `validate`, `info`, `params`,
+  `render`, `play`, `render-303`. `cpal` and `ctrlc` live only here.
+- `songs/<name>/song.toml` - committed songs. Renders go to `scratch/` or
+  `songs/*/renders/` (gitignored).
 - `crates/open303-ref` - dev-only C++ reference build used for parity tests.
 - `third_party/open303/` - vendored Open303 sources, unmodified.
 - `scripts/` - privacy check and its tests. `.githooks/` - pre-commit hook.
 - `docs/` - design spec, plans, research.
+
+## How Claude uses tune
+
+Songs are TOML files, `songs/<name>/song.toml`. Loop:
+
+1. Edit the song file.
+2. `tune validate <song> --json`. Errors carry `line` and `column`; fix them all.
+3. `tune info <song> --json` for the section, bar and time map.
+4. `tune render <song> --bars A..B --json --out scratch/x.wav` for the passage
+   in question. Read `peak_dbfs` and `pre_clip_peak_dbfs` (pre-clip above 0
+   means the master clipper is working; lower gains).
+
+Notation:
+
+- Acid pattern: one token per 16th. `C2` note, `.` rest, `!` accent,
+  `~` slide into the next step (same pitch ties), e.g. `C2 C2! C3~ . D#2`.
+- Drum pattern: `x` hit, `X` accent, `.` rest, e.g. `x...x...x...X...`.
+- A section plays patterns per track (`play = { kick = "k4" }`); bars are
+  1-based and ranges inclusive in CLI flags.
+- Automation: `[[sections.automation]]` with `param = "<track>.<param id>"` and
+  `points = [[bar_offset, normalized_0_to_1], ...]`; offset 0 is the section
+  start.
+- `tune params --json` is the source of param ids, ranges and units.
+
+Every command takes `--json`; exit code 2 means failure. `tune play` is for the
+producer: it plays through the speakers and reloads the file when it changes.
+Claude may run `tune play <song> --device null --json` to check a reload (no
+sound), never the default device. Never commit renders or any audio.
 
 ## Rules
 
