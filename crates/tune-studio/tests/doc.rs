@@ -438,3 +438,253 @@ fn inline_sections_array() {
         d.text()
     );
 }
+
+// ----- the mixer: `mix.*` paths and strip params -----
+
+const MIXED: &str = include_str!("../../tune-song/tests/fixtures/mixed.toml");
+
+fn mixed() -> SongDoc {
+    SongDoc::parse(MIXED).expect("mixed fixture parses")
+}
+
+/// The canonical writer gives back the same song from the edited text.
+fn assert_canonical_round_trip(d: &SongDoc) {
+    let canonical = d.song().to_toml();
+    assert_eq!(
+        &tune_song::parse_song(&canonical).expect("canonical text parses"),
+        d.song(),
+        "{canonical}"
+    );
+}
+
+#[test]
+fn mix_paths_round_trip() {
+    for s in [
+        "mix.master",
+        "mix.duck_source",
+        "mix.delay.feedback",
+        "mix.master.gain",
+        "tracks.acid.send.delay",
+        "tracks.acid.eq.low_cut",
+    ] {
+        assert_eq!(path(s).to_string(), s);
+    }
+    assert_eq!(path("mix.master"), SongPath::MixMaster);
+    assert_eq!(path("mix.duck_source"), SongPath::MixDuckSource);
+    assert_eq!(
+        path("mix.delay.feedback"),
+        SongPath::MixParam {
+            param: "delay.feedback".into()
+        }
+    );
+    assert_eq!(
+        path("tracks.acid.send.delay"),
+        SongPath::TrackParam {
+            track: "acid".into(),
+            param: "send.delay".into()
+        }
+    );
+    assert_eq!(
+        SongPath::param("mix", "reverb.size"),
+        path("mix.reverb.size")
+    );
+    assert_eq!(
+        SongPath::param("acid", "send.reverb"),
+        path("tracks.acid.send.reverb")
+    );
+    for bad in [
+        "mix",
+        "mix.",
+        "mix.delay",
+        "mix.delay.",
+        "mix..feedback",
+        "mix.delay.feed.back",
+        "mix.Delay.feedback",
+    ] {
+        assert!(bad.parse::<SongPath>().is_err(), "`{bad}` should not parse");
+    }
+    let err = "nope".parse::<SongPath>().unwrap_err();
+    assert!(err.contains("mix.<param id>"), "{err}");
+}
+
+/// Review Focus 5: a commented file with no `[mix]` gains one right after
+/// `[song]`, and nothing else in the file moves.
+#[test]
+fn set_mix_param_creates_mix_table() {
+    let mut d = doc();
+    d.set(&path("mix.master.gain"), &json!(6)).unwrap();
+    let expected = COMMENTED.replacen(
+        "seed = 7\n",
+        "seed = 7\n\n[mix]\nparams = { \"master.gain\" = 6 }\n",
+        1,
+    );
+    assert_ne!(expected, COMMENTED);
+    assert_eq!(d.text(), expected);
+    assert_eq!(d.song().mix.params["master.gain"], 6.0);
+    assert_eq!(d.get(&path("mix.master.gain")), Some(json!(6)));
+    assert_canonical_round_trip(&d);
+    // The text is a valid song on its own, with the comments.
+    let reparsed = SongDoc::parse(&d.text()).expect("edited text parses");
+    assert_eq!(reparsed.song(), d.song());
+
+    // More mix values land in the same table.
+    d.set(&path("mix.delay.feedback"), &json!(30)).unwrap();
+    d.set(&path("mix.master"), &json!("limit")).unwrap();
+    let expected = COMMENTED.replacen(
+        "seed = 7\n",
+        "seed = 7\n\n[mix]\nparams = { \"master.gain\" = 6, \"delay.feedback\" = 30 }\n\
+         master = \"limit\"\n",
+        1,
+    );
+    assert_eq!(d.text(), expected);
+    assert_eq!(d.get(&path("mix.master")), Some(json!("limit")));
+    assert_eq!(d.get(&path("mix.delay.feedback")), Some(json!(30)));
+    // An id left out reads as its default.
+    assert_eq!(d.get(&path("mix.reverb.size")), Some(json!(25)));
+    assert_canonical_round_trip(&d);
+
+    // An unknown mix id is refused with the usual message.
+    let before = d.text();
+    let err = d.set(&path("mix.delay.fedback"), &json!(30)).unwrap_err();
+    assert_eq!(
+        err,
+        EditError::UnknownParam {
+            track: "mix".into(),
+            instrument: "mix",
+            param: "delay.fedback".into(),
+        }
+    );
+    assert_eq!(
+        err.to_string(),
+        "`delay.fedback` is not a parameter of track `mix` (mix); see `tune params --json`"
+    );
+    assert_eq!(d.get(&path("mix.delay.fedback")), None);
+    assert_eq!(d.text(), before);
+}
+
+/// `[mix]` follows `[song]` wherever `[song]` sits in the file.
+#[test]
+fn mix_table_follows_song() {
+    let src = "# tracks first\n[tracks.k]\ninstrument = \"kick\"\n\n\
+               [song]\nname = \"x\"\nbpm = 120\n\n\
+               # the end\n[[sections]]\nname = \"a\"\nbars = 1\nplay = { k = \"p\" }\n\n\
+               [patterns.p]\ntrack = \"k\"\nsteps = \"x...\"\n";
+    let mut d = SongDoc::parse(src).unwrap();
+    d.set(&path("mix.master"), &json!("limit")).unwrap();
+    assert_eq!(
+        d.text(),
+        src.replacen("bpm = 120\n", "bpm = 120\n\n[mix]\nmaster = \"limit\"\n", 1)
+    );
+}
+
+/// Review Focus 5: a strip param on a track without a `params` key.
+#[test]
+fn set_strip_param_on_track_without_params() {
+    let mut d = doc();
+    d.set(&path("tracks.hat.send.delay"), &json!(-14)).unwrap();
+    assert_eq!(
+        d.text(),
+        COMMENTED.replacen(
+            "pan = 0.3\n",
+            "pan = 0.3\nparams = { \"send.delay\" = -14 }\n",
+            1
+        )
+    );
+    assert_eq!(d.song().tracks["hat"].params["send.delay"], -14.0);
+    assert_eq!(d.get(&path("tracks.hat.send.delay")), Some(json!(-14)));
+    assert_eq!(d.get(&path("tracks.hat.send.reverb")), Some(json!(-60)));
+    assert_canonical_round_trip(&d);
+
+    // On a track with an inline `params`, the strip id joins it.
+    d.set(&path("tracks.acid.duck.depth"), &json!(6)).unwrap();
+    assert!(
+        d.text()
+            .contains("\"acid303.accent\" = 55, \"duck.depth\" = 6 }"),
+        "{}",
+        d.text()
+    );
+    assert_eq!(d.song().tracks["acid"].params["duck.depth"], 6.0);
+    for c in COMMENTS {
+        assert!(d.text().contains(c), "lost `{c}`:\n{}", d.text());
+    }
+}
+
+#[test]
+fn set_eq_param() {
+    let mut d = mixed();
+    assert_eq!(d.get(&path("tracks.acid.eq.low_cut")), Some(json!(85)));
+    d.set(&path("tracks.acid.eq.low_cut"), &json!(120)).unwrap();
+    assert_eq!(
+        d.text(),
+        MIXED.replacen("\"eq.low_cut\" = 85", "\"eq.low_cut\" = 120", 1)
+    );
+    let FxSpec::Eq { params } = &d.song().tracks["acid"].fx[1] else {
+        panic!("expected eq")
+    };
+    assert_eq!(params["eq.low_cut"], 120.0);
+    assert_eq!(d.get(&path("tracks.acid.eq.low_cut")), Some(json!(120)));
+    // An eq id the file leaves out is inserted into the eq entry.
+    d.set(&path("tracks.acid.eq.high_cut"), &json!(9000))
+        .unwrap();
+    assert!(
+        d.text().contains(
+            "{ type = \"eq\", params = { \"eq.low_cut\" = 120, \"eq.high_cut\" = 9000 } }"
+        ),
+        "{}",
+        d.text()
+    );
+    // The kick has no eq.
+    assert_eq!(
+        d.set(&path("tracks.kick.eq.low_cut"), &json!(120)),
+        Err(EditError::NoSuchTarget("tracks.kick.eq.low_cut".into()))
+    );
+}
+
+#[test]
+fn set_master_mode_bad_value() {
+    let mut d = doc();
+    let err = d.set(&path("mix.master"), &json!("loud")).unwrap_err();
+    assert!(matches!(err, EditError::Invalid(_)), "{err:?}");
+    assert!(err.to_string().contains("unknown master mode"), "{err}");
+    assert_eq!(d.text(), COMMENTED, "a refused edit changes nothing");
+    assert_eq!(d.get(&path("mix.master")), Some(json!("clip")));
+    assert!(matches!(
+        d.set(&path("mix.master"), &json!(1)),
+        Err(EditError::BadValue { .. })
+    ));
+}
+
+/// Review Focus 5: `mix.duck_source=` clears the key, falling back to the
+/// first kick.
+#[test]
+fn clear_duck_source() {
+    let src = MIXED.replacen(
+        "master = \"limit\"\n",
+        "master = \"limit\"\nduck_source = \"hat\"\n",
+        1,
+    );
+    assert_ne!(src, MIXED);
+    let mut d = SongDoc::parse(&src).unwrap();
+    assert_eq!(d.get(&path("mix.duck_source")), Some(json!("hat")));
+    d.set(&path("mix.duck_source"), &Value::Null).unwrap();
+    assert_eq!(d.text(), MIXED);
+    assert_eq!(d.song().mix.duck_source, None);
+    assert_eq!(d.get(&path("mix.duck_source")), Some(json!("kick")));
+    // Setting it writes the key back into `[mix]`.
+    d.set(&path("mix.duck_source"), &json!("hat")).unwrap();
+    assert_eq!(d.text(), MIXED.replacen(
+        "params = { \"delay.feedback\" = 40, \"reverb.size\" = 30, \"master.gain\" = 6 }\n",
+        "params = { \"delay.feedback\" = 40, \"reverb.size\" = 30, \"master.gain\" = 6 }\nduck_source = \"hat\"\n",
+        1,
+    ));
+
+    // Clearing on a file without `[mix]` adds nothing.
+    let mut d = doc();
+    d.set(&path("mix.duck_source"), &Value::Null).unwrap();
+    assert_eq!(d.text(), COMMENTED);
+    assert_eq!(d.get(&path("mix.duck_source")), Some(json!("kick")));
+    assert!(matches!(
+        d.set(&path("mix.duck_source"), &json!(3)),
+        Err(EditError::BadValue { .. })
+    ));
+}
