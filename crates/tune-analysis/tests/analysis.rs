@@ -21,6 +21,7 @@ fn map(first_bar: u32, bars: usize) -> BarMap {
     BarMap {
         first_bar,
         bar_frames: (0..=bars).map(|i| i * BAR).collect(),
+        partial_end: false,
         sections: vec![
             SectionSpan {
                 name: "a".into(),
@@ -75,6 +76,20 @@ fn unchanged_section_noted() {
         r[1].notes,
         vec!["same energy and balance as `a`: nothing changes here".to_string()]
     );
+}
+
+#[test]
+fn cut_last_bar_marks_its_section_partial() {
+    // Bars 1-4, but the audio stops half way through bar 4.
+    let end = 3 * BAR + BAR / 2;
+    let audio = tone(-20.0, 4).slice(0..end);
+    let mut m = map(0, 4);
+    *m.bar_frames.last_mut().unwrap() = end;
+    m.partial_end = true;
+    let r = analyze_sections(&audio, &m).unwrap();
+    assert_eq!((r[1].start_bar, r[1].end_bar), (3, 4));
+    assert!(!r[0].partial);
+    assert!(r[1].partial);
 }
 
 #[test]

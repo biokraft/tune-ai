@@ -168,6 +168,53 @@ fn analyze_wav_with_song_map() {
     assert!((a - b).abs() < 0.02, "{a} vs {b}");
 }
 
+#[test]
+fn analyze_wav_past_the_song_end_is_noted() {
+    let dir = tempfile::tempdir().unwrap();
+    let m = mini();
+    let ms = m.to_str().unwrap();
+    // mini is 4 bars of 2 s. 6 s from bar 3 holds bars 3-4 and 2 s past the end.
+    write_sine(&dir.path().join("long.wav"), 48_000, 2, 6, -20.0);
+    let v = analyze_json(dir.path(), &["long.wav", "--song", ms, "--from-bar", "3"]);
+    assert_eq!(v["source"]["bars"], serde_json::json!([3, 4]));
+    assert_eq!(v["source"]["seconds"], 4.0);
+    assert_eq!(
+        v["notes"],
+        serde_json::json!([
+            "the file runs 2.0 s past the song's last bar; that audio is ignored (check --from-bar)"
+        ])
+    );
+    let out = tune(dir.path())
+        .args(["analyze", "long.wav", "--song", ms, "--from-bar", "3"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(err.starts_with("note: the file runs 2.0 s past"), "{err}");
+
+    // A file that fits leaves `notes` empty.
+    write_sine(&dir.path().join("fit.wav"), 48_000, 2, 4, -20.0);
+    let v = analyze_json(dir.path(), &["fit.wav", "--song", ms, "--from-bar", "3"]);
+    assert_eq!(v["notes"], serde_json::json!([]));
+}
+
+#[test]
+fn analyze_wav_ending_mid_bar_marks_the_section_partial() {
+    let dir = tempfile::tempdir().unwrap();
+    let m = mini();
+    let ms = m.to_str().unwrap();
+    // 3 s from bar 1: bar 1 whole, bar 2 cut in half; section a is bars 1-2.
+    write_sine(&dir.path().join("short.wav"), 48_000, 2, 3, -20.0);
+    let v = analyze_json(dir.path(), &["short.wav", "--song", ms, "--sections"]);
+    let s = v["sections"].as_array().unwrap();
+    assert_eq!(s.len(), 1);
+    assert_eq!(
+        (s[0]["start_bar"].as_u64(), s[0]["end_bar"].as_u64()),
+        (Some(1), Some(2))
+    );
+    assert_eq!(s[0]["partial"], true);
+}
+
 fn fails_with(dir: &Path, args: &[&str], needle: &str) {
     let out = tune(dir)
         .arg("analyze")

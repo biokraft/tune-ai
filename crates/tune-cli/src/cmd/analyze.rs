@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tune_analysis::spectrogram::spectrogram_png;
 use tune_analysis::{Analysis, BANDS, analyze};
 
@@ -149,6 +149,13 @@ fn run_inner(a: &Args) -> Result<Success, Vec<Failure>> {
         json.extend(rest);
     }
     json.insert("png".into(), png.clone().map_or(Value::Null, Value::String));
+    json.insert("notes".into(), json!(input.notes));
+    if !a.json {
+        // stderr, like `tune render`: stdout stays the report.
+        for n in &input.notes {
+            eprintln!("note: {n}");
+        }
+    }
     Ok(Success {
         text: text(&input, &analysis, png.as_deref()),
         json: Value::Object(json),
