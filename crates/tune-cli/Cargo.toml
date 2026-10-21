@@ -1,0 +1,26 @@
+[package]
+name = "tune-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tune"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[lib]
+name = "tune_cli"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+hound = "3.5"
+thiserror = "2"
+tune-dsp = { path = "../tune-dsp" }
+
+[dev-dependencies]
+assert_cmd = "2"
+tempfile = "3"

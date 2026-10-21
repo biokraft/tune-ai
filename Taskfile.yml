@@ -1,0 +1,43 @@
+version: "3"
+
+tasks:
+  setup:
+    desc: Install the git pre-commit hook
+    cmds:
+      - git config core.hooksPath .githooks
+
+  fmt:check:
+    desc: Check formatting
+    cmds:
+      - cargo fmt --all -- --check
+
+  lint:
+    desc: Clippy with warnings denied
+    cmds:
+      - cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    desc: Run all tests
+    cmds:
+      - cargo test --workspace
+
+  privacy:
+    desc: Scan tracked files for audio and personal data
+    cmds:
+      - bash scripts/test-privacy.sh
+      - bash scripts/check-privacy.sh
+
+  verify:
+    desc: Everything that must pass before a commit
+    cmds:
+      - task: fmt:check
+      - task: lint
+      - task: test
+      - task: privacy
+
+  demo:
+    desc: Render the demo 303 line and play it
+    cmds:
+      - mkdir -p scratch
+      - cargo run --release -p tune-cli -- render-303 --demo --out scratch/demo.wav
+      - afplay scratch/demo.wav
