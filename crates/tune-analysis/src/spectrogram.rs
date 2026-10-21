@@ -310,7 +310,9 @@ fn panel(audio: &Audio, title: &str, map: Option<&BarMap>) -> Canvas {
     for (hz, label) in HZ_LABELS {
         let y = freq_to_y(hz);
         for x in (PLOT_X0..PLOT_X0 + PLOT_W).step_by(2) {
-            canvas.set(x, y, GRID);
+            if canvas.luma_sum(x, y) < luma_sum(GRID) {
+                canvas.set(x, y, GRID);
+            }
         }
         let w = Canvas::text_width(label, 2);
         canvas.text(PLOT_X0 - 4 - w, y.saturating_sub(8), label, 2, TEXT);
