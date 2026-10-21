@@ -1,0 +1,629 @@
+{
+  "commands": [
+    {
+      "cmd": "list_songs"
+    },
+    {
+      "cmd": "open_song",
+      "args": {
+        "path": "songs/mini/song.toml"
+      }
+    },
+    {
+      "cmd": "play",
+      "args": {
+        "from_bar": 4
+      }
+    },
+    {
+      "cmd": "stop"
+    },
+    {
+      "cmd": "seek_bar",
+      "args": {
+        "bar": 8
+      }
+    },
+    {
+      "cmd": "set_loop",
+      "args": {
+        "bars": [
+          2,
+          6
+        ]
+      }
+    },
+    {
+      "cmd": "set_param",
+      "args": {
+        "track": "acid",
+        "param": "acid303.cutoff",
+        "value": 820.0,
+        "commit": true
+      }
+    },
+    {
+      "cmd": "set_fx_mode",
+      "args": {
+        "track": "acid",
+        "mode": "hard"
+      }
+    },
+    {
+      "cmd": "set_acid_step",
+      "args": {
+        "pattern": "a1",
+        "index": 3,
+        "note": 36,
+        "accent": true,
+        "slide": false
+      }
+    },
+    {
+      "cmd": "set_drum_step",
+      "args": {
+        "pattern": "k4",
+        "index": 5,
+        "hit": "accent"
+      }
+    },
+    {
+      "cmd": "move_section",
+      "args": {
+        "from": 0,
+        "to": 2
+      }
+    },
+    {
+      "cmd": "resize_section",
+      "args": {
+        "index": 1,
+        "bars": 4
+      }
+    },
+    {
+      "cmd": "duplicate_section",
+      "args": {
+        "index": 1
+      }
+    },
+    {
+      "cmd": "delete_section",
+      "args": {
+        "index": 0
+      }
+    },
+    {
+      "cmd": "set_section_play",
+      "args": {
+        "section": 1,
+        "track": "kick",
+        "pattern": null
+      }
+    },
+    {
+      "cmd": "set_track_mix",
+      "args": {
+        "track": "hat",
+        "gain_db": -8.5,
+        "pan": null,
+        "mute": true,
+        "solo": false
+      }
+    },
+    {
+      "cmd": "undo"
+    },
+    {
+      "cmd": "redo"
+    },
+    {
+      "cmd": "resolve_offered",
+      "args": {
+        "reapply": true
+      }
+    }
+  ],
+  "events": [
+    {
+      "event": "state",
+      "path": "songs/mini/song.toml",
+      "song": {
+        "name": "mini",
+        "bpm": 120.0,
+        "total_bars": 4,
+        "tracks": [
+          {
+            "id": "kick",
+            "instrument": "kick",
+            "gain_db": -3.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false,
+            "params": [
+              {
+                "id": "kick.tune",
+                "label": "Tune",
+                "unit": "Hz",
+                "min": 40.0,
+                "max": 80.0,
+                "curve": "linear",
+                "default": 50.0,
+                "help": "Pitch the kick body settles on. Tune it to the track's root note so kick and bassline agree.",
+                "value": 50.0,
+                "explicit": false
+              },
+              {
+                "id": "kick.decay",
+                "label": "Decay",
+                "unit": "ms",
+                "min": 100.0,
+                "max": 1500.0,
+                "curve": "exponential",
+                "default": 450.0,
+                "help": "How long the kick booms. Short is tight and punchy; long turns into a rumbling sub.",
+                "value": 450.0,
+                "explicit": false
+              },
+              {
+                "id": "kick.punch",
+                "label": "Punch",
+                "unit": "%",
+                "min": 0.0,
+                "max": 100.0,
+                "curve": "linear",
+                "default": 50.0,
+                "help": "How far the pitch drops at the start of each hit. More punch, more thud in the chest.",
+                "value": 50.0,
+                "explicit": false
+              },
+              {
+                "id": "kick.click",
+                "label": "Click",
+                "unit": "%",
+                "min": 0.0,
+                "max": 100.0,
+                "curve": "linear",
+                "default": 30.0,
+                "help": "The short tick at the front of the kick that helps it cut through on small speakers.",
+                "value": 30.0,
+                "explicit": false
+              },
+              {
+                "id": "kick.drive",
+                "label": "Drive",
+                "unit": "dB",
+                "min": 0.0,
+                "max": 24.0,
+                "curve": "linear",
+                "default": 6.0,
+                "help": "Saturates the kick for a harder, rave-style knock. Too much turns the low end muddy.",
+                "value": 6.0,
+                "explicit": false
+              }
+            ],
+            "fx": []
+          },
+          {
+            "id": "acid",
+            "instrument": "acid303",
+            "gain_db": 0.0,
+            "pan": 0.0,
+            "mute": false,
+            "solo": false,
+            "params": [
+              {
+                "id": "acid303.waveform",
+                "label": "Waveform",
+                "unit": "",
+                "min": 0.0,
+                "max": 1.0,
+                "curve": "linear",
+                "default": 0.0,
+                "help": "Blends saw (0) into square (1). Saw is brighter and buzzier; square is hollower.",
+                "value": 0.0,
+                "explicit": false
+              },
+              {
+                "id": "acid303.tuning",
+                "label": "Tuning",
+                "unit": "Hz",
+                "min": 400.0,
+                "max": 480.0,
+                "curve": "linear",
+                "default": 440.0,
+                "help": "Master pitch. 440 Hz is standard tuning.",
+                "value": 440.0,
+                "explicit": false
+              },
+              {
+                "id": "acid303.cutoff",
+                "label": "Cutoff",
+                "unit": "Hz",
+                "min": 314.0,
+                "max": 2394.0,
+                "curve": "exponential",
+                "default": 1000.0,
+                "help": "How bright or muffled the sound is. Slowly opening this over many bars is the classic acid build.",
+                "value": 500.0,
+                "explicit": true
+              },
+              {
+                "id": "acid303.resonance",
+                "label": "Resonance",
+                "unit": "%",
+                "min": 0.0,
+                "max": 100.0,
+                "curve": "linear",
+                "default": 0.0,
+                "help": "A whistling peak at the cutoff. High values make the line squeal and turn rubbery.",
+                "value": 70.0,
+                "explicit": true
+              },
+              {
+                "id": "acid303.env_mod",
+                "label": "Env Mod",
+                "unit": "%",
+                "min": 0.0,
+                "max": 100.0,
+                "curve": "linear",
+                "default": 25.0,
+                "help": "How far the filter jumps open on each note. This is the 'wow' on every step.",
+                "value": 50.0,
+                "explicit": true
+              },
+              {
+                "id": "acid303.decay",
+                "label": "Decay",
+                "unit": "ms",
+                "min": 200.0,
+                "max": 2000.0,
+                "curve": "exponential",
+                "default": 1000.0,
+                "help": "How fast the filter closes again after each note. Short is plucky, long is smeared.",
+                "value": 400.0,
+                "explicit": true
+              },
+              {
+                "id": "acid303.accent",
+                "label": "Accent",
+                "unit": "%",
+                "min": 0.0,
+                "max": 100.0,
+                "curve": "linear",
+                "default": 0.0,
+                "help": "How much harder and brighter accented steps hit. Back-to-back accents stack into a rising squelch.",
+                "value": 55.0,
+                "explicit": true
+              },
+              {
+                "id": "acid303.volume",
+                "label": "Volume",
+                "unit": "dB",
+                "min": -60.0,
+                "max": 0.0,
+                "curve": "linear",
+                "default": -12.0,
+                "help": "Output level of the 303.",
+                "value": -12.0,
+                "explicit": false
+              },
+              {
+                "id": "acid303.slide_time",
+                "label": "Slide Time",
+                "unit": "ms",
+                "min": 0.0,
+                "max": 200.0,
+                "curve": "linear",
+                "default": 60.0,
+                "help": "How long a slide takes to glide into the next note. This is the wobble.",
+                "value": 60.0,
+                "explicit": false
+              }
+            ],
+            "fx": [
+              {
+                "kind": "distortion",
+                "mode": "soft",
+                "modes": [
+                  "soft",
+                  "hard",
+                  "overdrive"
+                ],
+                "params": [
+                  {
+                    "id": "dist.drive",
+                    "label": "Drive",
+                    "unit": "dB",
+                    "min": 0.0,
+                    "max": 48.0,
+                    "curve": "linear",
+                    "default": 12.0,
+                    "help": "How hard the 303 is pushed into distortion. More drive, more grit and sustain.",
+                    "value": 12.0,
+                    "explicit": true
+                  },
+                  {
+                    "id": "dist.mix",
+                    "label": "Mix",
+                    "unit": "",
+                    "min": 0.0,
+                    "max": 1.0,
+                    "curve": "linear",
+                    "default": 1.0,
+                    "help": "Blend of distorted and clean signal.",
+                    "value": 1.0,
+                    "explicit": false
+                  },
+                  {
+                    "id": "dist.output",
+                    "label": "Output",
+                    "unit": "dB",
+                    "min": -24.0,
+                    "max": 6.0,
+                    "curve": "linear",
+                    "default": -6.0,
+                    "help": "Level after the distortion, to keep loudness in check.",
+                    "value": -6.0,
+                    "explicit": false
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "hat",
+            "instrument": "hat_closed",
+            "gain_db": -10.0,
+            "pan": 0.3,
+            "mute": false,
+            "solo": false,
+            "params": [
+              {
+                "id": "hat_closed.tone",
+                "label": "Tone",
+                "unit": "Hz",
+                "min": 4000.0,
+                "max": 12000.0,
+                "curve": "exponential",
+                "default": 7000.0,
+                "help": "Brightness of the hat. Higher is crisper and thinner.",
+                "value": 7000.0,
+                "explicit": false
+              },
+              {
+                "id": "hat_closed.decay",
+                "label": "Decay",
+                "unit": "ms",
+                "min": 10.0,
+                "max": 200.0,
+                "curve": "exponential",
+                "default": 45.0,
+                "help": "How long the hat rings. Keep it short so fast 16ths stay tight.",
+                "value": 45.0,
+                "explicit": false
+              },
+              {
+                "id": "hat_closed.metal",
+                "label": "Metal",
+                "unit": "%",
+                "min": 0.0,
+                "max": 100.0,
+                "curve": "linear",
+                "default": 40.0,
+                "help": "Blend of metallic ring and plain noise. More metal sounds like a real cymbal.",
+                "value": 40.0,
+                "explicit": false
+              }
+            ],
+            "fx": []
+          }
+        ],
+        "patterns": [
+          {
+            "kind": "drum",
+            "id": "k4",
+            "track": "kick",
+            "hits": [
+              "hit",
+              "rest",
+              "rest",
+              "rest",
+              "hit",
+              "rest",
+              "rest",
+              "rest",
+              "hit",
+              "rest",
+              "rest",
+              "rest",
+              "accent",
+              "rest",
+              "rest",
+              "rest"
+            ]
+          },
+          {
+            "kind": "acid",
+            "id": "a1",
+            "track": "acid",
+            "steps": [
+              {
+                "note": 36,
+                "accent": false,
+                "slide": false
+              },
+              {
+                "note": 36,
+                "accent": true,
+                "slide": false
+              },
+              {
+                "note": 48,
+                "accent": false,
+                "slide": true
+              },
+              {
+                "note": 36,
+                "accent": false,
+                "slide": false
+              },
+              {
+                "note": null,
+                "accent": false,
+                "slide": false
+              },
+              {
+                "note": 39,
+                "accent": false,
+                "slide": false
+              },
+              {
+                "note": 36,
+                "accent": false,
+                "slide": true
+              },
+              {
+                "note": 43,
+                "accent": true,
+                "slide": false
+              }
+            ]
+          },
+          {
+            "kind": "drum",
+            "id": "h",
+            "track": "hat",
+            "hits": [
+              "rest",
+              "rest",
+              "hit",
+              "rest",
+              "rest",
+              "rest",
+              "hit",
+              "rest",
+              "rest",
+              "rest",
+              "hit",
+              "rest",
+              "rest",
+              "rest",
+              "hit",
+              "rest"
+            ]
+          }
+        ],
+        "sections": [
+          {
+            "name": "a",
+            "start_bar": 0,
+            "bars": 2,
+            "play": {
+              "kick": "k4",
+              "hat": "h"
+            },
+            "lanes": []
+          },
+          {
+            "name": "b",
+            "start_bar": 2,
+            "bars": 2,
+            "play": {
+              "kick": "k4",
+              "acid": "a1",
+              "hat": "h"
+            },
+            "lanes": [
+              {
+                "track": "acid",
+                "param": "acid303.cutoff",
+                "points": [
+                  [
+                    0.0,
+                    0.1
+                  ],
+                  [
+                    2.0,
+                    0.8
+                  ]
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "playing": false,
+      "cursor_bar": 0,
+      "loop_bars": [
+        0,
+        2
+      ],
+      "can_undo": true,
+      "can_redo": false,
+      "offered": [
+        {
+          "path": "tracks.acid.acid303.cutoff",
+          "old": 500,
+          "new": 820
+        }
+      ],
+      "file_errors": [
+        {
+          "line": 12,
+          "column": 5,
+          "message": "expected a value"
+        }
+      ]
+    },
+    {
+      "event": "playhead",
+      "step": 37,
+      "bar": 2,
+      "beat": 1,
+      "playing": true
+    },
+    {
+      "event": "applied",
+      "source": "human",
+      "changes": [
+        {
+          "path": "tracks.acid.acid303.cutoff",
+          "old": 500,
+          "new": 820
+        }
+      ]
+    },
+    {
+      "event": "external_change",
+      "source": "claude",
+      "changes": [
+        {
+          "path": "sections[1].bars",
+          "old": 2,
+          "new": 4
+        }
+      ],
+      "replaced": false,
+      "merged": [
+        {
+          "path": "tracks.hat.pan",
+          "old": 0.3,
+          "new": 0.4
+        }
+      ],
+      "offered": [
+        {
+          "path": "tracks.acid.acid303.cutoff",
+          "old": 820,
+          "new": 500
+        }
+      ],
+      "errors": []
+    },
+    {
+      "event": "error",
+      "message": "cannot write the song file"
+    }
+  ]
+}
