@@ -14,7 +14,6 @@ function setup(song: SongView = goldenState.song!, result: unknown = null, autom
       song={song}
       section={1}
       automatedIn={automatedIn}
-      playingStep={null}
       highlights={new Map()}
       send={send}
     />,

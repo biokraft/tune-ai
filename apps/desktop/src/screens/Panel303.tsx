@@ -1,9 +1,17 @@
-import { AcidStepSequencer, cn, Knob, type AcidStep, type ParamSpecView } from "@tune/ui";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  AcidStepSequencer,
+  cn,
+  Knob,
+  type AcidStep,
+  type AcidStepSequencerProps,
+  type ParamSpecView,
+} from "@tune/ui";
+import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { Command, ParamView, SongView, TrackView } from "../client/protocol";
 import { frameThrottle } from "../lib/frameThrottle";
 import { highlightedSteps, patternIn, sentenceCase, stepInPattern } from "../lib/song";
 import type { HighlightKind } from "../store/studioStore";
+import { usePlayheadStep } from "../store/useStudio";
 import { HelpStrip } from "./HelpStrip";
 
 export type Panel303Props = {
@@ -15,8 +23,6 @@ export type Panel303Props = {
    * param automated there, so its knobs carry the lane badge.
    */
   automatedIn: number | null;
-  /** The playhead in 16ths from the song start, while playing. */
-  playingStep: number | null;
   highlights: Map<string, HighlightKind>;
   send(cmd: Command): Promise<unknown>;
 };
@@ -41,11 +47,11 @@ const byShortId = (params: ParamView[], short: string) =>
 const settled = (a: number, b: number) => Math.abs(a - b) <= Math.abs(b) * 1e-3 + 1e-9;
 
 /** The 303 faceplate: the first acid303 track's knobs, distortion, help strip and sequencer. */
-export function Panel303({
+/** Memoised: playhead ticks reach only the sequencer's LEDs, never the knobs. */
+export const Panel303 = memo(function Panel303({
   song,
   section,
   automatedIn,
-  playingStep,
   highlights,
   send,
 }: Panel303Props) {
@@ -70,12 +76,11 @@ export function Panel303({
       onChoose={setChosen}
       section={section}
       automatedIn={automatedIn}
-      playingStep={playingStep}
       highlights={highlights}
       send={send}
     />
   );
-}
+});
 
 type TrackPanelProps = Omit<Panel303Props, "song"> & {
   song: SongView;
@@ -91,7 +96,6 @@ function TrackPanel({
   onChoose,
   section,
   automatedIn,
-  playingStep,
   highlights,
   send,
 }: TrackPanelProps) {
@@ -276,10 +280,11 @@ function TrackPanel({
               Pattern {acid.id} in {shownSection?.name}
             </p>
             <div className="overflow-x-auto pb-1">
-              <AcidStepSequencer
+              <LiveSequencer
+                song={song}
+                section={section}
                 patternId={acid.id}
                 steps={acid.steps}
-                playingStep={stepInPattern(song, section, playingStep, acid.steps.length)}
                 highlighted={highlightedSteps(highlights, acid.id)}
                 onChange={(index: number, s: AcidStep) =>
                   void send({
@@ -380,5 +385,21 @@ function Screws() {
         <span key={p} aria-hidden="true" className={cn("screw absolute", p)} />
       ))}
     </>
+  );
+}
+
+type LiveSequencerProps = Omit<AcidStepSequencerProps, "playingStep"> & {
+  song: SongView;
+  section: number | null;
+};
+
+/** The step sequencer, lighting the sounding step as the playhead moves. */
+function LiveSequencer({ song, section, ...rest }: LiveSequencerProps) {
+  const step = usePlayheadStep();
+  return (
+    <AcidStepSequencer
+      {...rest}
+      playingStep={stepInPattern(song, section, step, rest.steps.length)}
+    />
   );
 }

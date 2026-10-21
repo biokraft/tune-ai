@@ -93,9 +93,13 @@ export function createStudioStore(client: StudioClient): StudioStore {
         set({ state, selectedSection: clampSelection(state, view.selectedSection) });
         break;
       }
-      case "playhead":
+      case "playhead": {
+        // 30 events a second, but the step moves only every ~100 ms: skip repeats outright.
+        const p = view.playhead;
+        if (p && p.step === e.step && p.bar === e.bar && p.beat === e.beat) break;
         set({ playhead: { step: e.step, bar: e.bar, beat: e.beat } });
         break;
+      }
       case "applied":
         // A client's own edit is already in the next state; only outside sources highlight.
         if (e.source !== "human") {
