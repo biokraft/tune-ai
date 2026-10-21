@@ -37,6 +37,34 @@ change is heard at the next step without stopping. A file with errors prints
 them and the previous version keeps playing. `--device null` runs without
 sound. Every command takes `--json`.
 
+## Mixing
+
+A track can carry an EQ, send to a shared dotted-eighth delay and a short
+reverb, and duck under the kick. The master is a soft clipper by default;
+`master = "limit"` switches to a true-peak limiter for loud masters.
+
+```toml
+[mix]
+master = "limit"
+params = { "delay.feedback" = 40, "reverb.size" = 30, "master.gain" = 6 }
+
+[tracks.acid]
+instrument = "acid303"
+params = { "send.delay" = -12, "send.reverb" = -18, "duck.depth" = 6 }
+fx = [{ type = "eq", params = { "eq.low_cut" = 85 } }]
+```
+
+```sh
+tune set songs/first-acid/song.toml tracks.acid.send.delay=-9 mix.master.gain=8
+tune set songs/first-acid/song.toml mix.master=limit mix.duck_source=kick
+tune render songs/first-acid/song.toml --bars 33..40 --out scratch/drop.wav
+```
+
+`tune render` reports `max_reduction_db`, how far the limiter pulled peaks
+down; keep it under about 9 dB. `tune params` lists every id and range. The
+limiter delays the output by 1.6 ms (not compensated), and a hot reload that
+changes the tempo or master mode cuts ringing delay and reverb tails.
+
 ## Open the studio
 
 The studio is the song on screen: play it, twist the 303's knobs, edit steps
