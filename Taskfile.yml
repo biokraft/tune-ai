@@ -22,7 +22,7 @@ tasks:
       - pnpm lint && pnpm format:check && pnpm -r typecheck && pnpm -r test
 
   ui:build:
-    desc: Build the desktop frontend (no-op until apps/desktop exists)
+    desc: Build the desktop frontend into apps/desktop/dist
     cmds:
       - test -f apps/desktop/package.json || exit 0; pnpm --filter @tune/desktop build
 
