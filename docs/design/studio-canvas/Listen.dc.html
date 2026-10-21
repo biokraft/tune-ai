@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Listening view</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#07040D}
+a{color:#3FDCEB}a:hover{color:#9FF3FA}
+.app{--bg:#0A0612;--ink:#EEE9F8;--ink2:#B5ADCB;--ink3:#9790AE;--line:rgba(255,255,255,.085);--line2:rgba(255,255,255,.16);--glass:rgba(23,16,39,.56);--glass2:rgba(10,6,18,.45);--blur:22px;--r:16px;--rs:9px;--row:46px;--blobop:.55;--kick:#FF5470;--clap:#FFB547;--hat:#5E8CFF;--ohat:#A3C0FF;--ride:#B79CFF;--acid:#A8F04C;--agent:#3FDCEB;--play:#F7F2FF;position:relative;width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.35}
+.app *{box-sizing:border-box}
+.look-b{--glass:rgba(16,12,27,.86);--glass2:rgba(6,4,12,.6);--blur:8px;--r:10px;--rs:6px;--row:40px;--blobop:.2;--line:rgba(255,255,255,.07)}
+.look-c{--glass:rgba(44,30,78,.32);--glass2:rgba(20,12,36,.35);--blur:40px;--r:22px;--rs:13px;--row:48px;--blobop:.9;--line:rgba(255,255,255,.15)}
+.blob{position:absolute;border-radius:50%;filter:blur(110px);opacity:var(--blobop);pointer-events:none}
+.glass{background:var(--glass);backdrop-filter:blur(var(--blur)) saturate(150%);-webkit-backdrop-filter:blur(var(--blur)) saturate(150%);border:1px solid var(--line);border-radius:var(--r);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 60px rgba(0,0,0,.35)}
+.look-c .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),inset 0 0 0 1px rgba(255,255,255,.04),0 30px 80px rgba(0,0,0,.45)}
+.look-b .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+.muted{color:var(--ink2)}
+.ib{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;min-width:32px;padding:0 9px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);font:600 12px Manrope,system-ui,sans-serif;cursor:pointer;white-space:nowrap}
+.ib:hover{background:rgba(255,255,255,.09)}
+.ib:focus-visible{outline:2px solid var(--play);outline-offset:2px}
+.ib.on{background:rgba(255,255,255,.13);border-color:var(--line2)}
+.ib svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ib.sm{height:26px;min-width:26px;padding:0 6px;font-size:11px}
+.ib.sm svg{width:14px;height:14px}
+.kbd{font:600 10px 'JetBrains Mono',monospace;color:var(--ink3);border:1px solid var(--line2);border-radius:4px;padding:0 4px;line-height:15px}
+.sep{width:1px;height:28px;background:var(--line);flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.transport{position:absolute;left:12px;top:12px;right:12px;height:56px;display:flex;align-items:center;gap:12px;padding:0 12px}
+.play{width:40px;height:40px;border-radius:50%;border:none;background:var(--play);color:#120A1F;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 0 0 4px rgba(247,242,255,.12),0 0 24px rgba(220,200,255,.55);cursor:pointer}
+.play svg{width:18px;height:18px;fill:currentColor}
+.readout{display:flex;flex-direction:column;gap:1px}
+.big{font-size:20px;font-weight:600;line-height:22px}
+.lufs{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);cursor:pointer;font-family:Manrope,system-ui,sans-serif}
+.lufs:hover{background:rgba(255,255,255,.09)}
+.lmeter{position:relative;width:96px;height:6px;border-radius:3px;background:rgba(255,255,255,.1)}
+
+.tl{position:absolute;left:12px;top:80px;width:1064px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .tl{width:1348px}
+.tlbar{height:46px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line)}
+.grid{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
+.row{display:flex;height:var(--row);flex:none;border-bottom:1px solid rgba(255,255,255,.045);padding-right:10px}
+.hdr{width:168px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 0 0;border-right:1px solid var(--line)}
+.hdr .cbar{width:3px;align-self:stretch;margin:6px 4px 6px 0;border-radius:2px}
+.hdr .nm{flex:1;min-width:0;font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ms{width:22px;height:20px;border-radius:5px;border:1px solid var(--line);background:transparent;color:var(--ink2);font:700 10px Manrope,sans-serif;cursor:pointer;padding:0}
+.ms:hover{color:var(--ink);background:rgba(255,255,255,.08)}
+.hmeter{width:4px;height:26px;border-radius:2px;background:rgba(255,255,255,.08);position:relative;overflow:hidden}
+.hmeter i{position:absolute;left:0;right:0;bottom:0;border-radius:2px}
+.lanes{flex:1;display:flex;position:relative;min-width:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.035) 0 1px,transparent 1px 100%);background-size:calc(100% / 18) 100%}
+.cell{min-width:0;padding:5px 1px;display:flex}
+.blk{position:relative;flex:1;min-width:0;border:1px solid;border-radius:7px;padding:4px 6px 4px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;cursor:pointer}
+.look-b .blk{border-radius:4px}
+.look-c .blk{border-radius:11px}
+.blk .bn{font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:22px}
+.glyph{display:flex;align-items:flex-end;gap:1.5px;height:14px}
+.glyph i{flex:1;border-radius:1px;min-width:1px}
+.badge{position:absolute;right:4px;top:3px;font:600 9.5px 'JetBrains Mono',monospace;padding:0 4px;border-radius:4px;background:rgba(0,0,0,.35);color:var(--ink2);line-height:14px}
+.ruler{height:24px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.ruler .lanes{background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.22) 0 1px,transparent 1px 100%);background-size:calc(100% / 36) 5px;background-repeat:repeat-x;background-position:0 100%}
+.rc{min-width:0;font:500 10px 'JetBrains Mono',monospace;color:var(--ink3);padding:4px 0 0 4px;border-left:1px solid rgba(255,255,255,.18)}
+.secrow{height:32px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.sec{min-width:0;display:flex;align-items:center;gap:6px;padding:0 4px 0 7px;margin:4px 1px;border-radius:7px;font-size:11px;font-weight:700;color:var(--ink2);white-space:nowrap;overflow:hidden;background:rgba(255,255,255,.035);cursor:pointer}
+.sec.on{background:rgba(255,255,255,.14);color:var(--ink);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),0 0 18px rgba(220,200,255,.18)}
+.livedot{width:6px;height:6px;border-radius:50%;background:var(--play);box-shadow:0 0 8px var(--play);flex:none}
+.ov{position:absolute;left:168px;right:10px;top:0;bottom:0;pointer-events:none}
+.ph{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--play);box-shadow:0 0 8px rgba(247,242,255,.9),0 0 22px rgba(200,170,255,.55)}
+.ph::before{content:"";position:absolute;top:0;left:-5px;border:6px solid transparent;border-top:8px solid var(--play)}
+.loop{position:absolute;top:0;bottom:0;background:rgba(255,255,255,.035);border-left:1px solid rgba(255,255,255,.4);border-right:1px solid rgba(255,255,255,.4)}
+.loop::before{content:"";position:absolute;left:0;right:0;top:0;height:5px;background:rgba(255,255,255,.55);border-radius:0 0 2px 2px}
+.lane{height:72px}
+.lane .hdr{padding-left:15px;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px}
+.lane svg{position:absolute;inset:6px 0;width:100%;height:calc(100% - 12px);overflow:visible}
+.bp{position:absolute;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#0A0612;border:1.5px solid var(--acid)}
+.bp.ag{border-color:var(--agent);box-shadow:0 0 8px var(--agent)}
+.drop{flex:1;display:flex;padding:10px 10px 10px 178px}
+.dropzone{flex:1;border:1.5px dashed rgba(255,255,255,.12);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--ink3);font-size:12.5px}
+.help{height:36px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-top:1px solid var(--line);font-size:12px;color:var(--ink2)}
+.help b{color:var(--ink);font-weight:700}
+.agent-soft{box-shadow:inset 3px 0 0 var(--agent)}
+
+.chat{position:absolute;left:1088px;top:80px;width:340px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .chat{display:none}
+.rail{display:none;position:absolute;left:1372px;top:80px;width:56px;height:808px;flex-direction:column;align-items:center;gap:6px;padding:10px 0}
+.chat-rail .rail{display:flex}
+.rail .ib{width:40px;height:40px;padding:0;position:relative}
+.pip{position:absolute;top:4px;right:4px;min-width:15px;height:15px;border-radius:8px;background:var(--agent);color:#04161A;font:700 9.5px Manrope,sans-serif;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.chead{height:50px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px 0 14px;border-bottom:1px solid var(--line)}
+.tab{height:28px;padding:0 9px;border-radius:7px;border:none;background:transparent;color:var(--ink2);font:700 12px Manrope,sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.tab.on{background:rgba(255,255,255,.1);color:var(--ink)}
+.tab .n{min-width:16px;height:16px;border-radius:8px;background:var(--agent);color:#04161A;font-size:9.5px;display:inline-flex;align-items:center;justify-content:center}
+.msgs{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:12px;padding:14px}
+.me{align-self:flex-end;max-width:86%;background:rgba(255,255,255,.09);border:1px solid var(--line);border-radius:14px 14px 4px 14px;padding:8px 11px}
+.who{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--agent);margin-bottom:4px}
+.card{border-radius:12px;background:var(--glass2);border:1px solid rgba(63,220,235,.3);overflow:hidden}
+.card-h{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:11.5px;font-weight:700}
+.cl{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 10px;font-size:12px;cursor:pointer}
+.cl:hover{background:rgba(255,255,255,.05)}
+.cl .t{flex:1;min-width:0}
+.cl .v{font-size:10.5px;color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.card-f{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--line)}
+.agentbtn{border-color:rgba(63,220,235,.45);color:#BDF6FB}
+.xb{width:26px;height:26px;border-radius:6px;border:none;background:transparent;color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.xb:hover{background:rgba(255,255,255,.08);color:var(--ink)}
+.xb svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cfoot{flex:none;padding:10px 12px 12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:9px}
+.sw{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;cursor:pointer}
+.sw input{position:absolute;opacity:0;width:1px;height:1px}
+.sw .trk{width:30px;height:17px;border-radius:9px;background:rgba(255,255,255,.14);position:relative;flex:none}
+.sw .trk::after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:var(--ink2)}
+.sw input:checked + .trk{background:var(--agent)}
+.sw input:checked + .trk::after{left:15px;background:#04161A}
+.sw input:focus-visible + .trk{outline:2px solid var(--play);outline-offset:2px}
+.composer{display:flex;align-items:flex-end;gap:8px;border-radius:12px;border:1px solid var(--line2);background:rgba(0,0,0,.25);padding:8px 8px 8px 12px}
+.composer textarea{flex:1;resize:none;border:none;background:transparent;color:var(--ink);font:500 13px Manrope,sans-serif;height:38px;outline:none}
+.composer textarea::placeholder{color:var(--ink3)}
+.send{width:32px;height:32px;border-radius:9px;border:none;background:var(--agent);color:#04161A;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.send svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+.lufs.open{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.4);box-shadow:0 0 0 3px rgba(247,242,255,.1)}
+.lv{position:absolute;left:12px;top:80px;width:1064px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.lbody{flex:1;min-height:0;display:flex;flex-direction:column;gap:12px;padding:12px}
+.lrow{display:flex;gap:12px;min-height:0}
+.pnl{border-radius:var(--rs);background:rgba(255,255,255,.04);border:1px solid var(--line);padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.ph2{display:flex;align-items:center;gap:8px}
+.ph2 b{font-size:12.5px;font-weight:800}
+.stat{font:600 26px 'JetBrains Mono',monospace;line-height:28px}
+.unit{font-size:11px;color:var(--ink2);font-weight:700;margin-left:4px;font-family:Manrope,sans-serif}
+.ok{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#C9F7A0}
+.ok svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.tbar{position:relative;height:8px;border-radius:4px;background:rgba(255,255,255,.08)}
+.tband{position:absolute;top:-3px;bottom:-3px;border-radius:3px;background:rgba(168,240,76,.22);box-shadow:inset 0 0 0 1px rgba(168,240,76,.6)}
+.tmark{position:absolute;top:-6px;bottom:-6px;width:3px;margin-left:-1.5px;border-radius:2px;background:var(--play);box-shadow:0 0 8px rgba(247,242,255,.8)}
+.bands{display:flex;gap:10px;align-items:flex-end;height:58px}
+.bnd{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;height:100%;justify-content:flex-end}
+.bnd i{width:100%;border-radius:4px 4px 1px 1px;background:linear-gradient(0deg,rgba(238,233,248,.25),rgba(238,233,248,.8))}
+.spec{position:relative;flex:1;min-height:0;border-radius:8px;overflow:hidden;background:#07030C;display:flex;margin-left:34px}
+.scol{position:relative;min-width:0;border-left:1px solid rgba(255,255,255,.28)}
+.scol:first-child{border-left:none}
+.scol span{position:absolute;left:0;right:0}
+.scol em{position:absolute;left:4px;top:3px;font:700 9.5px Manrope,sans-serif;font-style:normal;color:rgba(255,255,255,.85);white-space:nowrap;text-shadow:0 1px 3px #000;z-index:2}
+.faxis{position:absolute;left:0;top:0;bottom:0;width:30px;font:500 9px 'JetBrains Mono',monospace;color:var(--ink3);text-align:right}
+.faxis span{position:absolute;right:0;transform:translateY(-50%)}
+.erow{display:flex;align-items:center;gap:8px;font-size:11.5px;height:19px}
+.erow .en{width:76px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink2);font-weight:600}
+.erow .eb{flex:1;height:9px;border-radius:3px;background:rgba(255,255,255,.06);position:relative}
+.erow .eb i{position:absolute;left:0;top:0;bottom:0;border-radius:3px}
+.erow .ev{width:44px;flex:none;text-align:right;font-size:10.5px}
+.erow .ed{width:40px;flex:none;text-align:right;font-size:10px;color:var(--ink2)}
+.vline{display:flex;gap:9px;align-items:flex-start;font-size:12px;line-height:1.4}
+.vline svg{width:15px;height:15px;flex:none;margin-top:1px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.ref{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;border:1px solid var(--line);font-size:11.5px;background:transparent;color:var(--ink);font-family:Manrope,sans-serif;cursor:pointer;text-align:left}
+.ref.on{border-color:var(--line2);background:rgba(255,255,255,.08)}
+.src{font:500 9.5px 'JetBrains Mono',monospace;color:var(--ink2);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.seg{display:flex;padding:2px;border-radius:8px;background:rgba(0,0,0,.3);border:1px solid var(--line)}
+.seg button{height:26px;border:none;border-radius:6px;background:transparent;color:var(--ink2);font:700 11.5px Manrope,sans-serif;cursor:pointer;padding:0 10px}
+.seg button.on{background:rgba(255,255,255,.14);color:var(--ink)}
+</style>
+</helmet>
+<div class="app look-{{look}}">
+  <div class="blob" style="left: -160px; top: 420px; width: 620px; height: 520px; background: #B4237E"></div>
+  <div class="blob" style="left: 520px; top: -220px; width: 720px; height: 460px; background: #3A2BC2"></div>
+  <div class="blob" style="left: 1080px; top: 560px; width: 560px; height: 460px; background: #5B1E9E"></div>
+
+  <header class="transport glass">
+    <div style="display: flex; align-items: center; gap: 8px; padding-right: 4px">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" style="fill: none; stroke: #A8F04C; stroke-width: 2.2; stroke-linecap: round"><path d="M3 12h2l2-6 3 12 3-9 2 5 2-2h4"></path></svg>
+      <div style="display: flex; flex-direction: column">
+        <span style="font-weight: 800; font-size: 13px; letter-spacing: .02em">first-acid</span>
+        <span class="muted" style="font-size: 10.5px">saved · 145 BPM · 144 bars</span>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <button class="ib on" aria-label="Loop on (L)" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M17 2l3 3-3 3"></path><path d="M4 11V9a4 4 0 014-4h12"></path><path d="M7 22l-3-3 3-3"></path><path d="M20 13v2a4 4 0 01-4 4H4"></path></svg></button>
+    <button class="ib" aria-label="Stop"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+    <button class="play" aria-label="Pause (space)"><svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+    <div class="readout" style="margin-left: 4px; min-width: 76px">
+      <span class="lbl">Bar · beat</span>
+      <span class="mono big">88.3</span>
+    </div>
+    <div class="readout" style="min-width: 64px">
+      <span class="lbl">Time</span>
+      <span class="mono" style="font-size: 14px; color: var(--ink2); line-height: 22px">2:24.8</span>
+    </div>
+    <div class="readout" style="min-width: 54px">
+      <span class="lbl">BPM</span>
+      <span class="mono big">145</span>
+    </div>
+    <div class="sep"></div>
+    <button class="ib" aria-label="Loop range bars 81 to 96" style="height: 40px; gap: 8px">
+      <span class="lbl" style="color: var(--ink2)">Loop</span>
+      <span class="mono" style="font-size: 13px">81 – 96</span>
+      <span style="font-size: 11px; color: var(--ink2)">drop</span>
+    </button>
+    <div style="flex: 1"></div>
+    <button class="ib" aria-label="Browser (B)"><svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>Browser <span class="kbd">B</span></button>
+    <button class="ib" aria-label="Mixer (M)"><svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"></path></svg>Mixer <span class="kbd">M</span></button>
+    <div class="sep"></div>
+    <button class="lufs open" aria-pressed="true" aria-label="Loudness minus 7.6 LUFS, true peak minus 1.6 dBTP. Listening view open">
+      <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px">
+        <div style="display: flex; align-items: baseline; gap: 5px"><span class="mono" style="font-size: 17px; font-weight: 600">−7.6</span><span class="lbl">LUFS</span></div>
+        <div class="lmeter">
+          <div style="position: absolute; left: 60%; width: 10%; top: -2px; bottom: -2px; border-radius: 2px; background: rgba(168,240,76,.28); box-shadow: inset 0 0 0 1px rgba(168,240,76,.55)"></div>
+          <div style="position: absolute; left: 0; width: 62%; top: 0; bottom: 0; border-radius: 3px; background: linear-gradient(90deg, rgba(247,242,255,.25), rgba(247,242,255,.85))"></div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 2px">
+        <span class="lbl">True peak</span>
+        <span class="mono" style="font-size: 12px">−1.6 dB</span>
+      </div>
+    </button>
+    <button class="ib" aria-label="Reset to base view"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18M15 9v12"></path></svg></button>
+  </header>
+
+  <section class="lv glass" aria-label="Listening">
+    <div class="tlbar">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round"><path d="M2 12h2M6 8v8M10 4v16M14 7v10M18 10v4M22 12h0"></path></svg>
+      <span style="font-weight: 800; font-size: 13px">Listening</span>
+      <div class="seg" role="group" aria-label="What to analyse" style="margin-left: 8px">
+        <button class="on" aria-pressed="true">Whole song</button>
+        <button>Loop 81–96</button>
+        <button>Pick bars…</button>
+      </div>
+      <span class="muted" style="font-size: 11.5px; margin-left: 4px">analysed 12 s ago</span>
+      <div style="flex: 1"></div>
+      <button class="ib sm"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 11-2.3-5.7M20 4v5h-5"></path></svg>Re-analyse</button>
+      <button class="ib sm"><svg viewBox="0 0 24 24" style="fill: #3FDCEB; stroke: none"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>Ask the agent about this</button>
+      <button class="ib sm" aria-label="Back to arrangement (Esc)">Arrangement <span class="kbd">Esc</span></button>
+    </div>
+    <div class="lbody">
+      <div class="lrow" style="height: 118px; flex: none">
+        <div class="pnl" style="width: 250px">
+          <div class="ph2"><span class="lbl">Integrated</span><div style="flex: 1"></div><span class="ok"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"></path></svg>in target</span></div>
+          <div><span class="stat">−7.6</span><span class="unit">LUFS</span></div>
+          <div class="tbar" role="img" aria-label="Minus 7.6 LUFS inside the minus 8 to minus 6 target">
+            <span class="tband" style="left: 60%; width: 10%"></span>
+            <span class="tmark" style="left: 62%"></span>
+          </div>
+          <div style="display: flex; justify-content: space-between" class="mono muted"><span style="font-size: 9.5px">−20</span><span style="font-size: 9.5px">acid target −8 … −6</span><span style="font-size: 9.5px">0</span></div>
+        </div>
+        <div class="pnl" style="width: 210px">
+          <div class="ph2"><span class="lbl">True peak</span><div style="flex: 1"></div><span class="ok"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"></path></svg>safe</span></div>
+          <div><span class="stat">−1.6</span><span class="unit">dBTP</span></div>
+          <div class="tbar" role="img" aria-label="Minus 1.6 dBTP, below the minus 1 limit">
+            <span style="position: absolute; left: 83.3%; top: -5px; bottom: -5px; width: 2px; background: #FF5470"></span>
+            <span class="tmark" style="left: 80.7%"></span>
+          </div>
+          <span class="muted" style="font-size: 10.5px">stay at or under −1 so encoding does not distort</span>
+        </div>
+        <div class="pnl" style="width: 150px">
+          <span class="lbl">Range (LRA)</span>
+          <div><span class="stat">5.2</span><span class="unit">LU</span></div>
+          <span class="muted" style="font-size: 10.5px">quiet intro to loud drop</span>
+        </div>
+        <div class="pnl" style="flex: 1">
+          <div class="ph2"><span class="lbl">Band balance</span><span class="muted" style="font-size: 10.5px">dB vs the whole mix</span></div>
+          <div class="bands">
+            <sc-for list="{{bands}}" as="b" hint-placeholder-count="6">
+              <div class="bnd">
+                <span class="mono" style="font-size: 9.5px">{{b.db}}</span>
+                <i style="height: {{b.h}}%"></i>
+                <span class="lbl" style="font-size: 8.5px; letter-spacing: .06em">{{b.name}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+
+      <div class="lrow" style="height: 252px; flex: none">
+        <div class="pnl" style="flex: 1">
+          <div class="ph2"><b>Spectrogram</b><span class="muted" style="font-size: 11px">whole song · bright = loud · 30 Hz – 16 kHz</span><div style="flex: 1"></div><button class="ib sm">Open picture</button></div>
+          <div style="position: relative; flex: 1; display: flex; min-height: 0">
+            <div class="faxis" aria-hidden="true"><span style="top: 4%">16k</span><span style="top: 30%">2k</span><span style="top: 58%">250</span><span style="top: 82%">60</span></div>
+            <div class="spec" role="img" aria-label="Spectrogram of the whole song: the drop and drop peak are the brightest, the breakdown has no kick">
+              <sc-for list="{{song}}" as="c" hint-placeholder-count="8">
+                <div class="scol" style="flex: {{c.bars}} 1 0">
+                  <em>{{c.name}}</em>
+                  <span style="box-sizing: border-box; {{c.hi}}"></span>
+                  <span style="box-sizing: border-box; {{c.clap}}"></span>
+                  <span style="box-sizing: border-box; {{c.mid}}"></span>
+                  <span style="box-sizing: border-box; {{c.low}}"></span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div class="mono muted" style="display: flex; justify-content: space-between; font-size: 9.5px; margin-left: 34px"><span>bar 1</span><span>33</span><span>65</span><span>81</span><span>97</span><span>129</span><span>144</span></div>
+        </div>
+        <div class="pnl" style="width: 380px; flex: none">
+          <div class="ph2"><b>Energy by section</b><div style="flex: 1"></div><span class="muted" style="font-size: 10.5px">LUFS · Δ vs song</span></div>
+          <sc-for list="{{energy}}" as="e" hint-placeholder-count="8">
+            <div class="erow">
+              <span class="en">{{e.name}}</span>
+              <span class="eb"><i style="box-sizing: border-box; {{e.bar}}"></i></span>
+              <span class="mono ev">{{e.lufs}}</span>
+              <span class="mono ed">{{e.delta}}</span>
+            </div>
+          </sc-for>
+          <div class="vline" style="margin-top: 4px; color: #C9F7A0"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"></path></svg><span>The drop is 3.4 LU louder than the breakdown. Every section changes something.</span></div>
+        </div>
+      </div>
+
+      <div class="lrow" style="flex: 1">
+        <div class="pnl" style="flex: 1">
+          <div class="ph2">
+            <b>Our drop vs the reference</b>
+            <span class="muted" style="font-size: 11px">bars 81–96 · same frequency axis and colour scale</span>
+          </div>
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 6px; min-height: 0">
+            <div style="display: flex; align-items: center; gap: 8px"><span class="lbl" style="width: 120px">Ours · drop</span><span class="mono muted" style="font-size: 9.5px">−7.4 LUFS</span></div>
+            <div style="position: relative; flex: 1; display: flex; min-height: 0">
+              <div class="faxis" aria-hidden="true"><span style="top: 6%">16k</span><span style="top: 58%">250</span><span style="top: 86%">60</span></div>
+              <div class="spec" role="img" aria-label="Our drop: strong kick and acid, a gap in the low mids">
+                <div class="scol" style="flex: 1">
+                  <span style="box-sizing: border-box; {{cmp.ours.hi}}"></span>
+                  <span style="box-sizing: border-box; {{cmp.ours.mid}}"></span>
+                  <span style="box-sizing: border-box; {{cmp.ours.lowmid}}"></span>
+                  <span style="box-sizing: border-box; {{cmp.ours.low}}"></span>
+                </div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px"><span class="lbl" style="width: 120px">[reference A]</span><span class="mono muted" style="font-size: 9.5px">2:08–2:35 · −7.2 LUFS</span></div>
+            <div style="position: relative; flex: 1; display: flex; min-height: 0">
+              <div class="faxis" aria-hidden="true"><span style="top: 6%">16k</span><span style="top: 58%">250</span><span style="top: 86%">60</span></div>
+              <div class="spec" role="img" aria-label="Reference drop: fuller low mids and a brighter top">
+                <div class="scol" style="flex: 1">
+                  <span style="box-sizing: border-box; {{cmp.ref.hi}}"></span>
+                  <span style="box-sizing: border-box; {{cmp.ref.mid}}"></span>
+                  <span style="box-sizing: border-box; {{cmp.ref.lowmid}}"></span>
+                  <span style="box-sizing: border-box; {{cmp.ref.low}}"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pnl" style="width: 380px; flex: none; gap: 9px">
+          <div class="ph2"><b>What differs</b></div>
+          <sc-for list="{{verdicts}}" as="v" hint-placeholder-count="4">
+            <div class="vline"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="{{v.icon}}"></path></svg><span>{{v.text}}</span></div>
+          </sc-for>
+          <div style="height: 1px; background: var(--line); margin: 2px 0"></div>
+          <div class="ph2"><span class="lbl">Reference</span><div style="flex: 1"></div><button class="ib sm"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>Add</button></div>
+          <button class="ref on" aria-pressed="true"><span class="dot" style="background: #EEE9F8"></span><span style="flex: 1; font-weight: 700">[reference A]</span><span class="src">refs/</span></button>
+          <button class="ref"><span class="dot" style="background: rgba(238,233,248,.3)"></span><span style="flex: 1">[reference B]</span><span class="src">tune.local.toml</span></button>
+          <span class="muted" style="font-size: 10.5px; display: flex; gap: 6px; align-items: center"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 2"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 018 0v3"></path></svg>Your files, local only, never uploaded.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="chat glass" aria-label="Agent">
+    <div class="chead">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="fill: #3FDCEB"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>
+      <button class="tab on" aria-pressed="true">Chat</button>
+      <button class="tab">Approvals</button>
+      <button class="tab">Activity</button>
+      <div style="flex: 1"></div>
+      <button class="xb" aria-label="Sessions, memory and skills"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg></button>
+      <button class="xb" aria-label="Collapse agent panel (⌘ .)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M15 3v18M8 9l3 3-3 3"></path></svg></button>
+    </div>
+    <div class="msgs">
+      <div class="me">how does my drop compare to the reference?</div>
+      <div>
+        <div class="who"><svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true" style="fill: #3FDCEB"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>tune-ai</div>
+        <div>Loudness is right where it should be. The difference you hear is shape, not level: between the kick and the acid there is a gap around 250–500 Hz, so the drop feels a bit hollow next to the reference.</div>
+        <div style="margin-top: 8px">Two ways to fill it: lift the acid's EQ mid gain around 350 Hz, or open its cutoff a little further in the drop. Want me to try one?</div>
+        <div style="display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap">
+          <button class="ib sm">Try the EQ</button>
+          <button class="ib sm">Try the cutoff</button>
+        </div>
+      </div>
+    </div>
+    <div class="cfoot">
+      <label class="sw">
+        <input type="checkbox" role="switch">
+        <span class="trk"></span>
+        Learning mode
+        <span class="muted" style="font-weight: 500; font-size: 11.5px">· one step at a time</span>
+      </label>
+      <div class="composer">
+        <label for="ask" class="sr">Tell tune-ai what to do</label>
+        <textarea id="ask" placeholder="Tell tune-ai what to do…"></textarea>
+        <button class="send" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+      </div>
+    </div>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["a","b","c"],"default":"a"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const look = this.props.look ?? 'a';
+    const B = [['sub', -9.8], ['low', -6.1], ['low mid', -10.9], ['mid', -11.2], ['high', -15.6], ['air', -24.3]];
+    const bands = B.map(([name, db]) => ({ name, db: `${db}`.replace('-', '−'), h: Math.max(6, (30 + db) / 30 * 100).toFixed(0) }));
+
+    const kick = (a) => `left: 0; right: 0; bottom: 0; height: 26%; background: linear-gradient(0deg, rgba(255,214,106,${a}) 0%, rgba(255,110,60,${(a * 0.9).toFixed(2)}) 30%, rgba(176,36,110,${(a * 0.6).toFixed(2)}) 70%, transparent)`;
+    const acid = (c) => `left: 0; right: 0; bottom: 20%; height: ${(8 + c * 46).toFixed(0)}%; background: repeating-linear-gradient(0deg, rgba(255,255,255,.07) 0 1px, transparent 1px 6px), linear-gradient(0deg, rgba(255,140,70,${(0.25 + c * 0.6).toFixed(2)}), rgba(214,60,160,${(0.3 + c * 0.4).toFixed(2)}) 45%, rgba(90,30,140,.25) 85%, transparent)`;
+    const hats = (a) => `left: 0; right: 0; top: 4%; height: 36%; background: repeating-linear-gradient(90deg, rgba(240,200,255,${a}) 0 1px, transparent 1px 3px), linear-gradient(0deg, rgba(160,80,220,${(a * 0.6).toFixed(2)}), rgba(60,20,90,${(a * 0.3).toFixed(2)}))`;
+    const clap = (a) => `left: 0; right: 0; top: 28%; height: 30%; background: repeating-linear-gradient(90deg, rgba(255,200,130,${a}) 0 2px, transparent 2px 11px)`;
+    const S = [
+      ['intro', 16, 0.85, 0, 0.45, 0], ['intro_acid', 16, 0.85, 0.07, 0.45, 0], ['build', 32, 0.9, 0.33, 0.6, 0.35],
+      ['breakdown', 16, 0, 0.3, 0.45, 0], ['drop', 16, 1, 0.72, 0.75, 0.45], ['drop_peak', 16, 1, 0.9, 0.8, 0.45],
+      ['outro', 16, 0.9, 0.4, 0.6, 0.35], ['outro_drums', 16, 0.85, 0, 0.45, 0]
+    ];
+    const song = S.map(([name, bars, k, c, h, cl]) => ({
+      name, bars,
+      low: k ? kick(k) : 'left: 0; right: 0; bottom: 0; height: 20%; background: linear-gradient(0deg, rgba(90,30,120,.35), transparent)',
+      mid: c ? acid(c) : 'display: none',
+      hi: hats(h),
+      clap: cl ? clap(cl) : 'display: none'
+    }));
+
+    const kickHits = (a) => `left: 0; right: 0; bottom: 0; height: 24%; background: repeating-linear-gradient(90deg, rgba(255,220,120,${a}) 0 0.45%, rgba(176,36,110,.45) 0.45% 1.5625%), linear-gradient(0deg, rgba(255,110,60,.5), transparent)`;
+    const hatHits = (a) => `left: 0; right: 0; top: 3%; height: 38%; background: repeating-linear-gradient(90deg, rgba(245,210,255,${a}) 0 0.2%, transparent 0.2% 0.78%), linear-gradient(0deg, rgba(150,70,210,${(a * 0.5).toFixed(2)}), rgba(60,20,90,.2))`;
+    const cmp = {
+      ours: {
+        hi: hatHits(0.55),
+        mid: 'left: 0; right: 0; bottom: 38%; height: 26%; background: repeating-linear-gradient(90deg, rgba(255,150,80,.55) 0 0.35%, rgba(200,60,150,.35) 0.35% 0.78%), linear-gradient(0deg, rgba(255,120,70,.55), rgba(140,40,150,.2))',
+        lowmid: 'left: 0; right: 0; bottom: 24%; height: 14%; background: linear-gradient(0deg, rgba(70,20,90,.35), rgba(40,10,60,.2))',
+        low: kickHits(1)
+      },
+      ref: {
+        hi: hatHits(0.8),
+        mid: 'left: 0; right: 0; bottom: 38%; height: 30%; background: repeating-linear-gradient(90deg, rgba(255,170,90,.6) 0 0.35%, rgba(210,70,150,.4) 0.35% 0.78%), linear-gradient(0deg, rgba(255,130,70,.6), rgba(150,50,160,.25))',
+        lowmid: 'left: 0; right: 0; bottom: 24%; height: 14%; background: linear-gradient(0deg, rgba(255,120,60,.6), rgba(210,60,140,.45))',
+        low: kickHits(0.95)
+      }
+    };
+
+    const SONG = -7.6;
+    const E = [['intro', -11.0], ['intro_acid', -10.2], ['build', -9.2], ['breakdown', -10.8], ['drop', -7.4], ['drop_peak', -7.1], ['outro', -8.9], ['outro_drums', -10.6]];
+    const energy = E.map(([name, l]) => {
+      const d = l - SONG;
+      const hot = l > -8;
+      return {
+        name,
+        lufs: `${l.toFixed(1)}`.replace('-', '−'),
+        delta: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}`,
+        bar: `width: ${((l + 14) / 8 * 100).toFixed(0)}%; background: ${hot ? 'linear-gradient(90deg, rgba(247,242,255,.4), #F7F2FF)' : 'linear-gradient(90deg, rgba(238,233,248,.15), rgba(238,233,248,.5))'}${hot ? '; box-shadow: 0 0 10px rgba(247,242,255,.4)' : ''}`
+      };
+    });
+    const DOWN = 'M12 5v14M6 13l6 6 6-6';
+    const UP = 'M12 19V5M6 11l6-6 6 6';
+    const OK = 'M20 6L9 17l-5-5';
+    const verdicts = [
+      { icon: DOWN, text: 'The drop is hollow in the low mids: 250–500 Hz sits 3.1 dB under the reference.' },
+      { icon: DOWN, text: 'Top end is 2 dB darker than the reference.' },
+      { icon: OK, text: 'Loudness matches: −7.4 vs −7.2 LUFS.' },
+      { icon: OK, text: 'Low end is close: kick against bass within 1 dB.' }
+    ];
+    return { look, bands, song, cmp, energy, verdicts };
+  }
+}
+</script>
+</body>
+</html>

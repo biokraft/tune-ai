@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent panel A · top tabs</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#07040D}
+a{color:#3FDCEB}a:hover{color:#9FF3FA}
+.app{--bg:#0A0612;--ink:#EEE9F8;--ink2:#B5ADCB;--ink3:#9790AE;--line:rgba(255,255,255,.085);--line2:rgba(255,255,255,.16);--glass:rgba(23,16,39,.56);--glass2:rgba(10,6,18,.45);--blur:22px;--r:16px;--rs:9px;--row:46px;--blobop:.55;--kick:#FF5470;--clap:#FFB547;--hat:#5E8CFF;--ohat:#A3C0FF;--ride:#B79CFF;--acid:#A8F04C;--agent:#3FDCEB;--play:#F7F2FF;position:relative;width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.35}
+.app *{box-sizing:border-box}
+.look-b{--glass:rgba(16,12,27,.86);--glass2:rgba(6,4,12,.6);--blur:8px;--r:10px;--rs:6px;--row:40px;--blobop:.2;--line:rgba(255,255,255,.07)}
+.look-c{--glass:rgba(44,30,78,.32);--glass2:rgba(20,12,36,.35);--blur:40px;--r:22px;--rs:13px;--row:48px;--blobop:.9;--line:rgba(255,255,255,.15)}
+.blob{position:absolute;border-radius:50%;filter:blur(110px);opacity:var(--blobop);pointer-events:none}
+.glass{background:var(--glass);backdrop-filter:blur(var(--blur)) saturate(150%);-webkit-backdrop-filter:blur(var(--blur)) saturate(150%);border:1px solid var(--line);border-radius:var(--r);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 60px rgba(0,0,0,.35)}
+.look-c .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),inset 0 0 0 1px rgba(255,255,255,.04),0 30px 80px rgba(0,0,0,.45)}
+.look-b .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+.muted{color:var(--ink2)}
+.ib{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;min-width:32px;padding:0 9px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);font:600 12px Manrope,system-ui,sans-serif;cursor:pointer;white-space:nowrap}
+.ib:hover{background:rgba(255,255,255,.09)}
+.ib:focus-visible{outline:2px solid var(--play);outline-offset:2px}
+.ib.on{background:rgba(255,255,255,.13);border-color:var(--line2)}
+.ib svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ib.sm{height:26px;min-width:26px;padding:0 6px;font-size:11px}
+.ib.sm svg{width:14px;height:14px}
+.kbd{font:600 10px 'JetBrains Mono',monospace;color:var(--ink3);border:1px solid var(--line2);border-radius:4px;padding:0 4px;line-height:15px}
+.sep{width:1px;height:28px;background:var(--line);flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.transport{position:absolute;left:12px;top:12px;right:12px;height:56px;display:flex;align-items:center;gap:12px;padding:0 12px}
+.play{width:40px;height:40px;border-radius:50%;border:none;background:var(--play);color:#120A1F;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 0 0 4px rgba(247,242,255,.12),0 0 24px rgba(220,200,255,.55);cursor:pointer}
+.play svg{width:18px;height:18px;fill:currentColor}
+.readout{display:flex;flex-direction:column;gap:1px}
+.big{font-size:20px;font-weight:600;line-height:22px}
+.lufs{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);cursor:pointer;font-family:Manrope,system-ui,sans-serif}
+.lufs:hover{background:rgba(255,255,255,.09)}
+.lmeter{position:relative;width:96px;height:6px;border-radius:3px;background:rgba(255,255,255,.1)}
+
+.tl{position:absolute;left:12px;top:80px;width:1064px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .tl{width:1348px}
+.tlbar{height:46px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line)}
+.grid{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
+.row{display:flex;height:var(--row);flex:none;border-bottom:1px solid rgba(255,255,255,.045);padding-right:10px}
+.hdr{width:168px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 0 0;border-right:1px solid var(--line)}
+.hdr .cbar{width:3px;align-self:stretch;margin:6px 4px 6px 0;border-radius:2px}
+.hdr .nm{flex:1;min-width:0;font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ms{width:22px;height:20px;border-radius:5px;border:1px solid var(--line);background:transparent;color:var(--ink2);font:700 10px Manrope,sans-serif;cursor:pointer;padding:0}
+.ms:hover{color:var(--ink);background:rgba(255,255,255,.08)}
+.hmeter{width:4px;height:26px;border-radius:2px;background:rgba(255,255,255,.08);position:relative;overflow:hidden}
+.hmeter i{position:absolute;left:0;right:0;bottom:0;border-radius:2px}
+.lanes{flex:1;display:flex;position:relative;min-width:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.035) 0 1px,transparent 1px 100%);background-size:calc(100% / 18) 100%}
+.cell{min-width:0;padding:5px 1px;display:flex}
+.blk{position:relative;flex:1;min-width:0;border:1px solid;border-radius:7px;padding:4px 6px 4px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;cursor:pointer}
+.look-b .blk{border-radius:4px}
+.look-c .blk{border-radius:11px}
+.blk .bn{font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:22px}
+.glyph{display:flex;align-items:flex-end;gap:1.5px;height:14px}
+.glyph i{flex:1;border-radius:1px;min-width:1px}
+.badge{position:absolute;right:4px;top:3px;font:600 9.5px 'JetBrains Mono',monospace;padding:0 4px;border-radius:4px;background:rgba(0,0,0,.35);color:var(--ink2);line-height:14px}
+.ruler{height:24px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.ruler .lanes{background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.22) 0 1px,transparent 1px 100%);background-size:calc(100% / 36) 5px;background-repeat:repeat-x;background-position:0 100%}
+.rc{min-width:0;font:500 10px 'JetBrains Mono',monospace;color:var(--ink3);padding:4px 0 0 4px;border-left:1px solid rgba(255,255,255,.18)}
+.secrow{height:32px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.sec{min-width:0;display:flex;align-items:center;gap:6px;padding:0 4px 0 7px;margin:4px 1px;border-radius:7px;font-size:11px;font-weight:700;color:var(--ink2);white-space:nowrap;overflow:hidden;background:rgba(255,255,255,.035);cursor:pointer}
+.sec.on{background:rgba(255,255,255,.14);color:var(--ink);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),0 0 18px rgba(220,200,255,.18)}
+.livedot{width:6px;height:6px;border-radius:50%;background:var(--play);box-shadow:0 0 8px var(--play);flex:none}
+.ov{position:absolute;left:168px;right:10px;top:0;bottom:0;pointer-events:none}
+.ph{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--play);box-shadow:0 0 8px rgba(247,242,255,.9),0 0 22px rgba(200,170,255,.55)}
+.ph::before{content:"";position:absolute;top:0;left:-5px;border:6px solid transparent;border-top:8px solid var(--play)}
+.loop{position:absolute;top:0;bottom:0;background:rgba(255,255,255,.035);border-left:1px solid rgba(255,255,255,.4);border-right:1px solid rgba(255,255,255,.4)}
+.loop::before{content:"";position:absolute;left:0;right:0;top:0;height:5px;background:rgba(255,255,255,.55);border-radius:0 0 2px 2px}
+.lane{height:72px}
+.lane .hdr{padding-left:15px;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px}
+.lane svg{position:absolute;inset:6px 0;width:100%;height:calc(100% - 12px);overflow:visible}
+.bp{position:absolute;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#0A0612;border:1.5px solid var(--acid)}
+.bp.ag{border-color:var(--agent);box-shadow:0 0 8px var(--agent)}
+.drop{flex:1;display:flex;padding:10px 10px 10px 178px}
+.dropzone{flex:1;border:1.5px dashed rgba(255,255,255,.12);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--ink3);font-size:12.5px}
+.help{height:36px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-top:1px solid var(--line);font-size:12px;color:var(--ink2)}
+.help b{color:var(--ink);font-weight:700}
+.agent-soft{box-shadow:inset 3px 0 0 var(--agent)}
+
+.chat{position:absolute;left:1088px;top:80px;width:340px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .chat{display:none}
+.rail{display:none;position:absolute;left:1372px;top:80px;width:56px;height:808px;flex-direction:column;align-items:center;gap:6px;padding:10px 0}
+.chat-rail .rail{display:flex}
+.rail .ib{width:40px;height:40px;padding:0;position:relative}
+.pip{position:absolute;top:4px;right:4px;min-width:15px;height:15px;border-radius:8px;background:var(--agent);color:#04161A;font:700 9.5px Manrope,sans-serif;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.chead{height:50px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px 0 14px;border-bottom:1px solid var(--line)}
+.tab{height:28px;padding:0 9px;border-radius:7px;border:none;background:transparent;color:var(--ink2);font:700 12px Manrope,sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.tab.on{background:rgba(255,255,255,.1);color:var(--ink)}
+.tab .n{min-width:16px;height:16px;border-radius:8px;background:var(--agent);color:#04161A;font-size:9.5px;display:inline-flex;align-items:center;justify-content:center}
+.msgs{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:12px;padding:14px}
+.me{align-self:flex-end;max-width:86%;background:rgba(255,255,255,.09);border:1px solid var(--line);border-radius:14px 14px 4px 14px;padding:8px 11px}
+.who{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--agent);margin-bottom:4px}
+.card{border-radius:12px;background:var(--glass2);border:1px solid rgba(63,220,235,.3);overflow:hidden}
+.card-h{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:11.5px;font-weight:700}
+.cl{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 10px;font-size:12px;cursor:pointer}
+.cl:hover{background:rgba(255,255,255,.05)}
+.cl .t{flex:1;min-width:0}
+.cl .v{font-size:10.5px;color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.card-f{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--line)}
+.agentbtn{border-color:rgba(63,220,235,.45);color:#BDF6FB}
+.xb{width:26px;height:26px;border-radius:6px;border:none;background:transparent;color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.xb:hover{background:rgba(255,255,255,.08);color:var(--ink)}
+.xb svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cfoot{flex:none;padding:10px 12px 12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:9px}
+.sw{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;cursor:pointer}
+.sw input{position:absolute;opacity:0;width:1px;height:1px}
+.sw .trk{width:30px;height:17px;border-radius:9px;background:rgba(255,255,255,.14);position:relative;flex:none}
+.sw .trk::after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:var(--ink2)}
+.sw input:checked + .trk{background:var(--agent)}
+.sw input:checked + .trk::after{left:15px;background:#04161A}
+.sw input:focus-visible + .trk{outline:2px solid var(--play);outline-offset:2px}
+.composer{display:flex;align-items:flex-end;gap:8px;border-radius:12px;border:1px solid var(--line2);background:rgba(0,0,0,.25);padding:8px 8px 8px 12px}
+.composer textarea{flex:1;resize:none;border:none;background:transparent;color:var(--ink);font:500 13px Manrope,sans-serif;height:38px;outline:none}
+.composer textarea::placeholder{color:var(--ink3)}
+.send{width:32px;height:32px;border-radius:9px;border:none;background:var(--agent);color:#04161A;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.send svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+.cols{position:absolute;left:16px;top:44px;right:16px;bottom:16px;display:flex;gap:12px}
+.col{width:272px;flex:none;display:flex;flex-direction:column;overflow:hidden}
+.colcap{position:absolute;top:16px;font-size:11px;font-weight:700;color:var(--ink2);letter-spacing:.06em}
+.col .chead{padding:0 8px 0 12px;gap:3px}
+.col .tab{padding:0 7px;font-size:11.5px}
+.col .msgs{padding:12px;gap:10px;font-size:12.5px}
+.caret{display:inline-block;width:7px;height:14px;background:var(--agent);vertical-align:-2px;margin-left:2px;border-radius:1px;animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.pt{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:11px;background:rgba(0,0,0,.3);border:1px solid var(--line2);font-size:11px;font-weight:700;margin-bottom:6px}
+.seg{display:flex;padding:2px;border-radius:8px;background:rgba(0,0,0,.25);border:1px solid var(--line)}
+.seg button{flex:1;height:24px;border:none;background:transparent;color:var(--ink2);font:700 11px Manrope,sans-serif;border-radius:6px;cursor:pointer}
+.seg button.on{background:rgba(255,255,255,.13);color:var(--ink)}
+.grp{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);font-weight:700;margin:4px 0 -2px}
+.item{display:flex;align-items:flex-start;gap:8px;padding:8px 6px 8px 10px;border-radius:10px;background:rgba(255,255,255,.035);border:1px solid var(--line)}
+.item .t{flex:1;min-width:0}
+.item .s{font-size:11px;color:var(--ink2);margin-top:2px}
+.item.cur{border-color:rgba(255,255,255,.22);background:rgba(255,255,255,.08)}
+.mini{display:flex;height:12px;gap:1px;border-radius:3px;overflow:hidden}
+.mini i{min-width:0;background:rgba(255,255,255,.16)}
+.hatch{background:repeating-linear-gradient(135deg,rgba(63,220,235,.55) 0 3px,rgba(63,220,235,.15) 3px 6px) !important}
+.shrunk{background:transparent !important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.45)}
+.backh{display:flex;align-items:center;gap:6px;font-weight:800;font-size:13px;flex:1}
+.search{display:flex;align-items:center;gap:8px;height:32px;border-radius:9px;border:1px solid var(--line2);background:rgba(0,0,0,.25);padding:0 10px;color:var(--ink2)}
+.search input{flex:1;min-width:0;border:none;background:transparent;color:var(--ink);font:500 12px Manrope,sans-serif;outline:none}
+.search input::placeholder{color:var(--ink3)}
+.search svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+.src{width:20px;height:20px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;flex:none;margin-top:1px}
+.src svg{width:12px;height:12px}
+.src.ag{background:rgba(63,220,235,.15);color:var(--agent)}
+.src.me{background:rgba(255,255,255,.1);color:var(--ink)}
+.act{display:flex;align-items:flex-start;gap:8px;padding:6px 2px 6px 4px;border-radius:8px;font-size:12px}
+.act:hover{background:rgba(255,255,255,.05)}
+.act .t{flex:1;min-width:0}
+</style>
+</helmet>
+<div class="app look-{{look}}">
+  <div class="blob" style="left: -160px; top: 420px; width: 620px; height: 520px; background: #B4237E"></div>
+  <div class="blob" style="left: 520px; top: -220px; width: 720px; height: 460px; background: #3A2BC2"></div>
+  <div class="blob" style="left: 1080px; top: 560px; width: 560px; height: 460px; background: #5B1E9E"></div>
+
+  <span class="colcap" style="left: 18px">A · top tabs — Chat</span>
+  <span class="colcap" style="left: 302px">Approvals</span>
+  <span class="colcap" style="left: 586px">Sessions</span>
+  <span class="colcap" style="left: 870px">Memory &amp; skills</span>
+  <span class="colcap" style="left: 1154px">Activity</span>
+
+  <div class="cols">
+    <!-- Chat -->
+    <section class="col glass" aria-label="Agent chat">
+      <div class="chead">
+        <button class="tab on" aria-pressed="true">Chat</button>
+        <button class="tab">Approvals <span class="n">1</span></button>
+        <button class="tab">Activity</button>
+        <div style="flex: 1"></div>
+        <button class="xb" aria-label="Sessions, memory and skills"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg></button>
+        <button class="xb" aria-label="Collapse agent panel (⌘ .)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M15 3v18M8 9l3 3-3 3"></path></svg></button>
+      </div>
+      <div class="msgs">
+        <div class="me">open the filter in the build</div>
+        <div class="card">
+          <div class="card-h">
+            <span style="color: var(--agent)">2 changes</span>
+            <span class="muted" style="font-weight: 600">· build · 4 min ago</span>
+            <div style="flex: 1"></div>
+            <button class="xb" aria-label="Undo both changes"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg></button>
+          </div>
+          <div class="cl">
+            <span class="dot" style="background: #A8F04C"></span>
+            <div class="t"><div style="font-weight: 600">acid · cutoff ramp in build</div><div class="mono v">12→55 %  ⟶  12→70 %</div></div>
+            <button class="xb" aria-label="Undo cutoff ramp"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg></button>
+          </div>
+          <div class="cl">
+            <span class="dot" style="background: #A8F04C"></span>
+            <div class="t"><div style="font-weight: 600">acid · resonance</div><div class="mono v">85 %  ⟶  88 %</div></div>
+            <button class="xb" aria-label="Undo resonance"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg></button>
+          </div>
+          <div class="card-f">
+            <button class="ib sm agentbtn"><svg viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"></path><path d="M6 11v5c3 2 9 2 12 0v-5"></path></svg>Teach me this</button>
+          </div>
+        </div>
+        <div class="me">
+          <span class="pt"><span class="dot" style="background: #A8F04C"></span>acid · cutoff</span>
+          <div>what does this knob actually do?</div>
+        </div>
+        <div>
+          <div class="who"><svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true" style="fill: #3FDCEB"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>tune-ai</div>
+          <div>Cutoff is where the 303's filter sits. Low, only the deep part of the sound gets through, so it is dark and round. Opening it over the build lets the bright, buzzy top in, so the line gets more excited<span class="caret" aria-hidden="true"></span></div>
+        </div>
+      </div>
+      <div class="cfoot">
+        <label class="sw">
+          <input type="checkbox" role="switch">
+          <span class="trk"></span>
+          Learning mode
+        </label>
+        <div class="composer">
+          <label for="askA" class="sr">Tell tune-ai what to do</label>
+          <textarea id="askA" placeholder="Tell tune-ai what to do…"></textarea>
+          <button class="send" aria-label="Stop reply"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" style="fill: currentColor"></rect></svg></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Approvals -->
+    <section class="col glass" aria-label="Approvals">
+      <div class="chead">
+        <button class="tab">Chat</button>
+        <button class="tab on" aria-pressed="true">Approvals <span class="n">1</span></button>
+        <button class="tab">Activity</button>
+        <div style="flex: 1"></div>
+        <button class="xb" aria-label="Sessions, memory and skills"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg></button>
+      </div>
+      <div class="msgs">
+        <div class="grp">Waiting for you · 1</div>
+        <div class="card" style="border-color: rgba(63,220,235,.55); box-shadow: 0 0 22px rgba(63,220,235,.15)">
+          <div class="card-h" style="flex-direction: column; align-items: flex-start; gap: 2px">
+            <span style="color: var(--agent); font-size: 10px; letter-spacing: .1em; text-transform: uppercase">Big change · rearrange</span>
+            <span style="font-size: 13px">Add a second breakdown, shorten the outro</span>
+          </div>
+          <div style="padding: 10px; display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; align-items: center; gap: 8px"><span class="lbl" style="width: 36px">Now</span>
+              <div class="mini" style="flex: 1"><sc-for list="{{now}}" as="m" hint-placeholder-count="8"><i class="{{m.cls}}" style="flex: {{m.b}} 1 0"></i></sc-for></div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px"><span class="lbl" style="width: 36px">After</span>
+              <div class="mini" style="flex: 1"><sc-for list="{{after}}" as="m" hint-placeholder-count="9"><i class="{{m.cls}}" style="flex: {{m.b}} 1 0"></i></sc-for></div>
+            </div>
+            <div style="font-size: 12px; display: flex; flex-direction: column; gap: 3px">
+              <span><span class="mono" style="color: var(--agent)">+</span> breakdown_2, 8 bars after drop_peak</span>
+              <span><span class="mono muted">~</span> outro 16 → 8 bars</span>
+              <span class="muted">Song stays 144 bars.</span>
+            </div>
+            <label class="sw" style="font-size: 11.5px"><input type="checkbox" role="switch" checked><span class="trk"></span>Preview on timeline</label>
+          </div>
+          <div class="card-f">
+            <button class="ib sm" style="background: #3FDCEB; color: #04161A; border-color: #3FDCEB">Approve</button>
+            <button class="ib sm">Reject</button>
+            <div style="flex: 1"></div>
+            <span class="kbd" style="align-self: center">⌘ ⏎</span>
+          </div>
+        </div>
+        <div class="grp" style="margin-top: 8px">Earlier</div>
+        <div class="item">
+          <span class="src ag"><svg viewBox="0 0 24 24" style="fill: currentColor"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg></span>
+          <div class="t"><div style="font-weight: 600">Replace acid_jump with a new line</div><div class="s">Approved · 12 min ago</div></div>
+          <button class="xb" aria-label="Undo replace acid_jump"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg></button>
+        </div>
+        <div class="item">
+          <span class="src me"><svg viewBox="0 0 24 24" style="fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round"><path d="M6 6l12 12M18 6L6 18"></path></svg></span>
+          <div class="t"><div style="font-weight: 600">Delete track Open hat</div><div class="s">Rejected · yesterday</div></div>
+        </div>
+        <div style="flex: 1"></div>
+        <div style="font-size: 11.5px; color: var(--ink2)">What counts as big is up to you.</div>
+        <button class="ib sm" style="align-self: flex-start"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19 12a7 7 0 00-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 00-2-1.2L14 3h-4l-.5 2.6a7 7 0 00-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 005 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 002 1.2L10 21h4l.5-2.6a7 7 0 002-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z"></path></svg>Edit permissions</button>
+      </div>
+    </section>
+
+    <!-- Sessions -->
+    <section class="col glass" aria-label="Sessions">
+      <div class="chead">
+        <div class="backh">
+          <button class="xb" aria-label="Back to chat"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"></path></svg></button>
+          Sessions
+        </div>
+        <button class="ib sm"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>New</button>
+      </div>
+      <div class="msgs">
+        <label class="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4-4"></path></svg><span class="sr">Search sessions</span><input type="text" placeholder="Search sessions"></label>
+        <div class="seg" role="group" aria-label="Which songs"><button class="on" aria-pressed="true">This song</button><button>All songs</button></div>
+        <sc-for list="{{sessions}}" as="s" hint-placeholder-count="5">
+          <div class="{{s.cls}}">
+            <div class="t">
+              <div style="display: flex; align-items: center; gap: 6px; font-weight: 700">
+                <sc-if value="{{s.cur}}" hint-placeholder-val="{{false}}"><span class="livedot" style="background: #3FDCEB; box-shadow: 0 0 8px #3FDCEB"></span></sc-if>
+                <span>{{s.title}}</span>
+              </div>
+              <div class="s">{{s.meta}}</div>
+              <div style="display: flex; gap: 2px; margin-top: 6px">
+                <button class="ib sm">{{s.open}}</button>
+                <button class="xb" aria-label="Rename {{s.title}}"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"></path></svg></button>
+                <button class="xb" aria-label="Delete {{s.title}}"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button>
+              </div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+
+    <!-- Memory & skills -->
+    <section class="col glass" aria-label="Memory and skills">
+      <div class="chead">
+        <div class="backh">
+          <button class="xb" aria-label="Back to chat"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"></path></svg></button>
+          Memory &amp; skills
+        </div>
+      </div>
+      <div class="msgs" style="gap: 6px">
+        <div class="grp">About you</div>
+        <sc-for list="{{memYou}}" as="m" hint-placeholder-count="3">
+          <div class="item" style="padding: 6px 4px 6px 10px; align-items: center">
+            <div class="t" style="font-size: 12px">{{m}}</div>
+            <button class="xb" aria-label="Edit this memory"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"></path></svg></button>
+            <button class="xb" aria-label="Forget this"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+          </div>
+        </sc-for>
+        <div class="grp" style="margin-top: 8px">About first-acid</div>
+        <sc-for list="{{memSong}}" as="m" hint-placeholder-count="3">
+          <div class="item" style="padding: 6px 4px 6px 10px; align-items: center">
+            <div class="t" style="font-size: 12px">{{m}}</div>
+            <button class="xb" aria-label="Edit this memory"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"></path></svg></button>
+            <button class="xb" aria-label="Forget this"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+          </div>
+        </sc-for>
+        <button class="ib sm" style="align-self: flex-start"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>Add a memory</button>
+        <div class="grp" style="margin-top: 10px">What it can do</div>
+        <sc-for list="{{skills}}" as="k" hint-placeholder-count="6">
+          <button class="act" style="border: none; background: transparent; color: var(--ink); text-align: left; font-family: Manrope, sans-serif; width: 100%; cursor: pointer">
+            <div class="t"><div style="font-weight: 700">{{k.n}}</div><div class="muted" style="font-size: 11px">{{k.d}}</div></div>
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 1.8; margin-top: 3px; color: #9790AE"><path d="M9 6l6 6-6 6"></path></svg>
+          </button>
+        </sc-for>
+      </div>
+    </section>
+
+    <!-- Activity -->
+    <section class="col glass" aria-label="Activity">
+      <div class="chead">
+        <button class="tab">Chat</button>
+        <button class="tab">Approvals <span class="n">1</span></button>
+        <button class="tab on" aria-pressed="true">Activity</button>
+        <div style="flex: 1"></div>
+        <button class="xb" aria-label="Sessions, memory and skills"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg></button>
+      </div>
+      <div class="msgs" style="gap: 4px">
+        <div class="seg" role="group" aria-label="Show changes by" style="margin-bottom: 6px"><button class="on" aria-pressed="true">All</button><button>Agent</button><button>Me</button></div>
+        <sc-for list="{{activity}}" as="g" hint-placeholder-count="3">
+          <div class="grp" style="margin: 8px 0 2px">{{g.when}}</div>
+          <sc-for list="{{g.items}}" as="a" hint-placeholder-count="3">
+            <div class="act">
+              <sc-if value="{{a.ag}}" hint-placeholder-val="{{true}}">
+                <span class="src ag" title="Agent"><svg viewBox="0 0 24 24" style="fill: currentColor"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg></span>
+              </sc-if>
+              <sc-if value="{{a.me}}" hint-placeholder-val="{{false}}">
+                <span class="src me" title="You"><svg viewBox="0 0 24 24" style="fill: none; stroke: currentColor; stroke-width: 2.2"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c1-4 4-6 8-6s7 2 8 6"></path></svg></span>
+              </sc-if>
+              <div class="t">
+                <div style="display: flex; align-items: center; gap: 6px; font-weight: 600"><span class="dot" style="background: {{a.col}}"></span>{{a.what}}</div>
+                <div class="mono" style="font-size: 10.5px; color: var(--ink2)">{{a.val}}</div>
+              </div>
+              <sc-if value="{{a.ag}}" hint-placeholder-val="{{true}}">
+                <button class="xb" aria-label="Teach me {{a.what}}"><svg viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"></path><path d="M6 11v5c3 2 9 2 12 0v-5"></path></svg></button>
+              </sc-if>
+              <button class="xb" aria-label="Undo {{a.what}}"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg></button>
+            </div>
+          </sc-for>
+        </sc-for>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["a","b","c"],"default":"a"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const look = this.props.look ?? 'a';
+    const now = [16, 16, 32, 16, 16, 16, 8, 8, 16].map((b, i) => ({ b, cls: i === 7 ? 'shrunk' : '' }));
+    const after = [16, 16, 32, 16, 16, 16, 8, 8, 16].map((b, i) => ({ b, cls: i === 6 ? 'hatch' : '' }));
+    const sessions = [
+      { title: 'Make the drop hit harder', meta: 'Current · today 15:20 · 4 changes', cur: true, open: 'Open', cls: 'item cur' },
+      { title: 'Open the filter in the build', meta: 'Today 14:02 · 6 changes', cur: false, open: 'Resume', cls: 'item' },
+      { title: 'What is a 303, anyway?', meta: 'Lesson · Oct 19', cur: false, open: 'Resume', cls: 'item' },
+      { title: 'Tune the kick to the key', meta: 'Oct 18 · 2 changes', cur: false, open: 'Resume', cls: 'item' },
+      { title: 'Start first-acid', meta: 'Oct 16 · 31 changes', cur: false, open: 'Resume', cls: 'item' }
+    ];
+    const memYou = [
+      'Just starting out. Explain things in plain words, no maths.',
+      'Likes long filter builds over 32 bars.',
+      'Wants to try changes by hand after seeing them once.'
+    ];
+    const memSong = [
+      'Key of C. Kick tuned to G1 (49 Hz).',
+      'Club loud: −8 to −6 LUFS, limiter on the master.',
+      'Reference for the drop: [your reference track]'
+    ];
+    const skills = [
+      { n: 'Render a passage', d: 'Plays bars offline to check levels' },
+      { n: 'Listen', d: 'Loudness, spectrum, energy per section' },
+      { n: 'Compare with a reference', d: 'Your drop against a track you own' },
+      { n: 'Arrange', d: 'Sections and which pattern plays where' },
+      { n: 'Mix', d: 'Gain, pan, sends, ducking, master' },
+      { n: 'Explain', d: 'Any control, in plain words' }
+    ];
+    const A = '#A8F04C';
+    const activity = [
+      { when: 'Just now', items: [
+        { ag: true, me: false, col: A, what: 'acid · cutoff ramp in drop', val: '55→80 %  ⟶  62→92 %' },
+        { ag: true, me: false, col: A, what: 'acid · accent', val: '87 %  ⟶  94 %' },
+        { ag: true, me: false, col: '#FFB547', what: 'clap · reverb send', val: '−53 dB  ⟶  −40 dB' }
+      ] },
+      { when: '4 min ago', items: [
+        { ag: false, me: true, col: A, what: 'acid · cutoff', val: '350 Hz  ⟶  380 Hz' },
+        { ag: false, me: true, col: '#5E8CFF', what: 'hats8 · step 7 accent', val: 'off  ⟶  on' }
+      ] },
+      { when: 'Today 14:02', items: [
+        { ag: true, me: false, col: A, what: 'acid · cutoff ramp in build', val: '12→55 %  ⟶  12→70 %' },
+        { ag: true, me: false, col: A, what: 'acid · delay send lane in build', val: 'new lane, 60→75 %' },
+        { ag: true, me: false, col: A, what: 'acid_main · step 6 slide', val: 'off  ⟶  on' }
+      ] }
+    ];
+    return { look, now, after, sessions, memYou, memSong, skills, activity };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Drum step grid</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#07040D}
+a{color:#3FDCEB}a:hover{color:#9FF3FA}
+.app{--bg:#0A0612;--ink:#EEE9F8;--ink2:#B5ADCB;--ink3:#9790AE;--line:rgba(255,255,255,.085);--line2:rgba(255,255,255,.16);--glass:rgba(23,16,39,.56);--glass2:rgba(10,6,18,.45);--blur:22px;--r:16px;--rs:9px;--row:46px;--blobop:.55;--kick:#FF5470;--clap:#FFB547;--hat:#5E8CFF;--ohat:#A3C0FF;--ride:#B79CFF;--acid:#A8F04C;--agent:#3FDCEB;--play:#F7F2FF;position:relative;width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.35}
+.app *{box-sizing:border-box}
+.look-b{--glass:rgba(16,12,27,.86);--glass2:rgba(6,4,12,.6);--blur:8px;--r:10px;--rs:6px;--row:40px;--blobop:.2;--line:rgba(255,255,255,.07)}
+.look-c{--glass:rgba(44,30,78,.32);--glass2:rgba(20,12,36,.35);--blur:40px;--r:22px;--rs:13px;--row:48px;--blobop:.9;--line:rgba(255,255,255,.15)}
+.blob{position:absolute;border-radius:50%;filter:blur(110px);opacity:var(--blobop);pointer-events:none}
+.glass{background:var(--glass);backdrop-filter:blur(var(--blur)) saturate(150%);-webkit-backdrop-filter:blur(var(--blur)) saturate(150%);border:1px solid var(--line);border-radius:var(--r);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 60px rgba(0,0,0,.35)}
+.look-c .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),inset 0 0 0 1px rgba(255,255,255,.04),0 30px 80px rgba(0,0,0,.45)}
+.look-b .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+.muted{color:var(--ink2)}
+.ib{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;min-width:32px;padding:0 9px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);font:600 12px Manrope,system-ui,sans-serif;cursor:pointer;white-space:nowrap}
+.ib:hover{background:rgba(255,255,255,.09)}
+.ib:focus-visible{outline:2px solid var(--play);outline-offset:2px}
+.ib.on{background:rgba(255,255,255,.13);border-color:var(--line2)}
+.ib svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ib.sm{height:26px;min-width:26px;padding:0 6px;font-size:11px}
+.ib.sm svg{width:14px;height:14px}
+.kbd{font:600 10px 'JetBrains Mono',monospace;color:var(--ink3);border:1px solid var(--line2);border-radius:4px;padding:0 4px;line-height:15px}
+.sep{width:1px;height:28px;background:var(--line);flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.transport{position:absolute;left:12px;top:12px;right:12px;height:56px;display:flex;align-items:center;gap:12px;padding:0 12px}
+.play{width:40px;height:40px;border-radius:50%;border:none;background:var(--play);color:#120A1F;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 0 0 4px rgba(247,242,255,.12),0 0 24px rgba(220,200,255,.55);cursor:pointer}
+.play svg{width:18px;height:18px;fill:currentColor}
+.readout{display:flex;flex-direction:column;gap:1px}
+.big{font-size:20px;font-weight:600;line-height:22px}
+.lufs{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);cursor:pointer;font-family:Manrope,system-ui,sans-serif}
+.lufs:hover{background:rgba(255,255,255,.09)}
+.lmeter{position:relative;width:96px;height:6px;border-radius:3px;background:rgba(255,255,255,.1)}
+
+.tl{position:absolute;left:12px;top:80px;width:1064px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .tl{width:1348px}
+.tlbar{height:46px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line)}
+.grid{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
+.row{display:flex;height:var(--row);flex:none;border-bottom:1px solid rgba(255,255,255,.045);padding-right:10px}
+.hdr{width:168px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 0 0;border-right:1px solid var(--line)}
+.hdr .cbar{width:3px;align-self:stretch;margin:6px 4px 6px 0;border-radius:2px}
+.hdr .nm{flex:1;min-width:0;font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ms{width:22px;height:20px;border-radius:5px;border:1px solid var(--line);background:transparent;color:var(--ink2);font:700 10px Manrope,sans-serif;cursor:pointer;padding:0}
+.ms:hover{color:var(--ink);background:rgba(255,255,255,.08)}
+.hmeter{width:4px;height:26px;border-radius:2px;background:rgba(255,255,255,.08);position:relative;overflow:hidden}
+.hmeter i{position:absolute;left:0;right:0;bottom:0;border-radius:2px}
+.lanes{flex:1;display:flex;position:relative;min-width:0;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.035) 0 1px,transparent 1px 100%);background-size:calc(100% / 18) 100%}
+.cell{min-width:0;padding:5px 1px;display:flex}
+.blk{position:relative;flex:1;min-width:0;border:1px solid;border-radius:7px;padding:4px 6px 4px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;cursor:pointer}
+.look-b .blk{border-radius:4px}
+.look-c .blk{border-radius:11px}
+.blk .bn{font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:22px}
+.glyph{display:flex;align-items:flex-end;gap:1.5px;height:14px}
+.glyph i{flex:1;border-radius:1px;min-width:1px}
+.badge{position:absolute;right:4px;top:3px;font:600 9.5px 'JetBrains Mono',monospace;padding:0 4px;border-radius:4px;background:rgba(0,0,0,.35);color:var(--ink2);line-height:14px}
+.ruler{height:24px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.ruler .lanes{background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.22) 0 1px,transparent 1px 100%);background-size:calc(100% / 36) 5px;background-repeat:repeat-x;background-position:0 100%}
+.rc{min-width:0;font:500 10px 'JetBrains Mono',monospace;color:var(--ink3);padding:4px 0 0 4px;border-left:1px solid rgba(255,255,255,.18)}
+.secrow{height:32px;flex:none;display:flex;padding-right:10px;border-bottom:1px solid var(--line)}
+.sec{min-width:0;display:flex;align-items:center;gap:6px;padding:0 4px 0 7px;margin:4px 1px;border-radius:7px;font-size:11px;font-weight:700;color:var(--ink2);white-space:nowrap;overflow:hidden;background:rgba(255,255,255,.035);cursor:pointer}
+.sec.on{background:rgba(255,255,255,.14);color:var(--ink);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),0 0 18px rgba(220,200,255,.18)}
+.livedot{width:6px;height:6px;border-radius:50%;background:var(--play);box-shadow:0 0 8px var(--play);flex:none}
+.ov{position:absolute;left:168px;right:10px;top:0;bottom:0;pointer-events:none}
+.ph{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--play);box-shadow:0 0 8px rgba(247,242,255,.9),0 0 22px rgba(200,170,255,.55)}
+.ph::before{content:"";position:absolute;top:0;left:-5px;border:6px solid transparent;border-top:8px solid var(--play)}
+.loop{position:absolute;top:0;bottom:0;background:rgba(255,255,255,.035);border-left:1px solid rgba(255,255,255,.4);border-right:1px solid rgba(255,255,255,.4)}
+.loop::before{content:"";position:absolute;left:0;right:0;top:0;height:5px;background:rgba(255,255,255,.55);border-radius:0 0 2px 2px}
+.lane{height:72px}
+.lane .hdr{padding-left:15px;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px}
+.lane svg{position:absolute;inset:6px 0;width:100%;height:calc(100% - 12px);overflow:visible}
+.bp{position:absolute;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#0A0612;border:1.5px solid var(--acid)}
+.bp.ag{border-color:var(--agent);box-shadow:0 0 8px var(--agent)}
+.drop{flex:1;display:flex;padding:10px 10px 10px 178px}
+.dropzone{flex:1;border:1.5px dashed rgba(255,255,255,.12);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--ink3);font-size:12.5px}
+.help{height:36px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-top:1px solid var(--line);font-size:12px;color:var(--ink2)}
+.help b{color:var(--ink);font-weight:700}
+.agent-soft{box-shadow:inset 3px 0 0 var(--agent)}
+
+.chat{position:absolute;left:1088px;top:80px;width:340px;height:808px;display:flex;flex-direction:column;overflow:hidden}
+.chat-rail .chat{display:none}
+.rail{display:none;position:absolute;left:1372px;top:80px;width:56px;height:808px;flex-direction:column;align-items:center;gap:6px;padding:10px 0}
+.chat-rail .rail{display:flex}
+.rail .ib{width:40px;height:40px;padding:0;position:relative}
+.pip{position:absolute;top:4px;right:4px;min-width:15px;height:15px;border-radius:8px;background:var(--agent);color:#04161A;font:700 9.5px Manrope,sans-serif;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.chead{height:50px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px 0 14px;border-bottom:1px solid var(--line)}
+.tab{height:28px;padding:0 9px;border-radius:7px;border:none;background:transparent;color:var(--ink2);font:700 12px Manrope,sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.tab.on{background:rgba(255,255,255,.1);color:var(--ink)}
+.tab .n{min-width:16px;height:16px;border-radius:8px;background:var(--agent);color:#04161A;font-size:9.5px;display:inline-flex;align-items:center;justify-content:center}
+.msgs{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:12px;padding:14px}
+.me{align-self:flex-end;max-width:86%;background:rgba(255,255,255,.09);border:1px solid var(--line);border-radius:14px 14px 4px 14px;padding:8px 11px}
+.who{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--agent);margin-bottom:4px}
+.card{border-radius:12px;background:var(--glass2);border:1px solid rgba(63,220,235,.3);overflow:hidden}
+.card-h{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);font-size:11.5px;font-weight:700}
+.cl{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 10px;font-size:12px;cursor:pointer}
+.cl:hover{background:rgba(255,255,255,.05)}
+.cl .t{flex:1;min-width:0}
+.cl .v{font-size:10.5px;color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.card-f{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--line)}
+.agentbtn{border-color:rgba(63,220,235,.45);color:#BDF6FB}
+.xb{width:26px;height:26px;border-radius:6px;border:none;background:transparent;color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.xb:hover{background:rgba(255,255,255,.08);color:var(--ink)}
+.xb svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.cfoot{flex:none;padding:10px 12px 12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:9px}
+.sw{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:700;cursor:pointer}
+.sw input{position:absolute;opacity:0;width:1px;height:1px}
+.sw .trk{width:30px;height:17px;border-radius:9px;background:rgba(255,255,255,.14);position:relative;flex:none}
+.sw .trk::after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:var(--ink2)}
+.sw input:checked + .trk{background:var(--agent)}
+.sw input:checked + .trk::after{left:15px;background:#04161A}
+.sw input:focus-visible + .trk{outline:2px solid var(--play);outline-offset:2px}
+.composer{display:flex;align-items:flex-end;gap:8px;border-radius:12px;border:1px solid var(--line2);background:rgba(0,0,0,.25);padding:8px 8px 8px 12px}
+.composer textarea{flex:1;resize:none;border:none;background:transparent;color:var(--ink);font:500 13px Manrope,sans-serif;height:38px;outline:none}
+.composer textarea::placeholder{color:var(--ink3)}
+.send{width:32px;height:32px;border-radius:9px;border:none;background:var(--agent);color:#04161A;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.send svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+.pnl{position:absolute;left:12px;right:12px;display:flex;flex-direction:column;overflow:hidden}
+.ph2{height:52px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line)}
+.trkchip{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:13px}
+.trkchip i{width:10px;height:10px;border-radius:3px}
+.vlab{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);border:1px solid var(--line2);border-radius:5px;padding:2px 7px}
+.linkb{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink2)}
+.pfoot{height:40px;flex:none;display:flex;align-items:center;gap:14px;padding:0 14px;font-size:11.5px;color:var(--ink2)}
+.dg{padding:10px 14px 0;display:flex;flex-direction:column;gap:6px}
+.dnums{display:flex;height:16px}
+.dnums .sp{width:250px;flex:none}
+.grps{flex:1;display:flex;gap:16px;min-width:0}
+.grp{flex:1;display:flex;gap:6px;min-width:0}
+.nm16{flex:1;text-align:center;font:500 10px 'JetBrains Mono',monospace;color:var(--ink3)}
+.nm16.live{color:var(--play);font-weight:600}
+.drow{display:flex;align-items:center;height:50px}
+.rh{width:250px;flex:none;display:flex;align-items:center;gap:8px;padding-right:14px}
+.rh .cb{width:4px;height:32px;border-radius:2px;flex:none}
+.rh .nm{font-weight:700;font-size:12.5px;width:86px}
+.rh .pn{font:500 11px 'JetBrains Mono',monospace;color:var(--ink2);flex:1;white-space:nowrap}
+.st{flex:1;min-width:0;height:42px;border-radius:8px;border:1px solid;cursor:pointer;position:relative;padding:0}
+.look-b .st{border-radius:4px}
+.look-c .st{border-radius:12px}
+.st.live{outline:2px solid rgba(247,242,255,.9);outline-offset:1px}
+.st .acc{position:absolute;left:25%;right:25%;top:5px;height:3px;border-radius:2px;background:rgba(255,255,255,.9)}
+.ride .st{border-style:dashed}
+.big .st{height:88px;border-radius:12px}
+.velo{display:flex;align-items:stretch;height:84px}
+.velo .grp > div{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;border-bottom:1px solid var(--line2);position:relative}
+.vbar{width:56%;border-radius:4px 4px 0 0;position:relative}
+.vbar::before{content:"";position:absolute;left:50%;top:-5px;width:9px;height:9px;margin-left:-4.5px;border-radius:50%;background:#0A0612;border:2px solid currentColor}
+.namein{height:26px;width:110px;border-radius:6px;border:1px solid var(--line2);background:rgba(0,0,0,.25);color:var(--ink);font:500 11.5px 'JetBrains Mono',monospace;padding:0 8px}
+.legend{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border-radius:4px;border:1px solid}
+</style>
+</helmet>
+<div class="app look-{{look}}">
+  <div class="blob" style="left: -160px; top: 420px; width: 620px; height: 520px; background: #B4237E"></div>
+  <div class="blob" style="left: 520px; top: -220px; width: 720px; height: 460px; background: #3A2BC2"></div>
+  <div class="blob" style="left: 1080px; top: 560px; width: 560px; height: 460px; background: #5B1E9E"></div>
+
+  <section class="pnl glass" style="top: 12px; height: 404px" aria-label="Drum grid, variation A">
+    <div class="ph2">
+      <span class="trkchip">Drums</span>
+      <span class="muted">Steps · build section</span>
+      <div class="sep" style="height: 22px"></div>
+      <span class="legend"><i style="background: rgba(255,255,255,.035); border-color: rgba(255,255,255,.12)"></i><span class="muted" style="font-size: 11.5px">rest</span></span>
+      <span class="legend"><i style="background: rgba(94,140,255,.38); border-color: rgba(94,140,255,.7)"></i><span class="muted" style="font-size: 11.5px">hit</span></span>
+      <span class="legend"><i style="background: #5E8CFF; border-color: transparent"></i><span class="muted" style="font-size: 11.5px">accent</span></span>
+      <div style="flex: 1"></div>
+      <span class="vlab">A · all voices</span>
+    </div>
+    <div class="dg">
+      <div class="dnums">
+        <span class="sp"></span>
+        <div class="grps">
+          <sc-for list="{{numGroups}}" as="g" hint-placeholder-count="4">
+            <div class="grp"><sc-for list="{{g.nums}}" as="n" hint-placeholder-count="4"><span class="{{n.cls}}">{{n.n}}</span></sc-for></div>
+          </sc-for>
+        </div>
+      </div>
+      <sc-for list="{{rows}}" as="r" hint-placeholder-count="4">
+        <div class="drow">
+          <div class="rh">
+            <span class="cb" style="background: {{r.col}}"></span>
+            <span class="nm">{{r.name}}</span>
+            <span class="pn">{{r.pat}}</span>
+            <button class="ms" aria-label="Mute {{r.name}}">M</button>
+            <button class="ms" aria-label="Solo {{r.name}}">S</button>
+          </div>
+          <div class="grps">
+            <sc-for list="{{r.groups}}" as="g" hint-placeholder-count="4">
+              <div class="grp">
+                <sc-for list="{{g.steps}}" as="s" hint-placeholder-count="4">
+                  <button class="{{s.cls}}" style="box-sizing: border-box; {{s.st}}" aria-label="{{r.name}} step {{s.n}} {{s.state}}">
+                    <sc-if value="{{s.acc}}" hint-placeholder-val="{{false}}"><span class="acc"></span></sc-if>
+                  </button>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+      <div class="drow ride">
+        <div class="rh">
+          <span class="cb" style="background: rgba(183,156,255,.35)"></span>
+          <span class="nm" style="color: var(--ink2)">Ride</span>
+          <span class="pn" style="color: var(--ink3)">no pattern</span>
+        </div>
+        <div class="grps" style="border: 1.5px dashed rgba(183,156,255,.3); border-radius: 10px; height: 42px; align-items: center; justify-content: center; color: var(--ink2); font-size: 12px">
+          <button class="ib sm" style="border-color: rgba(183,156,255,.45)"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>Add a ride</button>
+          <span>or drag one from the browser</span>
+        </div>
+      </div>
+    </div>
+    <div class="pfoot" style="padding-left: 264px; margin-top: auto">
+      <span>Click: hit · click again: accent · right-click: rest · drag across to paint</span>
+      <div style="flex: 1"></div>
+      <span>Step 11 is playing</span>
+    </div>
+  </section>
+
+  <section class="pnl glass" style="top: 428px; height: 412px" aria-label="Drum grid, variation B">
+    <div class="ph2">
+      <span class="trkchip"><i style="background: #5E8CFF; box-shadow: 0 0 10px rgba(94,140,255,.5)"></i>Closed hat</span>
+      <span class="muted">Steps</span>
+      <div class="sep" style="height: 22px"></div>
+      <span class="mono" style="font-size: 13px; font-weight: 600">hats8</span>
+      <span class="linkb"><span class="badge" style="position: static">×8</span> used in 8 blocks</span>
+      <button class="ib sm">Make unique</button>
+      <div class="sep" style="height: 22px"></div>
+      <label class="lbl" for="varname">Variation</label>
+      <input id="varname" class="namein" value="hats8_b">
+      <button class="ib sm"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"></path></svg>Duplicate as variation</button>
+      <div style="flex: 1"></div>
+      <span class="vlab">B · one voice</span>
+    </div>
+    <div class="dg big" style="padding-top: 14px">
+      <div class="dnums">
+        <span class="sp" style="width: 90px"></span>
+        <div class="grps">
+          <sc-for list="{{numGroups}}" as="g" hint-placeholder-count="4">
+            <div class="grp"><sc-for list="{{g.nums}}" as="n" hint-placeholder-count="4"><span class="{{n.cls}}">{{n.n}}</span></sc-for></div>
+          </sc-for>
+        </div>
+      </div>
+      <div class="drow" style="height: 92px">
+        <div class="rh" style="width: 90px"><span class="lbl">Steps</span></div>
+        <div class="grps">
+          <sc-for list="{{hat.groups}}" as="g" hint-placeholder-count="4">
+            <div class="grp">
+              <sc-for list="{{g.steps}}" as="s" hint-placeholder-count="4">
+                <button class="{{s.cls}}" style="box-sizing: border-box; {{s.st}}" aria-label="Closed hat step {{s.n}} {{s.state}}">
+                  <sc-if value="{{s.acc}}" hint-placeholder-val="{{false}}"><span class="acc"></span></sc-if>
+                </button>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div class="drow velo" style="margin-top: 10px">
+        <div class="rh" style="width: 90px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px"><span class="lbl">Accent</span><span class="muted" style="font-size: 10.5px">drag to set</span></div>
+        <div class="grps">
+          <sc-for list="{{hat.groups}}" as="g" hint-placeholder-count="4">
+            <div class="grp">
+              <sc-for list="{{g.steps}}" as="s" hint-placeholder-count="4">
+                <div><span class="vbar" style="box-sizing: border-box; {{s.vel}}"></span></div>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+    <div class="pfoot" style="padding-left: 104px; margin-top: auto">
+      <span>Editing hats8 changes all 8 blocks that use it. Make unique to change only this one.</span>
+      <div style="flex: 1"></div>
+      <span><span class="kbd">X</span> accent · <span class="kbd">.</span> rest</span>
+    </div>
+  </section>
+
+  <div class="glass help" style="position: absolute; left: 12px; right: 12px; top: 852px; height: 36px; border-top: 1px solid var(--line)">
+    <span class="kbd">?</span>
+    <span><b>hat · accent</b> — an accented hit plays louder and brighter. Accents on the off-beats give the hats their push.</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["a","b","c"],"default":"a"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const look = this.props.look ?? 'a';
+    const LIVE = 10;
+    const groupsOf = (arr) => [0, 1, 2, 3].map((g) => ({ steps: arr.slice(g * 4, g * 4 + 4) }));
+    const numGroups = groupsOf(Array.from({ length: 16 }, (_, i) => ({ n: i + 1, cls: i === LIVE ? 'nm16 live' : 'nm16' }))).map((g) => ({ nums: g.steps }));
+    const mk = (pat, rgb) => pat.split('').map((ch, i) => {
+      let st = 'background: rgba(255,255,255,.035); border-color: rgba(255,255,255,.1)';
+      let state = 'rest';
+      if (ch === 'x') { st = `background: rgba(${rgb},.38); border-color: rgba(${rgb},.7)`; state = 'hit'; }
+      if (ch === 'X') { st = `background: rgb(${rgb}); border-color: transparent; box-shadow: 0 0 14px rgba(${rgb},.45)`; state = 'accented hit'; }
+      if (i === LIVE && ch !== '.') st += `; box-shadow: 0 0 20px rgba(${rgb},.8)`;
+      let vel = 'height: 0; opacity: 0';
+      if (ch === 'x') vel = `height: 52%; background: rgba(${rgb},.55); color: rgb(${rgb})`;
+      if (ch === 'X') vel = `height: 92%; background: rgb(${rgb}); color: rgb(${rgb})`;
+      return { n: i + 1, st, state, acc: ch === 'X', cls: i === LIVE ? 'st live' : 'st', vel };
+    });
+    const R = [
+      { name: 'Kick', col: '#FF5470', rgb: '255,84,112', pat: 'kick4', steps: 'x.X.x...x...x...' },
+      { name: 'Clap', col: '#FFB547', rgb: '255,181,71', pat: 'clap24', steps: '....x.......x...' },
+      { name: 'Closed hat', col: '#5E8CFF', rgb: '94,140,255', pat: 'hats8', steps: 'x.X.x.X.x.X.x.X.' },
+      { name: 'Open hat', col: '#A3C0FF', rgb: '163,192,255', pat: 'open_off', steps: '..x...x...x...x.' }
+    ];
+    const rows = R.map((r) => ({ name: r.name, col: r.col, pat: r.pat, groups: groupsOf(mk(r.steps, r.rgb)) }));
+    const hat = { groups: groupsOf(mk('x.X.x.X.x.X.x.X.', '94,140,255')) };
+    return { look, numGroups, rows, hat };
+  }
+}
+</script>
+</body>
+</html>
