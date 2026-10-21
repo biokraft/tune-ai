@@ -173,6 +173,8 @@ fn same_fx_chain(a: &[CompiledFx], b: &[CompiledFx]) -> bool {
     a.len() == b.len()
         && a.iter().zip(b).all(|(x, y)| match (&x.spec, &y.spec) {
             (FxSpec::Distortion { mode: m, .. }, FxSpec::Distortion { mode: n, .. }) => m == n,
+            (FxSpec::Eq { .. }, FxSpec::Eq { .. }) => true,
+            _ => false,
         })
 }
 

@@ -210,6 +210,12 @@ fn fx_view(fx: &FxSpec) -> FxView {
             modes: DIST_MODES.iter().map(|m| m.name().to_owned()).collect(),
             params: param_views(fx.params_table(), params),
         },
+        FxSpec::Eq { params } => FxView {
+            kind: fx.type_name().to_owned(),
+            mode: String::new(),
+            modes: Vec::new(),
+            params: param_views(fx.params_table(), params),
+        },
     }
 }
 

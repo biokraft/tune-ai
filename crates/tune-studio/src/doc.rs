@@ -9,7 +9,7 @@
 
 use serde_json::{Value, json};
 use toml_edit::{DocumentMut, InlineTable, Item, Table};
-use tune_dsp::{DIST_PARAMS, ParamSpec, find_spec};
+use tune_dsp::{DIST_PARAMS, EQ_PARAMS, ParamSpec, find_spec};
 use tune_song::{FxSpec, InstrumentKind, PatternSteps, Song, SongError, Track, parse_song};
 
 use crate::path::{SongPath, TrackField};
@@ -239,15 +239,15 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
             let home = locate_param(t, param)?;
             let explicit = match home {
                 ParamHome::Instrument(_) => t.params.get(param),
-                ParamHome::Fx(i, _) => match &t.fx[i] {
-                    FxSpec::Distortion { params, .. } => params.get(param),
-                },
+                ParamHome::Fx(i, _) => t.fx[i].params().get(param),
             };
             num(explicit.copied().unwrap_or(home.spec().default))
         }
         SongPath::FxMode { track } => {
             let t = song.tracks.get(track)?;
-            let (_, FxSpec::Distortion { mode, .. }) = distortion(t)?;
+            let (_, FxSpec::Distortion { mode, .. }) = distortion(t)? else {
+                return None;
+            };
             Value::from(mode.name())
         }
         SongPath::Track { track } => {
@@ -336,7 +336,7 @@ fn is_known_param(param: &str) -> bool {
     InstrumentKind::ALL
         .iter()
         .map(|k| k.params())
-        .chain([DIST_PARAMS])
+        .chain([DIST_PARAMS, EQ_PARAMS])
         .any(|table| find_spec(table, param).is_ok())
 }
 

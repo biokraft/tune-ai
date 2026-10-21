@@ -105,7 +105,9 @@ fn process_never_allocates_or_frees() {
     }
     b.tracks.get_mut("kick").unwrap().mute = true;
     let acid = b.tracks.get_mut("acid").unwrap();
-    let FxSpec::Distortion { mode, .. } = &mut acid.fx[0];
+    let FxSpec::Distortion { mode, .. } = &mut acid.fx[0] else {
+        panic!("expected distortion")
+    };
     *mode = DistortionMode::Hard;
     b.tracks.insert(
         "clap".into(),

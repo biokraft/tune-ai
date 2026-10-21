@@ -21,6 +21,17 @@ impl Song {
             let _ = writeln!(out, "sample_rate = {rate}");
         }
 
+        if !self.mix.is_default() {
+            out.push_str("\n[mix]\n");
+            let _ = writeln!(out, "master = {}", string(self.mix.master.name()));
+            if let Some(source) = &self.mix.duck_source {
+                let _ = writeln!(out, "duck_source = {}", string(source));
+            }
+            if !self.mix.params.is_empty() {
+                let _ = writeln!(out, "params = {}", num_table(&self.mix.params));
+            }
+        }
+
         for (id, track) in &self.tracks {
             let _ = write!(out, "\n[tracks.{}]\n", key(id));
             let _ = writeln!(out, "instrument = \"{}\"", track.instrument.name());
@@ -83,6 +94,13 @@ fn fx_inline(fx: &FxSpec) -> String {
                 format!("type = {}", string(fx.type_name())),
                 format!("mode = {}", string(mode.name())),
             ];
+            if !params.is_empty() {
+                parts.push(format!("params = {}", num_table(params)));
+            }
+            inline(&parts)
+        }
+        FxSpec::Eq { params } => {
+            let mut parts = vec![format!("type = {}", string(fx.type_name()))];
             if !params.is_empty() {
                 parts.push(format!("params = {}", num_table(params)));
             }

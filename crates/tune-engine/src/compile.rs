@@ -3,7 +3,7 @@
 //! pattern turned into engine cells.
 
 use tune_dsp::acid303::math::db2amp;
-use tune_dsp::{DrumHit, ParamSpec, find_spec};
+use tune_dsp::{DrumHit, ParamSpec, STRIP_PARAMS, find_spec};
 use tune_song::{FxSpec, InstrumentKind, PatternSteps, Song};
 
 use crate::clock::{Clock, track_seed};
@@ -91,17 +91,20 @@ impl CompiledSong {
             .map(|(id, t)| CompiledTrack {
                 id: id.clone(),
                 kind: t.instrument,
-                params: fill(t.instrument.params(), t.params.iter()),
+                // Strip params (`send.*`, `duck.*`) share the track's map;
+                // they are not instrument params.
+                params: fill(
+                    t.instrument.params(),
+                    t.params
+                        .iter()
+                        .filter(|(id, _)| !is_strip_only(t.instrument.params(), id)),
+                ),
                 fx: t
                     .fx
                     .iter()
                     .map(|fx| CompiledFx {
                         spec: fx.clone(),
-                        params: match fx {
-                            FxSpec::Distortion { params, .. } => {
-                                fill(fx.params_table(), params.iter())
-                            }
-                        },
+                        params: fill(fx.params_table(), fx.params().iter()),
                     })
                     .collect(),
                 gain: db2amp(t.gain_db),
@@ -224,6 +227,12 @@ fn fill<'a>(
         params[index] = v;
     }
     params
+}
+
+/// Whether `id` is a strip param that `table` does not also have. Any other
+/// id still has to be in `table` (see [`fill`]).
+fn is_strip_only(table: &'static [ParamSpec], id: &str) -> bool {
+    find_spec(STRIP_PARAMS, id).is_ok() && find_spec(table, id).is_err()
 }
 
 /// Resolves a param id against the instrument table, then each fx table in

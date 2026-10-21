@@ -95,3 +95,43 @@ fn strings_escaped() {
     let back = parse(&song.to_toml());
     assert_eq!(back.name, song.name);
 }
+
+const MIXED: &str = include_str!("fixtures/mixed.toml");
+
+#[test]
+fn mixed_fixture_round_trips() {
+    let song = parse(MIXED);
+    let once = song.to_toml();
+    assert_eq!(parse(&once), song);
+    assert_eq!(parse(&once).to_toml(), once);
+    assert!(once.contains(
+        "\n[mix]\nmaster = \"limit\"\nparams = { \"delay.feedback\" = 40, \"reverb.size\" = 30, \"master.gain\" = 6 }\n\n[tracks.kick]"
+    ), "{once}");
+    assert!(once.contains(
+        "fx = [{ type = \"distortion\", mode = \"soft\", params = { \"dist.drive\" = 12 } }, { type = \"eq\", params = { \"eq.low_cut\" = 85 } }]"
+    ), "{once}");
+}
+
+#[test]
+fn mix_writes_duck_source_and_bare_eq() {
+    let mut song = parse(MINI);
+    song.mix.duck_source = Some("hat".into());
+    if let Some(acid) = song.tracks.get_mut("acid") {
+        acid.fx.push(tune_song::FxSpec::Eq {
+            params: Default::default(),
+        });
+    }
+    let text = song.to_toml();
+    assert!(
+        text.contains("seed = 7\n\n[mix]\nmaster = \"clip\"\nduck_source = \"hat\"\n\n[tracks."),
+        "{text}"
+    );
+    assert!(text.contains(", { type = \"eq\" }]"), "{text}");
+    assert_eq!(parse(&text), song);
+}
+
+#[test]
+fn no_mix_writes_no_mix_table() {
+    let text = parse(MINI).to_toml();
+    assert!(!text.contains("[mix]"), "{text}");
+}
