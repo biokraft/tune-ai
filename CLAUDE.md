@@ -87,17 +87,15 @@ sends -> delay and reverb buses -> master gain -> clip or limit.
 
 - Lanes: `<track>.send.delay` (delay throws), `<track>.duck.depth`,
   `mix.<param id>` (e.g. `param = "mix.reverb.size"`).
-- A bus runs only when some track sends to it (a static send above -60 dB or
-  a lane on it). Ducking follows the source's hits in the arrangement even if
-  it is muted; no hits, no ducking.
+- A delay/reverb bus is built only if some track sets `send.delay` /
+  `send.reverb` explicitly (even at -60) or a lane drives it. Ducking follows
+  the source's hits even if it is muted; no hits, no ducking.
 - `master = "limit"` is for loud masters; `master.ceiling` defaults to -1.5 dB.
-  The limiter's lookahead (84 frames, 1.6 ms at 48 kHz) is not compensated:
-  limit-mode renders start 1.6 ms late.
-- A studio send knob dragged on a track with no static send and no lane is
-  silent until released (sends start after the first release).
-- Stems carry dry tracks only.
-- A hot reload that changes bpm or the master mode rebuilds the effects and
-  cuts ringing delay/reverb tails; other reloads keep them.
+  Its 84-frame lookahead (1.75 ms at 48 kHz) is not compensated.
+- A studio send knob on a track with no static send and no lane is silent
+  until released. Stems carry dry tracks only.
+- A hot reload that changes bpm, the master mode, or adds or removes a bus cuts
+  ringing delay/reverb tails; other reloads keep them.
 
 Every command takes `--json`; exit code 2 means failure. `tune play` is for the
 producer: it plays through the speakers and reloads the file when it changes.

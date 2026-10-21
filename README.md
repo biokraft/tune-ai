@@ -57,13 +57,14 @@ fx = [{ type = "eq", params = { "eq.low_cut" = 85 } }]
 ```sh
 tune set songs/first-acid/song.toml tracks.acid.send.delay=-9 mix.master.gain=8
 tune set songs/first-acid/song.toml mix.master=limit mix.duck_source=kick
-tune render songs/first-acid/song.toml --bars 33..40 --out scratch/drop.wav
+tune render songs/first-acid/song.toml --bars 81..96 --out scratch/drop.wav
 ```
 
 `tune render` reports `max_reduction_db`, how far the limiter pulled peaks
 down; keep it under about 9 dB. `tune params` lists every id and range. The
-limiter delays the output by 1.6 ms (not compensated), and a hot reload that
-changes the tempo or master mode cuts ringing delay and reverb tails.
+limiter delays the output by 1.75 ms (not compensated), and a hot reload that
+changes the tempo or master mode, or adds or removes a delay or reverb bus,
+cuts ringing delay and reverb tails.
 
 ## Open the studio
 
