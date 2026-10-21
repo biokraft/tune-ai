@@ -108,4 +108,47 @@ describe("Knob", () => {
     expect(screen.getByTestId("knob-lane")).toBeInTheDocument();
     expect(screen.getByTestId("knob-highlight")).toBeInTheDocument();
   });
+
+  it("gives each knob its own gradient id", () => {
+    const { container } = render(
+      <>
+        <Knob spec={cutoff} value={500} onChange={() => {}} onCommit={() => {}} />
+        <Knob spec={cutoff} value={900} onChange={() => {}} onCommit={() => {}} />
+      </>,
+    );
+    const ids = [...container.querySelectorAll("radialGradient")].map((g) => g.id);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    const fills = [...container.querySelectorAll("circle[fill^='url(']")].map((c) =>
+      c.getAttribute("fill"),
+    );
+    expect(fills).toEqual(ids.map((id) => `url(#${id})`));
+  });
+
+  it("does not commit on a click without movement", () => {
+    const { knob, onCommit } = setup(0.3);
+    fireEvent.pointerDown(knob, { clientY: 300, pointerId: 1 });
+    fireEvent.pointerUp(knob, { clientY: 300, pointerId: 1 });
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("double click commits exactly once, with the default", () => {
+    const { knob, onCommit } = setup(0.3);
+    for (let i = 0; i < 2; i++) {
+      fireEvent.pointerDown(knob, { clientY: 300, pointerId: 1 });
+      fireEvent.pointerUp(knob, { clientY: 300, pointerId: 1 });
+    }
+    fireEvent.doubleClick(knob);
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith(cutoff.default);
+  });
+
+  it("commits the last value when the pointer is cancelled after a move", () => {
+    const { knob, onCommit } = setup(0);
+    fireEvent.pointerDown(knob, { clientY: 300, pointerId: 1 });
+    fireEvent.pointerMove(knob, { clientY: 200, pointerId: 1 });
+    fireEvent.pointerCancel(knob, { pointerId: 1 });
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith(toPlain(cutoff, 0.5));
+  });
 });
