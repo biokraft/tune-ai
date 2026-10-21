@@ -94,8 +94,10 @@ sends -> delay and reverb buses -> master gain -> clip or limit.
   Its 84-frame lookahead (1.75 ms at 48 kHz) is not compensated.
 - A studio send knob on a track with no static send and no lane is silent
   until released. Stems carry dry tracks only.
-- A hot reload that changes bpm, the master mode, or adds or removes a bus cuts
-  ringing delay/reverb tails; other reloads keep them.
+- A hot reload keeps the reverb tail and the limiter. Only a bpm change or a
+  delay bus appearing or going restarts the delay (its echoes stop). A
+  master-mode switch crossfades clipper and limiter over 10 ms, with no silent
+  frames.
 
 Every command takes `--json`; exit code 2 means failure. `tune play` is for the
 producer: it plays through the speakers and reloads the file when it changes.

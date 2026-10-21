@@ -212,24 +212,13 @@ fn same_fx_chain(a: &[CompiledFx], b: &[CompiledFx]) -> bool {
         })
 }
 
-/// Whether two songs build their mix runtimes alike, so one runtime serves
-/// both: the same master mode (the limiter), the same buses, and bit-equal
-/// `clock.samples_per_step` (the delay buffer is sized from it). Params may
-/// differ; the static reset after a swap sets them.
-fn same_mix_build(a: &CompiledSong, b: &CompiledSong) -> bool {
-    a.mix.master == b.mix.master
-        && a.mix.delay.is_some() == b.mix.delay.is_some()
-        && a.mix.reverb.is_some() == b.mix.reverb.is_some()
-        && a.clock.samples_per_step.to_bits() == b.clock.samples_per_step.to_bits()
-}
-
 /// Plays a [`CompiledSong`]: arrangement, automation, mixer, buses and the
 /// master stage.
 pub struct Engine {
     song: Arc<CompiledSong>,
     tracks: Vec<TrackRuntime>,
-    /// The buses and the master stage, built for the playing song (see
-    /// `same_mix_build`); a swap keeps it or takes the update's.
+    /// The buses and the master stage; a swap keeps each unit or takes the
+    /// update's (see [`MixRuntime::take_units`]).
     mix: MixRuntime,
     /// Song sample position of the next sample.
     pos: u64,
@@ -251,7 +240,7 @@ pub struct Engine {
     /// The last applied swap, holding the old song, until it is taken.
     retired: Option<Box<SongUpdate>>,
     swaps_applied: u64,
-    /// Swaps that kept `mix`.
+    /// Swaps that kept every unit of `mix`.
     mix_swaps_kept: u64,
     /// The generation of the song playing (see [`generation`](Self::generation)).
     generation: u64,
@@ -314,11 +303,13 @@ impl Engine {
     /// - every new track takes the old runtime with the same id and
     ///   instrument kind (keeping the old fx chain if it is built alike, see
     ///   `same_fx_chain`); other tracks get the update's fresh runtimes;
-    /// - the running mix runtime (bus tails, limiter state and mix
-    ///   overrides) stays when the new song builds its mix alike (the same
-    ///   master mode, the same buses and a bit-equal step length); otherwise
-    ///   the update's fresh one takes over and the old one goes back in the
-    ///   retired update;
+    /// - the mix keeps each unit the new song can use and takes the
+    ///   update's fresh one for the rest, the old one going back in the
+    ///   retired update: the delay is replaced when its bus appears or goes
+    ///   or the step length changes, the reverb only when its bus appears or
+    ///   goes, and a master-mode switch crossfades between the clipper and
+    ///   the limiter without a silent frame (see
+    ///   [`MixRuntime::take_units`]);
     /// - the new clock takes over at step `k` (the step index survives a bpm
     ///   change) and static params are re-applied;
     /// - the loop is clamped to the new end, and dropped when it starts at
@@ -331,7 +322,7 @@ impl Engine {
     ///
     /// Knob overrides travel with the runtimes a swap keeps (an fx chain's
     /// overrides only when the chain is kept, strip overrides with the
-    /// track, mix overrides with the mix runtime). An update made to clear the
+    /// track, mix overrides with the engine). An update made to clear the
     /// overrides clears them all when it lands; an update that replaces such
     /// a pending one inherits that.
     pub fn queue_swap(&mut self, mut update: Box<SongUpdate>) -> Option<Box<SongUpdate>> {
@@ -364,8 +355,8 @@ impl Engine {
         self.swaps_applied
     }
 
-    /// Swaps that kept the running mix runtime (see
-    /// [`queue_swap`](Self::queue_swap)).
+    /// Swaps that kept every unit of the running mix: buses and master
+    /// stage (see [`queue_swap`](Self::queue_swap)).
     pub fn mix_swaps_kept(&self) -> u64 {
         self.mix_swaps_kept
     }
@@ -672,10 +663,8 @@ impl Engine {
             u.spare.push(rt);
         }
         std::mem::swap(&mut self.tracks, &mut u.spare);
-        if same_mix_build(&self.song, &u.song) {
+        if self.mix.take_units(&mut u.mix, &self.song, &u.song) {
             self.mix_swaps_kept += 1;
-        } else {
-            std::mem::swap(&mut self.mix, &mut u.mix);
         }
         std::mem::swap(&mut self.song, &mut u.song);
         self.generation = u.generation;

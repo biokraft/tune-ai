@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
 use common::{MINI, MIXED, compile_song, compiled, drop_lane, run, song, variant_of};
-use tune_dsp::DistortionMode;
+use tune_dsp::{DistortionMode, db2amp};
 use tune_engine::{
     AudioOut, CompiledSong, Engine, LiveError, LiveProcessor, ParamTarget, RenderOptions,
     SongUpdate, live, render,
@@ -17,6 +17,35 @@ const BAR: u64 = 96_000;
 const END: u64 = 4 * BAR;
 /// One step at 120 BPM and 48 kHz.
 const STEP: u64 = 6000;
+
+/// `songs/first-acid` as first mixed: limit mode, delay and reverb buses.
+const FIRST_ACID_MIXED: &str = include_str!("../../tune-song/tests/fixtures/first-acid-mixed.toml");
+
+/// An open hat once a bar into the reverb, through the limiter, with no
+/// delay bus: after a hit only the hat's decay and the reverb tail sound.
+const ROOM: &str = r#"
+[song]
+name = "room"
+bpm = 120
+seed = 3
+
+[mix]
+master = "limit"
+params = { "reverb.size" = 70, "master.gain" = 6 }
+
+[tracks.hat]
+instrument = "hat_open"
+params = { "send.reverb" = 0 }
+
+[patterns.h]
+track = "hat"
+steps = "x..............."
+
+[[sections]]
+name = "a"
+bars = 4
+play = { hat = "h" }
+"#;
 
 fn render_bars(song: &Arc<CompiledSong>, start_bar: u32, end_bar: u32) -> Vec<f32> {
     render(
@@ -707,6 +736,80 @@ fn swap_builds_missing_units() {
         )
     };
     assert_ne!(room(0.0), room(100.0), "the swap built the reverb bus");
+}
+
+/// The longest run of frames in which both channels are exactly 0.0.
+fn longest_silence(x: &[f32]) -> usize {
+    let (mut run, mut longest) = (0, 0);
+    for f in x.chunks_exact(2) {
+        if f[0] == 0.0 && f[1] == 0.0 {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    longest
+}
+
+#[test]
+fn reload_in_the_drop_never_goes_silent() {
+    let limit = compiled(FIRST_ACID_MIXED);
+    let faster = compile_song(&variant_of(FIRST_ACID_MIXED, |s| s.bpm = 146.0));
+    let clip = compile_song(&variant_of(FIRST_ACID_MIXED, |s| {
+        s.mix.master = MasterMode::Clip;
+    }));
+    for (name, from, to) in [
+        ("bpm 145 -> 146", &limit, &faster),
+        ("clip -> limit", &clip, &limit),
+        ("limit -> clip", &limit, &clip),
+    ] {
+        let mut e = Engine::new(from.clone());
+        let bar = (16.0 * from.clock.samples_per_step) as u64;
+        // One bar into the drop (bar 81, 1-based), then the reload.
+        e.seek(80);
+        let before = run(&mut e, bar);
+        let loud = before.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!(loud > 0.5, "{name}: the drop is loud ({loud})");
+        assert!(e.queue_swap(SongUpdate::new(to.clone())).is_none());
+        let after = run(&mut e, bar);
+        assert_eq!(e.swaps_applied(), 1, "{name}");
+        let silent = longest_silence(&after);
+        assert!(
+            silent < 8,
+            "{name}: {silent} silent frames after the reload"
+        );
+        if to.mix.master == MasterMode::Limit {
+            // The swap lands within a step; a step and 20 ms on, the
+            // limiter alone holds the output (the clipper would allow
+            // -1 dBFS).
+            let settled = (from.clock.samples_per_step + 960.0) as usize;
+            let peak = after[2 * settled..]
+                .iter()
+                .fold(0.0f32, |m, x| m.max(x.abs()));
+            assert!(peak <= db2amp(-1.5) as f32, "{name}: peak {peak}");
+        }
+    }
+}
+
+#[test]
+fn bpm_reload_keeps_the_reverb_tail() {
+    // The same song played on without a reload is the reference: the hat,
+    // the reverb and the limiter all carry on, so until the next hit the
+    // output must not change by a bit.
+    let a = compiled(ROOM);
+    let faster = compile_song(&variant_of(ROOM, |s| s.bpm = 121.0));
+    let mut reference = Engine::new(a.clone());
+    let mut e = Engine::new(a);
+    let lead = 4 * STEP + 10;
+    assert_bits(&run(&mut e, lead), &run(&mut reference, lead));
+    assert!(e.queue_swap(SongUpdate::new(faster)).is_none());
+    // The swap lands at step 5; the next hit is 11 steps later.
+    let tail = 6 * STEP;
+    let heard = run(&mut e, tail);
+    assert_eq!(e.swaps_applied(), 1);
+    assert!(heard.iter().any(|&x| x.abs() > 1e-3), "the tail rings");
+    assert_bits(&heard, &run(&mut reference, tail));
 }
 
 /// Plays `from` into section `b`, swaps to `to` (which must replace the mix

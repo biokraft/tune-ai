@@ -62,9 +62,10 @@ tune render songs/first-acid/song.toml --bars 81..96 --out scratch/drop.wav
 
 `tune render` reports `max_reduction_db`, how far the limiter pulled peaks
 down; keep it under about 9 dB. `tune params` lists every id and range. The
-limiter delays the output by 1.75 ms (not compensated), and a hot reload that
-changes the tempo or master mode, or adds or removes a delay or reverb bus,
-cuts ringing delay and reverb tails.
+limiter delays the output by 1.75 ms (not compensated). A hot reload keeps
+the reverb tail and the limiter; a tempo change, or a delay bus appearing or
+going, restarts the delay, so its echoes stop. Switching the master mode
+crossfades between the clipper and the limiter over 10 ms without a gap.
 
 ## Open the studio
 

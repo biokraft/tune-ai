@@ -1,7 +1,8 @@
 //! Proves `LiveProcessor::process` and `Engine::process` neither allocate
 //! nor free memory, even across blocks that apply a swap (one that keeps the
-//! mix runtime and one that rebuilds it), a seek, a loop wrap, the song end
-//! and knob overrides on tracks, strips and the mix.
+//! mix, one that rebuilds the delay for a new bpm and master-mode switches
+//! that crossfade between the clipper and the limiter), a seek, a loop wrap,
+//! the song end and knob overrides on tracks, strips and the mix.
 //!
 //! A counting global allocator counts every allocation, reallocation and
 //! deallocation made while the thread-local "audio" flag is set. The flag is
@@ -18,7 +19,7 @@ use std::sync::Arc;
 use common::{MINI, MIXED, compile_song, compiled, song, variant_of};
 use tune_dsp::{DistortionMode, MASTER_GAIN, STRIP_SEND_DELAY};
 use tune_engine::{CompiledSong, Engine, LiveProcessor, MIX_TRACK, ParamTarget, SongUpdate, live};
-use tune_song::{FxSpec, InstrumentKind, MixUnit, Track};
+use tune_song::{FxSpec, InstrumentKind, MasterMode, MixUnit, Track};
 
 struct Counting;
 
@@ -286,6 +287,48 @@ fn bpm_swap_rebuilds_mix_without_alloc() {
     // Nine slow steps: the delay reads back its whole 8 steps.
     under_flag(&mut out, 9 * slow_step, 4096, |o| e.process(o));
     assert!(!e.finished());
+
+    assert_no_alloc();
+}
+
+#[test]
+fn master_switches_swap_without_alloc() {
+    const STEP: u64 = 6000;
+    let clip = |bpm: f64| {
+        compile_song(&variant_of(MIXED, |s| {
+            s.mix.master = MasterMode::Clip;
+            s.bpm = bpm;
+        }))
+    };
+    let faster = compile_song(&variant_of(MIXED, |s| s.bpm = 121.0));
+    let (mut ctl, mut p) = live(clip(120.0), 0, None);
+    let mut out = vec![0.0f32; 2 * 4096];
+
+    // Section `b`: the acid rings in both buses.
+    ctl.seek(2).unwrap();
+    audio(&mut p, &mut out, 1000, 512);
+    // Clip to limit: the fresh limiter fills, then the crossfade (well
+    // inside a step).
+    ctl.swap(compiled(MIXED)).unwrap();
+    audio(&mut p, &mut out, STEP, 512);
+    assert_eq!(ctl.swaps_applied(), 1);
+    assert_eq!(ctl.collect_garbage(), 1);
+    // A new bpm: the delay is rebuilt, the reverb and the limiter stay.
+    ctl.swap(faster).unwrap();
+    audio(&mut p, &mut out, STEP, 333);
+    assert_eq!(ctl.swaps_applied(), 2);
+    assert_eq!(ctl.collect_garbage(), 1);
+    // Limit to clip: the crossfade back; the limiter stays, idle.
+    ctl.swap(clip(120.0)).unwrap();
+    audio(&mut p, &mut out, STEP, 61);
+    assert_eq!(ctl.swaps_applied(), 3);
+    assert_eq!(ctl.collect_garbage(), 1);
+    // Clip to clip: the idle limiter goes back as garbage.
+    ctl.swap(clip(122.0)).unwrap();
+    audio(&mut p, &mut out, STEP, 4096);
+    assert_eq!(ctl.swaps_applied(), 4);
+    assert_eq!(ctl.collect_garbage(), 1);
+    audio(&mut p, &mut out, STEP, 512);
 
     assert_no_alloc();
 }

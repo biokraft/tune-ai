@@ -66,23 +66,50 @@ impl Meter {
         if pre > CLIP_KNEE {
             self.knee_samples += 1;
         }
-        let (cl, cr) = (soft_clip(l), soft_clip(r));
-        self.peak = self.peak.max(cl.abs().max(cr.abs()));
-        (cl, cr)
+        self.written(soft_clip(l), soft_clip(r))
     }
 
     /// Records one master frame, runs it through `limiter` and returns the
     /// limiter's output (the frame from its latency ago).
     pub fn limit_frame(&mut self, limiter: &mut Limiter, l: f64, r: f64) -> (f64, f64) {
+        let (ol, or) = self.limited(limiter, l, r);
+        self.written(ol, or)
+    }
+
+    /// The limiter half of [`limit_frame`](Self::limit_frame): every
+    /// statistic but the output peak.
+    fn limited(&mut self, limiter: &mut Limiter, l: f64, r: f64) -> (f64, f64) {
         self.pre_clip_peak = self.pre_clip_peak.max(l.abs().max(r.abs()));
         let (ol, or, gain) = limiter.process(l, r);
         if gain < 1.0 {
             self.knee_samples += 1;
             self.max_reduction_db = self.max_reduction_db.max(-20.0 * gain.log10());
         }
-        self.peak = self.peak.max(ol.abs().max(or.abs()));
         (ol, or)
     }
+
+    /// Records the frame the master stage writes and returns it.
+    fn written(&mut self, l: f64, r: f64) -> (f64, f64) {
+        self.peak = self.peak.max(l.abs().max(r.abs()));
+        (l, r)
+    }
+}
+
+/// How long a master-mode switch crossfades, in milliseconds.
+pub const MASTER_FADE_MS: f64 = 10.0;
+
+/// A master-mode switch in progress: the clipper and the limiter both run
+/// while the output crossfades from one to the other.
+#[derive(Clone, Copy, Debug)]
+struct MasterFade {
+    /// The mode faded to.
+    to: MasterMode,
+    /// Frames still to play from the mode faded from before the crossfade
+    /// starts: a fresh limiter's latency, while its lookahead fills.
+    wait: usize,
+    /// Crossfade frames done, out of `len`.
+    done: usize,
+    len: usize,
 }
 
 /// The strip of one track: its two send gains and its ducker, set by
@@ -162,7 +189,14 @@ impl Strip {
 pub struct MixRuntime {
     delay: Option<Delay>,
     reverb: Option<Reverb>,
+    /// Built in limit mode. After a switch to clip mode it stays (idle) so
+    /// the crossfade can play out; the next swap that ends clip mode or
+    /// keeps it hands it back as garbage.
     limiter: Option<Limiter>,
+    /// A master-mode switch being crossfaded.
+    fade: Option<MasterFade>,
+    /// Crossfade length in frames ([`MASTER_FADE_MS`]).
+    fade_len: usize,
     /// Linear master gain (`db2amp(master.gain)`).
     master_gain: f64,
     /// One override per param of each unit in plain units, indexed by
@@ -192,6 +226,8 @@ impl MixRuntime {
                 .map(|_| Delay::new(sample_rate, song.clock.samples_per_step)),
             reverb: mix.reverb.as_ref().map(|_| Reverb::new(sample_rate)),
             limiter: (mix.master == MasterMode::Limit).then(|| Limiter::new(sample_rate)),
+            fade: None,
+            fade_len: ((MASTER_FADE_MS * 0.001 * sample_rate).round() as usize).max(1),
             master_gain: 1.0,
             overrides: [
                 vec![f64::NAN; DELAY_PARAMS.len()],
@@ -314,6 +350,80 @@ impl MixRuntime {
             .sum()
     }
 
+    /// Takes over from `fresh`, built for `new`, each unit this runtime,
+    /// built for `old`, cannot serve, and hands back in `fresh` what it
+    /// gives up. Moves only: it never allocates or frees. Params and knob
+    /// overrides stay here; the static reset after a swap sets the params.
+    ///
+    /// - The delay is replaced when the bus appears or goes, or when the
+    ///   step length changes (its buffer is sized from it): its echoes stop.
+    /// - The reverb is replaced only when the bus appears or goes, so its
+    ///   tail rings on through a tempo change.
+    /// - The limiter stays while both songs limit. A switch to the limiter
+    ///   takes the fresh one, plays the clipper while its lookahead fills
+    ///   and then crossfades to it over [`MASTER_FADE_MS`]; a switch to the
+    ///   clipper crossfades the other way. Neither drops a frame.
+    ///
+    /// Returns whether every unit stayed.
+    pub(crate) fn take_units(
+        &mut self,
+        fresh: &mut MixRuntime,
+        old: &CompiledSong,
+        new: &CompiledSong,
+    ) -> bool {
+        let (a, b) = (&old.mix, &new.mix);
+        let keep_delay = a.delay.is_some() == b.delay.is_some()
+            && (b.delay.is_none()
+                || old.clock.samples_per_step.to_bits() == new.clock.samples_per_step.to_bits());
+        if !keep_delay {
+            std::mem::swap(&mut self.delay, &mut fresh.delay);
+        }
+        let keep_reverb = a.reverb.is_some() == b.reverb.is_some();
+        if !keep_reverb {
+            std::mem::swap(&mut self.reverb, &mut fresh.reverb);
+        }
+        let len = self.fade_len;
+        let fade = |to, wait, done| {
+            Some(MasterFade {
+                to,
+                wait,
+                done,
+                len,
+            })
+        };
+        match (a.master, b.master) {
+            (MasterMode::Limit, MasterMode::Limit) => {}
+            (MasterMode::Limit, MasterMode::Clip) => {
+                self.fade = match self.fade {
+                    // Back before the crossfade began: the clipper was
+                    // playing all along.
+                    Some(f) if f.wait > 0 => None,
+                    Some(f) => fade(MasterMode::Clip, 0, len - f.done),
+                    None if self.limiter.is_some() => fade(MasterMode::Clip, 0, 0),
+                    None => None,
+                };
+            }
+            (MasterMode::Clip, MasterMode::Limit) => match self.fade {
+                // Back while fading to the clipper: the limiter has kept
+                // running, so fade back to it from where the fade is.
+                Some(f) => self.fade = fade(MasterMode::Limit, 0, len - f.done),
+                None => {
+                    std::mem::swap(&mut self.limiter, &mut fresh.limiter);
+                    let wait = self.limiter.as_ref().map(Limiter::latency);
+                    self.fade = wait.and_then(|w| fade(MasterMode::Limit, w, 0));
+                }
+            },
+            (MasterMode::Clip, MasterMode::Clip) => {
+                // An idle limiter left by an earlier switch goes back now,
+                // unless its crossfade is still playing.
+                if self.fade.is_none() {
+                    std::mem::swap(&mut self.limiter, &mut fresh.limiter);
+                }
+            }
+        }
+        keep_delay && keep_reverb && a.master == b.master
+    }
+
     /// Whether the delay bus is built.
     pub fn has_delay(&self) -> bool {
         self.delay.is_some()
@@ -357,14 +467,23 @@ impl MixRuntime {
         mr: f64,
     ) -> (f64, f64) {
         let (l, r) = (ml * self.master_gain, mr * self.master_gain);
+        if let (Some(fade), Some(limiter)) = (&mut self.fade, &mut self.limiter) {
+            let out = fade.frame(limiter, meter, l, r);
+            if fade.done == fade.len {
+                self.fade = None;
+            }
+            return out;
+        }
         match (master, &mut self.limiter) {
             (MasterMode::Limit, Some(limiter)) => meter.limit_frame(limiter, l, r),
             _ => meter.clip_frame(l, r),
         }
     }
 
-    /// Clears every bus and the limiter; params and overrides stay.
+    /// Clears every bus and the limiter and ends a master crossfade; params
+    /// and overrides stay.
     pub fn reset(&mut self) {
+        self.fade = None;
         if let Some(d) = &mut self.delay {
             d.reset();
         }
@@ -374,6 +493,28 @@ impl MixRuntime {
         if let Some(l) = &mut self.limiter {
             l.reset();
         }
+    }
+}
+
+impl MasterFade {
+    /// One master frame of the crossfade: both stages run, the output moves
+    /// linearly from the mode faded from to `to`, reaching it on the last
+    /// frame. Linear, because both sides
+    /// carry the same music: their sum never exceeds the louder of the two.
+    fn frame(&mut self, limiter: &mut Limiter, meter: &mut Meter, l: f64, r: f64) -> (f64, f64) {
+        let limited = meter.limited(limiter, l, r);
+        let clipped = (soft_clip(l), soft_clip(r));
+        let (from, to) = match self.to {
+            MasterMode::Limit => (clipped, limited),
+            MasterMode::Clip => (limited, clipped),
+        };
+        if self.wait > 0 {
+            self.wait -= 1;
+            return meter.written(from.0, from.1);
+        }
+        self.done += 1;
+        let a = self.done as f64 / self.len as f64;
+        meter.written(from.0 + a * (to.0 - from.0), from.1 + a * (to.1 - from.1))
     }
 }
 
