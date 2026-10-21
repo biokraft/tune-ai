@@ -8,11 +8,11 @@ import {
 } from "@tune/ui";
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { Command, ParamView, SongView, TrackView } from "../client/protocol";
-import { frameThrottle } from "../lib/frameThrottle";
 import { highlightedSteps, patternIn, sentenceCase, stepInPattern } from "../lib/song";
 import type { HighlightKind } from "../store/studioStore";
 import { usePlayheadStep } from "../store/useStudio";
 import { HelpStrip } from "./HelpStrip";
+import { useParamDrag } from "./useParamDrag";
 
 export type Panel303Props = {
   song: SongView;
@@ -32,19 +32,12 @@ const SMALL = ["waveform", "slide_time", "volume"];
 const DIST = ["drive", "mix", "output"];
 /** How long a knob note (e.g. "automated here") stays in the help strip. */
 const NOTE_MS = 6000;
-/** After a commit's reply, how long the released value may wait for the studio's state. */
-const SETTLE_MS = 600;
 
 const focusRing =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-silkscreen";
 
-type Live = { value: number; committed: boolean };
-
 const byShortId = (params: ParamView[], short: string) =>
   params.find((p) => p.id.slice(p.id.indexOf(".") + 1) === short);
-
-/** Within the 4-significant-digit rounding the studio applies to a committed value. */
-const settled = (a: number, b: number) => Math.abs(a - b) <= Math.abs(b) * 1e-3 + 1e-9;
 
 /** The 303 faceplate: the first acid303 track's knobs, distortion, help strip and sequencer. */
 /** Memoised: playhead ticks reach only the sequencer's LEDs, never the knobs. */
@@ -99,23 +92,10 @@ function TrackPanel({
   highlights,
   send,
 }: TrackPanelProps) {
-  const [live, setLive] = useState<Map<string, Live>>(new Map());
   const [hovered, setHovered] = useState<ParamSpecView | null>(null);
   const [focused, setFocused] = useState<ParamSpecView | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const noteTimer = useRef<ReturnType<typeof setTimeout>>();
-  const sendRef = useRef(send);
-  sendRef.current = send;
-
-  const throttle = useMemo(
-    () =>
-      frameThrottle<number>((param, value) => {
-        void sendRef
-          .current({ cmd: "set_param", args: { track: track.id, param, value, commit: false } })
-          .catch(() => {});
-      }),
-    [track.id],
-  );
 
   const dist = track.fx.find((f) => f.kind === "distortion");
   const allParams = useMemo(
@@ -123,39 +103,20 @@ function TrackPanel({
     [track.params, dist?.params],
   );
 
-  // A released value stays on the knob until the studio's state shows it.
-  useEffect(() => {
-    setLive((prev) => {
-      let next: Map<string, Live> | null = null;
-      for (const [id, l] of prev) {
-        const p = allParams.find((x) => x.id === id);
-        if (l.committed && (!p || settled(p.value, l.value))) {
-          next ??= new Map(prev);
-          next.delete(id);
-        }
-      }
-      return next ?? prev;
-    });
-  }, [allParams]);
-
   useEffect(() => () => clearTimeout(noteTimer.current), []);
-
-  const setLiveValue = (id: string, value: number, committed: boolean) =>
-    setLive((prev) => new Map(prev).set(id, { value, committed }));
-  const dropLive = (id: string, value: number) =>
-    setLive((prev) => {
-      const l = prev.get(id);
-      if (!l || !l.committed || l.value !== value) return prev;
-      const next = new Map(prev);
-      next.delete(id);
-      return next;
-    });
 
   const showNote = (text: string) => {
     clearTimeout(noteTimer.current);
     setNote(text);
     noteTimer.current = setTimeout(() => setNote(null), NOTE_MS);
   };
+
+  const drag = useParamDrag(track.id, send, allParams, (id) => {
+    const p = allParams.find((x) => x.id === id);
+    showNote(
+      `${sentenceCase(p?.label ?? id)} follows its automation here — you heard your change, but it wasn't saved. Ask Claude to change the automation.`,
+    );
+  });
 
   const shownSection = section === null ? undefined : song.sections[section];
   const soundingSection = automatedIn === null ? undefined : song.sections[automatedIn];
@@ -165,7 +126,6 @@ function TrackPanel({
   const knob = (p: ParamView | undefined, size: "lg" | "md" | "sm") => {
     if (!p) return null;
     const spec = { ...p, label: sentenceCase(p.label) };
-    const l = live.get(p.id);
     const h = highlights.get(`tracks.${track.id}.${p.id}`) ?? null;
     return (
       <div
@@ -175,37 +135,13 @@ function TrackPanel({
       >
         <Knob
           spec={spec}
-          value={l?.value ?? p.value}
+          value={drag.valueOf(p)}
           size={size}
           highlight={h}
           automated={automated(p.id)}
           onHelp={(s) => setFocused(s)}
-          onChange={(v) => {
-            setLiveValue(p.id, v, false);
-            throttle.push(p.id, v);
-          }}
-          onCommit={(v) => {
-            throttle.cancel(p.id);
-            setLiveValue(p.id, v, true);
-            sendRef
-              .current({
-                cmd: "set_param",
-                args: { track: track.id, param: p.id, value: v, commit: true },
-              })
-              .then(
-                (r) => {
-                  if (r && typeof r === "object" && "automated" in r && r.automated) {
-                    dropLive(p.id, v);
-                    showNote(
-                      `${spec.label} follows its automation here — you heard your change, but it wasn't saved. Ask Claude to change the automation.`,
-                    );
-                  } else {
-                    setTimeout(() => dropLive(p.id, v), SETTLE_MS);
-                  }
-                },
-                () => dropLive(p.id, v),
-              );
-          }}
+          onChange={(v) => drag.change(p.id, v)}
+          onCommit={(v) => drag.commit(p.id, v)}
         />
       </div>
     );
