@@ -1,0 +1,75 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-10-21T17:40:14Z"},
+  "title": "tune-ai studio",
+  "launch": {"view": "canvas", "page": "base"},
+  "pages": [
+    {"id": "base", "name": "1 Base view & timeline"},
+    {"id": "style", "name": "2 Style, tokens & controls"},
+    {"id": "modules", "name": "3 Modules & note editors"},
+    {"id": "mix", "name": "4 Mixer, browser & listening"},
+    {"id": "agent", "name": "5 Agent panel & edits"},
+    {"id": "learn", "name": "6 Learning mode"},
+    {"id": "proto", "name": "7 Prototype"}
+  ],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "page": "base", "title": "Base view A · panel layout, playing the drop"},
+    "BaseB.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "page": "base", "title": "Base view B · song-map ribbon, chat as drawer"},
+    "Timeline.dc.html": {"x": 0, "y": 1280, "w": 1440, "h": 1100, "page": "base", "title": "Timeline details"},
+    "EmptySong.dc.html": {"x": 1520, "y": 1280, "w": 1440, "h": 900, "page": "base", "title": "Empty song"},
+
+    "StyleA.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 1820, "page": "style", "title": "Style A · Dusk Glass"},
+    "StyleB.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 1820, "page": "style", "title": "Style B · Night Console"},
+    "StyleC.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 1820, "page": "style", "title": "Style C · Aurora"},
+    "Tokens.dc.html": {"x": 0, "y": 2200, "w": 1440, "h": 900, "page": "style", "title": "Design tokens"},
+    "Controls.dc.html": {"x": 1520, "y": 2200, "w": 1440, "h": 900, "page": "style", "title": "Knobs and controls"},
+
+    "Dock303.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "page": "modules", "title": "303 in the dock"},
+    "Float303.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "page": "modules", "title": "Floating modules · 303 and clap"},
+    "DockDrum.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 900, "page": "modules", "title": "Kick in the dock"},
+    "Seq303.dc.html": {"x": 0, "y": 1280, "w": 1440, "h": 900, "page": "modules", "title": "303 step sequencer · A and B"},
+    "DrumGrid.dc.html": {"x": 1520, "y": 1280, "w": 1440, "h": 900, "page": "modules", "title": "Drum step grid · A and B"},
+
+    "MixerDock.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "page": "mix", "title": "Mixer A · dock tab"},
+    "MixerView.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "page": "mix", "title": "Mixer B · full view"},
+    "Browser.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 900, "page": "mix", "title": "Browser · preview and drag"},
+    "Listen.dc.html": {"x": 0, "y": 1280, "w": 1440, "h": 900, "page": "mix", "title": "Listening A · full view"},
+    "ListenB.dc.html": {"x": 1520, "y": 1280, "w": 1440, "h": 900, "page": "mix", "title": "Listening B · side drawer"},
+
+    "AgentPanelsA.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "page": "agent", "title": "Agent panel A · top tabs"},
+    "AgentPanelsB.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "page": "agent", "title": "Agent panel B · side tabs and rail"},
+    "Permissions.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 900, "page": "agent", "title": "Permissions · what counts as big"},
+    "AgentEdit.dc.html": {"x": 0, "y": 1280, "w": 1440, "h": 1100, "page": "agent", "title": "Normal-mode edit · frame sequence"},
+    "Approval.dc.html": {"x": 1520, "y": 1280, "w": 1440, "h": 900, "page": "agent", "title": "Pending big change"},
+
+    "Learn.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "page": "learn", "title": "Learning A · spotlight and bubble"},
+    "LearnB.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "page": "learn", "title": "Learning B · lesson rail and Let me try"},
+    "LearnRecap.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 900, "page": "learn", "title": "Recap and replay from an old card"},
+
+    "Proto.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "page": "proto", "title": "Clickable prototype", "is_interactive": true}
+  },
+  "order": [
+    "Main.dc.html", "BaseB.dc.html", "Timeline.dc.html", "EmptySong.dc.html",
+    "StyleA.dc.html", "StyleB.dc.html", "StyleC.dc.html", "Tokens.dc.html", "Controls.dc.html",
+    "Dock303.dc.html", "Float303.dc.html", "DockDrum.dc.html", "Seq303.dc.html", "DrumGrid.dc.html",
+    "MixerDock.dc.html", "MixerView.dc.html", "Browser.dc.html", "Listen.dc.html", "ListenB.dc.html",
+    "AgentPanelsA.dc.html", "AgentPanelsB.dc.html", "Permissions.dc.html", "AgentEdit.dc.html", "Approval.dc.html",
+    "Learn.dc.html", "LearnB.dc.html", "LearnRecap.dc.html",
+    "Proto.dc.html"
+  ],
+  "notes": {
+    "tBase1": {"x": 0, "y": -300, "text": "Base view: transport, timeline, slim agent panel", "kind": "title1", "maxW": 2960, "page": "base"},
+    "tBase2": {"x": 0, "y": 980, "text": "Timeline details and the empty song", "kind": "title1", "maxW": 2960, "page": "base"},
+    "tStyle1": {"x": 0, "y": -300, "text": "Three looks within Dusk, colour-coded", "kind": "title1", "maxW": 4480, "page": "style"},
+    "tStyle2": {"x": 0, "y": 1900, "text": "Tokens and the control set", "kind": "title1", "maxW": 2960, "page": "style"},
+    "tMod1": {"x": 0, "y": -300, "text": "Modules: docked and floating", "kind": "title1", "maxW": 4480, "page": "modules"},
+    "tMod2": {"x": 0, "y": 980, "text": "Note editors", "kind": "title1", "maxW": 2960, "page": "modules"},
+    "tMix1": {"x": 0, "y": -300, "text": "Mixer placements and the browser", "kind": "title1", "maxW": 4480, "page": "mix"},
+    "tMix2": {"x": 0, "y": 980, "text": "Listening view", "kind": "title1", "maxW": 2960, "page": "mix"},
+    "tAgent1": {"x": 0, "y": -300, "text": "Agent panel and permissions", "kind": "title1", "maxW": 4480, "page": "agent"},
+    "tAgent2": {"x": 0, "y": 980, "text": "How agent work shows up", "kind": "title1", "maxW": 2960, "page": "agent"},
+    "tLearn1": {"x": 0, "y": -300, "text": "Learning mode", "kind": "title1", "maxW": 4480, "page": "learn"},
+    "protoGuide": {"x": 1520, "y": 0, "w": 420, "maxH": 640, "page": "proto", "fill": "teal", "text": "Press Play on the prototype, then try:\n\n1. Play / pause the drop loop.\n2. Click the acid block in the drop: the 303 opens in the dock. Pop it out, drag it, dock it back.\n3. Click the suggestion \"open the filter in the build\" and watch it happen in normal mode.\n4. Turn on Learning mode and ask again: step through with Back / Next, try Let me try.\n5. Open the browser and drag Ride onto the timeline (or press Add).\n6. Open Approvals and approve the pending rearrangement.\n7. Click the loudness readout to open the listening view."}
+  },
+  "designSystems": []
+}

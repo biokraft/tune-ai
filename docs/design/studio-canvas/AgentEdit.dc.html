@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Normal-mode agent edit</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#07040D}
+a{color:#3FDCEB}a:hover{color:#9FF3FA}
+.app{--bg:#0A0612;--ink:#EEE9F8;--ink2:#B5ADCB;--ink3:#9790AE;--line:rgba(255,255,255,.085);--line2:rgba(255,255,255,.16);--glass:rgba(23,16,39,.56);--glass2:rgba(10,6,18,.45);--blur:22px;--r:16px;--rs:9px;--row:46px;--blobop:.55;--kick:#FF5470;--clap:#FFB547;--hat:#5E8CFF;--ohat:#A3C0FF;--ride:#B79CFF;--acid:#A8F04C;--agent:#3FDCEB;--play:#F7F2FF;position:relative;width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.35}
+.app *{box-sizing:border-box}
+.look-b{--glass:rgba(16,12,27,.86);--glass2:rgba(6,4,12,.6);--blur:8px;--r:10px;--rs:6px;--row:40px;--blobop:.2;--line:rgba(255,255,255,.07)}
+.look-c{--glass:rgba(44,30,78,.32);--glass2:rgba(20,12,36,.35);--blur:40px;--r:22px;--rs:13px;--row:48px;--blobop:.9;--line:rgba(255,255,255,.15)}
+.blob{position:absolute;border-radius:50%;filter:blur(110px);opacity:var(--blobop);pointer-events:none}
+.glass{background:var(--glass);backdrop-filter:blur(var(--blur)) saturate(150%);-webkit-backdrop-filter:blur(var(--blur)) saturate(150%);border:1px solid var(--line);border-radius:var(--r);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 60px rgba(0,0,0,.35)}
+.look-c .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.2),inset 0 0 0 1px rgba(255,255,255,.04),0 30px 80px rgba(0,0,0,.45)}
+.look-b .glass{box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.lbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+.muted{color:var(--ink2)}
+.ib{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;min-width:32px;padding:0 9px;border-radius:var(--rs);border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink);font:600 12px Manrope,system-ui,sans-serif;cursor:pointer;white-space:nowrap}
+.ib:hover{background:rgba(255,255,255,.09)}
+.ib:focus-visible{outline:2px solid var(--play);outline-offset:2px}
+.ib.on{background:rgba(255,255,255,.13);border-color:var(--line2)}
+.ib svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ib.sm{height:26px;min-width:26px;padding:0 6px;font-size:11px}
+.ib.sm svg{width:14px;height:14px}
+.kbd{font:600 10px 'JetBrains Mono',monospace;color:var(--ink3);border:1px solid var(--line2);border-radius:4px;padding:0 4px;line-height:15px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.blk{position:relative;flex:1;min-width:0;border:1px solid;border-radius:7px;padding:4px 6px 4px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;cursor:pointer}
+.look-b .blk{border-radius:4px}
+.look-c .blk{border-radius:11px}
+.blk .bn{font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:22px}
+.badge{position:absolute;right:4px;top:3px;font:600 9.5px 'JetBrains Mono',monospace;padding:0 4px;border-radius:4px;background:rgba(0,0,0,.35);color:var(--ink2);line-height:14px}
+.sec{min-width:0;display:flex;align-items:center;gap:6px;padding:0 4px 0 7px;margin:4px 1px;border-radius:7px;font-size:11px;font-weight:700;color:var(--ink2);white-space:nowrap;overflow:hidden;background:rgba(255,255,255,.035)}
+.bp{position:absolute;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#0A0612;border:1.5px solid var(--acid)}
+.bp.ag{border-color:var(--agent);box-shadow:0 0 8px var(--agent)}
+.bp.soft{border-color:var(--acid);box-shadow:0 0 0 2px rgba(63,220,235,.35)}
+.me{align-self:flex-end;max-width:86%;background:rgba(255,255,255,.09);border:1px solid var(--line);border-radius:14px 14px 4px 14px;padding:7px 10px}
+.who{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--agent);margin-bottom:4px}
+.card{border-radius:12px;background:var(--glass2);border:1px solid rgba(63,220,235,.3);overflow:hidden}
+.card-h{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);font-size:11.5px;font-weight:700}
+.cl{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 10px;font-size:12px}
+.cl .t{flex:1;min-width:0}
+.cl .v{font-size:10.5px;color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.card-f{display:flex;gap:6px;padding:7px 10px;border-top:1px solid var(--line)}
+.agentbtn{border-color:rgba(63,220,235,.45);color:#BDF6FB}
+.xb{width:26px;height:26px;border-radius:6px;border:none;background:transparent;color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.xb:hover{background:rgba(255,255,255,.08);color:var(--ink)}
+.xb svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.caret{display:inline-block;width:7px;height:13px;background:var(--agent);vertical-align:-2px;margin-left:2px;border-radius:1px}
+
+.knob{display:flex;flex-direction:column;align-items:center;gap:3px;width:62px;border:none;background:transparent;color:var(--ink);padding:0;cursor:ns-resize;font-family:Manrope,sans-serif}.knob .dial{position:relative;width:46px;height:46px;border-radius:50%}.knob svg{position:absolute;inset:0;width:46px;height:46px;transform:rotate(135deg);overflow:visible}.knob .trk{fill:none;stroke:rgba(255,255,255,.1);stroke-width:4;stroke-linecap:round;stroke-dasharray:75 100}.knob .arc{fill:none;stroke-width:4;stroke-linecap:round}.knob .cap{position:absolute;inset:9px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#3B2F57,#140E1F 72%);box-shadow:0 2px 6px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.14)}.knob .ptr{position:absolute;left:50%;top:2px;width:2px;height:8px;margin-left:-1px;border-radius:1px;background:var(--ink)}.knob .kv{font:500 11px 'JetBrains Mono',monospace;color:var(--ink)}.knob .kl{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);font-weight:700}.look-b .knob .cap{background:transparent;box-shadow:none;border:1px solid var(--line)}.look-c .knob .arc{filter:drop-shadow(0 0 4px currentColor)}.knob.agent .dial{box-shadow:0 0 0 2px #3FDCEB,0 0 16px rgba(63,220,235,.6)}.knob.auto .dial::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1px dashed rgba(255,255,255,.35)}.knob:disabled{opacity:.38;cursor:not-allowed}
+
+.frames{position:absolute;left:24px;top:24px;right:24px;bottom:24px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:30px 24px}
+.fr{display:flex;flex-direction:column;gap:8px;min-width:0}
+.fcap{display:flex;align-items:baseline;gap:8px;font-size:12px;color:var(--ink2);height:26px}
+.fcap b{font:600 12px 'JetBrains Mono',monospace;color:var(--ink);flex:none}
+.fbox{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.fsec{display:flex;height:28px;flex:none;border-bottom:1px solid var(--line)}
+.fh{width:96px;flex:none;border-right:1px solid var(--line);display:flex;align-items:center;gap:7px;padding-left:10px;font-weight:700;font-size:12px}
+.frow{display:flex;height:46px;flex:none;border-bottom:1px solid rgba(255,255,255,.05)}
+.frow .fh.ag{box-shadow:inset 3px 0 0 #3FDCEB,inset 0 0 22px rgba(63,220,235,.25)}
+.frow .fh.soft{box-shadow:inset 3px 0 0 rgba(63,220,235,.55)}
+.fl{flex:1;display:flex;position:relative;min-width:0;padding-right:8px}
+.flane{display:flex;height:104px;flex:none;border-bottom:1px solid var(--line)}
+.flane svg{position:absolute;inset:8px 0;width:100%;height:calc(100% - 16px);overflow:visible}
+.vbub{position:absolute;padding:2px 6px;border-radius:6px;font:600 10.5px 'JetBrains Mono',monospace;background:rgba(10,6,18,.9);border:1px solid rgba(63,220,235,.6);color:#BDF6FB;white-space:nowrap}
+.fchat{flex:1;min-height:0;padding:12px;display:flex;flex-direction:column;gap:10px;font-size:12.5px}
+.typing{display:flex;gap:4px;align-items:center;color:var(--ink2);font-size:11.5px}
+.typing i{width:5px;height:5px;border-radius:50%;background:var(--agent);display:inline-block}
+.tag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;border:1px dashed var(--line2);color:var(--ink2);white-space:nowrap}
+.warn{margin:0 10px 8px;border-radius:10px;border:1px solid var(--line2);background:rgba(4,2,8,.75);padding:8px 10px;font-size:11.5px;display:flex;gap:8px}
+.dock{flex:1;display:flex;flex-direction:column;border-top:1px solid var(--line);background:rgba(10,6,18,.35)}
+.dockh{display:flex;align-items:center;gap:8px;height:40px;padding:0 10px;border-bottom:1px solid var(--line)}
+.knobs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 6px;padding:14px 10px;justify-items:center}
+</style>
+</helmet>
+<div class="app look-{{look}}" style="height: 1100px">
+  <div class="blob" style="left: -160px; top: 420px; width: 620px; height: 520px; background: #B4237E"></div>
+  <div class="blob" style="left: 520px; top: -220px; width: 720px; height: 460px; background: #3A2BC2"></div>
+  <div class="blob" style="left: 1080px; top: 660px; width: 560px; height: 460px; background: #5B1E9E"></div>
+
+  <div class="frames">
+    <sc-for list="{{frames}}" as="f" hint-placeholder-count="6">
+      <div class="fr">
+        <div class="fcap"><b>{{f.n}} · {{f.time}}</b><span>{{f.title}}</span></div>
+        <div class="fbox glass">
+          <div class="fsec">
+            <div class="fh" style="font-size: 10px; color: var(--ink2); letter-spacing: .1em">BARS 17–80</div>
+            <div class="fl">
+              <div class="sec" style="flex: 16 1 0">intro_acid</div>
+              <div class="sec" style="flex: 32 1 0">build</div>
+              <div class="sec" style="flex: 16 1 0">breakdown</div>
+            </div>
+          </div>
+          <div class="frow">
+            <div class="{{f.hdrCls}}"><span style="width: 3px; height: 24px; border-radius: 2px; background: #A8F04C"></span>Acid 303
+              <sc-if value="{{f.hdrDot}}" hint-placeholder-val="{{false}}"><span style="width: 7px; height: 7px; border-radius: 50%; background: #3FDCEB; box-shadow: 0 0 8px #3FDCEB"></span></sc-if>
+            </div>
+            <div class="fl" style="padding-top: 6px; padding-bottom: 6px">
+              <div style="flex: 16 1 0; padding: 0 1px; display: flex"><div class="blk" style="background: rgba(168,240,76,.13); border-color: rgba(168,240,76,.42); color: #A8F04C"><span class="bn">acid_main</span><span class="badge">×5</span></div></div>
+              <div style="flex: 32 1 0; padding: 0 1px; display: flex"><div class="blk" style="box-sizing: border-box; {{f.buildSt}}"><span class="bn">acid_main</span><span class="badge">×5</span>
+                <sc-if value="{{f.softMark}}" hint-placeholder-val="{{false}}"><span style="position: absolute; right: 30px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: #3FDCEB; opacity: .7"></span></sc-if>
+              </div></div>
+              <div style="flex: 16 1 0; padding: 0 1px; display: flex"><div class="blk" style="background: rgba(168,240,76,.13); border-color: rgba(168,240,76,.42); color: #A8F04C"><span class="bn">acid_main</span><span class="badge">×5</span></div></div>
+            </div>
+          </div>
+          <sc-if value="{{f.lane}}" hint-placeholder-val="{{true}}">
+            <div class="flane">
+              <div class="fh" style="flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px"><span class="lbl" style="color: #A8F04C">↳ Cutoff</span><span class="mono muted" style="font-size: 10.5px">lane</span></div>
+              <div class="fl">
+                <svg viewBox="0 0 640 100" preserveAspectRatio="none" aria-hidden="true">
+                  <polyline points="{{f.old}}" style="fill: none; stroke: rgba(238,233,248,.45); stroke-width: 1.2; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke"></polyline>
+                  <polyline points="{{f.target}}" style="fill: none; stroke: rgba(63,220,235,.45); stroke-width: 1.2; stroke-dasharray: 2 4; vector-effect: non-scaling-stroke"></polyline>
+                  <polyline points="{{f.line}}" style="fill: none; stroke: #A8F04C; stroke-width: 1.6; vector-effect: non-scaling-stroke"></polyline>
+                  <polyline points="{{f.agent}}" style="box-sizing: border-box; fill: none; stroke-width: 2.2; vector-effect: non-scaling-stroke; {{f.agentSt}}"></polyline>
+                </svg>
+                <sc-for list="{{f.dots}}" as="d" hint-placeholder-count="6"><span class="{{d.cls}}" style="box-sizing: border-box; {{d.s}}"></span></sc-for>
+                <sc-if value="{{f.bub}}" hint-placeholder-val="{{false}}"><span class="vbub" style="right: 36%; top: 10px">{{f.bub}}</span></sc-if>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{f.k1}}" hint-placeholder-val="{{false}}">
+            <div class="fchat">
+              <div class="me">open the filter in the build</div>
+              <div class="typing"><i></i><i style="opacity: .6"></i><i style="opacity: .3"></i><span style="margin-left: 4px">tune-ai is on it</span></div>
+            </div>
+          </sc-if>
+          <sc-if value="{{f.k2}}" hint-placeholder-val="{{false}}">
+            <div class="fchat">
+              <div class="me">open the filter in the build</div>
+              <div>
+                <div class="who">tune-ai</div>
+                <div>Opening the filter across the build, so the line gets brighter as it climbs to the breakdown<span class="caret" aria-hidden="true"></span></div>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{f.k3}}" hint-placeholder-val="{{false}}">
+            <div class="fchat">
+              <div>
+                <div class="who">tune-ai</div>
+                <div>Done. The build now ends with the filter at 70 % instead of 55 %. Loop 33–64 to hear it climb.</div>
+              </div>
+              <div class="card" style="box-shadow: 0 0 22px rgba(63,220,235,.25); border-color: rgba(63,220,235,.6)">
+                <div class="card-h"><span style="color: var(--agent)">1 change</span><span class="muted" style="font-weight: 600">· build · just now</span></div>
+                <div class="cl"><span class="dot" style="background: #A8F04C"></span><div class="t"><div style="font-weight: 600">acid · cutoff ramp in build</div><div class="mono v">12→55 %  ⟶  12→70 %</div></div>
+                  <button class="xb" aria-label="Undo cutoff ramp"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg></button></div>
+                <div class="card-f"><button class="ib sm agentbtn">Teach me this</button><button class="ib sm">Loop the build</button></div>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{f.k4}}" hint-placeholder-val="{{false}}">
+            <div class="fchat">
+              <div class="card">
+                <div class="card-h"><span style="color: var(--agent)">1 change</span><span class="muted" style="font-weight: 600">· build · 3 min ago</span></div>
+                <div class="cl" style="background: rgba(255,255,255,.05)"><span class="dot" style="background: #A8F04C"></span><div class="t"><div style="font-weight: 600">acid · cutoff ramp in build</div><div class="mono v">12→55 %  ⟶  12→70 %</div></div>
+                  <button class="xb" aria-label="Undo cutoff ramp" style="background: rgba(255,255,255,.12); color: var(--ink)"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg></button></div>
+                <div class="warn" role="alert">
+                  <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" style="fill: none; stroke: #EEE9F8; stroke-width: 1.8; flex: none; margin-top: 1px"><path d="M12 3l10 18H2z"></path><path d="M12 10v5M12 18v.5"></path></svg>
+                  <div style="flex: 1">
+                    <div style="font-weight: 700">This also reverts your later change</div>
+                    <div class="muted mono" style="font-size: 10.5px; margin: 2px 0 6px">cutoff 62 % at bar 64 (you, 2 min ago)</div>
+                    <div style="display: flex; gap: 6px"><button class="ib sm">Undo both</button><button class="ib sm">Keep mine</button></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{f.k5}}" hint-placeholder-val="{{false}}">
+            <div class="fchat">
+              <div class="me">make it squeal a bit more at the top</div>
+              <div class="card" style="box-shadow: 0 0 22px rgba(63,220,235,.25); border-color: rgba(63,220,235,.6)">
+                <div class="card-h"><span style="color: var(--agent)">1 change</span><span class="muted" style="font-weight: 600">· build · just now</span></div>
+                <div class="cl"><span class="dot" style="background: #A8F04C"></span>
+                  <div class="t"><div style="font-weight: 600">acid · resonance</div><div style="display: flex; gap: 6px; align-items: center"><span class="mono v">85 %  ⟶  90 %</span><span class="tag">not on screen</span></div></div>
+                  <button class="ib sm agentbtn" style="box-shadow: 0 0 0 3px rgba(63,220,235,.18)">Show</button>
+                  <button class="xb" aria-label="Undo resonance"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"></path><path d="M4 9h11a5 5 0 010 10h-3"></path></svg></button></div>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{f.k6}}" hint-placeholder-val="{{false}}">
+            <div class="dock">
+              <div class="dockh">
+                <span style="width: 10px; height: 10px; border-radius: 3px; background: #A8F04C"></span>
+                <span style="font-weight: 800">Acid 303</span>
+                <span class="muted" style="font-size: 11.5px">· Sound</span>
+                <div style="flex: 1"></div>
+                <button class="xb" aria-label="Pop out"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"></path></svg></button>
+                <button class="xb" aria-label="Close dock (Esc)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+              </div>
+              <div class="knobs">
+                <sc-for list="{{knobs}}" as="k" hint-placeholder-count="8">
+                  <button class="{{k.cls}}" aria-label="{{k.label}} {{k.val}}"><span class="dial"><svg viewBox="0 0 46 46" aria-hidden="true"><circle class="trk" cx="23" cy="23" r="18" pathLength="100"></circle><circle class="arc" cx="23" cy="23" r="18" pathLength="100" style="stroke: {{k.col}}; stroke-dasharray: {{k.dash}} 100"></circle></svg><span class="cap" style="transform: rotate({{k.deg}}deg)"><span class="ptr"></span></span></span><span class="kv">{{k.val}}</span><span class="kl">{{k.label}}</span></button>
+                </sc-for>
+              </div>
+              <div style="margin: auto 10px 10px; font-size: 11.5px; color: var(--ink2); display: flex; gap: 8px; align-items: center"><span class="kbd">?</span><span><b style="color: var(--ink)">Resonance</b> — how much the filter rings at the cutoff. Higher squeals.</span></div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"look":{"editor":"enum","options":["a","b","c"],"default":"a"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const look = this.props.look ?? 'a';
+    const Y = (v) => (100 - v * 90 - 5).toFixed(1);
+    const lineFor = (end) => `0,${Y(.02)} 160,${Y(.12)} 160,${Y(.12)} 480,${Y(end)} 480,${Y(.35)} 640,${Y(.25)}`;
+    const dotsFor = (end, mode) => [[0, .02], [160, .12], [480, end], [480, .35], [640, .25]].map(([x, v], i) => ({
+      cls: i === 2 && mode ? 'bp ' + mode : 'bp',
+      s: `left: ${(x / 6.4).toFixed(2)}%; top: calc(8px + (100% - 16px) * ${(Number(Y(v)) / 100).toFixed(3)})`
+    }));
+    const NORMAL = 'background: rgba(168,240,76,.13); border-color: rgba(168,240,76,.42); color: #A8F04C';
+    const GLOW = 'background: rgba(168,240,76,.22); border-color: #3FDCEB; color: #fff; box-shadow: 0 0 0 1.5px #3FDCEB, 0 0 22px rgba(63,220,235,.5)';
+    const START = 'background: rgba(168,240,76,.18); border-color: rgba(63,220,235,.7); color: #fff; box-shadow: 0 0 12px rgba(63,220,235,.3)';
+    const OPEN = 'background: rgba(168,240,76,.22); border-color: #EEE9F8; color: #fff; box-shadow: 0 0 0 1.5px rgba(238,233,248,.7)';
+    const base = { k1: false, k2: false, k3: false, k4: false, k5: false, k6: false, lane: true, old: '', target: '', agent: '', agentSt: 'stroke: #3FDCEB', bub: '', hdrDot: false, hdrCls: 'fh', softMark: false, buildSt: NORMAL };
+    const frames = [
+      { ...base, n: '1', time: 't = 0 s', title: 'Before. The ask is sent.', k1: true, line: lineFor(.55), dots: dotsFor(.55) },
+      { ...base, n: '2', time: 't = 0.3 s', title: 'The ramp bends, the value sweeps, glow starts.', k2: true,
+        line: lineFor(.12).split(' ').slice(0, 3).join(' ') + ` 480,${Y(.35)} 640,${Y(.25)}`,
+        old: `160,${Y(.12)} 480,${Y(.55)}`, target: `160,${Y(.12)} 480,${Y(.70)}`, agent: `160,${Y(.12)} 480,${Y(.63)}`, agentSt: 'stroke: #3FDCEB; opacity: .8',
+        bub: '55 → 63 %', buildSt: START, dots: dotsFor(.63, 'ag') },
+      { ...base, n: '3', time: 't = 1.0 s', title: 'Done. Changed points and block glow, card posted.', k3: true,
+        line: lineFor(.12).split(' ').slice(0, 3).join(' ') + ` 480,${Y(.35)} 640,${Y(.25)}`,
+        old: `160,${Y(.12)} 480,${Y(.55)}`, agent: `160,${Y(.12)} 480,${Y(.70)}`, agentSt: 'stroke: #3FDCEB; filter: drop-shadow(0 0 4px #3FDCEB)',
+        bub: '70 %', hdrDot: true, buildSt: GLOW, dots: dotsFor(.70, 'ag') },
+      { ...base, n: '4', time: 'later', title: 'Glow faded to a mark. Undo warns about your edit.', k4: true,
+        line: lineFor(.70), dots: dotsFor(.70, 'soft'), hdrCls: 'fh soft', softMark: true },
+      { ...base, n: '5', time: 'off screen', title: 'Resonance changed with no module open.', k5: true,
+        line: lineFor(.70), dots: dotsFor(.70), hdrCls: 'fh ag', hdrDot: true, buildSt: GLOW },
+      { ...base, n: '6', time: 'after Show', title: 'The card opens the 303, resonance highlighted.', k6: true, lane: false, buildSt: OPEN, hdrCls: 'fh soft' }
+    ];
+    const K = [
+      ['Cutoff', '350 Hz', .1, 'knob auto'],
+      ['Resonance', '90 %', .9, 'knob agent'],
+      ['Env mod', '12 %', .12, 'knob'],
+      ['Decay', '758 ms', .36, 'knob'],
+      ['Accent', '87 %', .87, 'knob'],
+      ['Slide', '60 ms', .3, 'knob'],
+      ['Waveform', 'saw 29 %', .29, 'knob'],
+      ['Tuning', '450 Hz', .55, 'knob']
+    ];
+    const knobs = K.map(([label, val, v, cls]) => ({
+      label, val, cls,
+      col: cls === 'knob agent' ? '#3FDCEB' : '#A8F04C',
+      dash: (v * 75).toFixed(1),
+      deg: (-135 + v * 270).toFixed(1)
+    }));
+    return { look, frames, knobs };
+  }
+}
+</script>
+</body>
+</html>
