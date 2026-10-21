@@ -52,7 +52,14 @@ The producer's goals for the next stage:
 7. **An agent harness the producer controls from the frontend.** The leaning
    is OpenCode, with proper use of memories and skills. Chat sessions can be
    listed, resumed, renamed and deleted.
-8. **UI/UX feel comes first.** The producer then learns to build acid techno
+8. **Vibe and watch.** The producer tells tune-ai what to do and the agent
+   does it in front of them, on screen. Watching it happen is how the
+   producer learns.
+9. **Teach mode.** A slower, step-by-step mode. The agent performs one
+   action at a time, highlights the control it is about to touch, and fills a
+   speech bubble next to it explaining what it does and why. The producer can
+   pause, step forward, ask "why?", or take over and try it themselves.
+10. **UI/UX feel comes first.** The producer then learns to build acid techno
    in the new UI as its first real test. New synths come after that.
 
 ### What this changes in the spec
@@ -66,8 +73,9 @@ to be revised before Phase 1 is planned:
   (or the same Rust core behind it).
 - §6.8 lists the v1 screens. The new design replaces them.
 - §4's anti-goal "the producer learns nothing because Claude does everything"
-  still stands. The agent must explain what it does (G8), and the learning
-  test in Phase 6 is the producer's own track.
+  still stands, and teach mode is the answer to it. The agent may do the
+  work, but it does it visibly, step by step, explaining each move (G8), and
+  the producer can take over at any step.
 - §3 keeps third-party plugin hosting (VST3/AU/CLAP) a non-goal for now.
   "Plug and play synths" means tune-ai's own instrument modules at first.
 
@@ -104,6 +112,16 @@ rewritten.
 - **Agent UX.** How agent edits show up: highlight, diff, undo and an
   explanation. How the chat refers to things on screen, and how the user
   points the agent at something.
+- **Agent at work, on screen.** The agent's actions play out visibly, so the
+  producer can watch: the knob turns, the step lights up, the clip moves.
+  They are not applied silently in one jump.
+- **Teach mode.** Design the step-by-step flow:
+  - spotlight on the target control;
+  - a speech bubble anchored next to it, written by the agent;
+  - pacing controls (pause, next step, slower, faster);
+  - "why?", and "let me try", which hands the step to the producer and has
+    the agent check the result;
+  - a recap at the end.
 - **Deliverables.** A design system plus screen designs and a clickable
   prototype in Claude Design, covering every view and the main flows.
 - **Exit:** the producer approves the design.
@@ -188,13 +206,29 @@ Goal: the chat dock is a full agent that can operate the studio.
   - a visible activity log of agent actions, each undoable.
 - **Safety.** The agent's shell and file access is limited to the repo and
   the sample root. No credentials pass through the agent.
-- **Exit:** the producer can say "make the build build more and show me what
-  you changed", see the edits ringed, hear them, and undo any of them.
+- **Visible actions.** The agent's edits are animated in the UI as they
+  happen: knob sweeps, step toggles, and clips moving into place.
+- **Teach mode.**
+  - Actions run as a queue of steps, one at a time.
+  - Each step carries a target (a UI element id from the action layer) and an
+    explanation; the UI spotlights the target and shows the agent's speech
+    bubble beside it.
+  - The producer can pause, step, change the speed, ask "why?", or take a
+    step over ("let me try"). In that case the agent waits, reads the
+    producer's edit from the edit log, and comments on it.
+  - Teach mode and normal mode share one action layer, so nothing behaves
+    differently, only slower and narrated.
+- **Exit:**
+  - The producer can say "make the build build more and show me what you
+    changed", see the edits ringed, hear them, and undo any of them.
+  - In teach mode, the agent builds a 16-bar acid loop step by step with a
+    bubble on every step, and the producer can take over mid-way.
 
 ### Phase 6: Learning test with acid techno
 
-Goal: the producer builds an acid techno track mostly by hand in the new UI,
-with the agent as teacher and assistant. This is spec milestone G1.
+Goal: the producer builds an acid techno track in the new UI. They start by
+vibing with the agent in teach mode and watching it work, and do more of it
+by hand as they learn. This is spec milestone G1.
 
 - **Learning content.** Explanations for every control and step (spec G8),
   drawn from `docs/research/`.
