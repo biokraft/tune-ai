@@ -424,3 +424,37 @@ fn clap_hats_tone_changes_mid_hit() {
         check(id, hat(None), hat(Some(11000.0)));
     }
 }
+
+fn fnv1a(x: &[f64]) -> u64 {
+    x.iter()
+        .flat_map(|v| v.to_bits().to_le_bytes())
+        .fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+}
+
+/// Pins the closed and open hats bit for bit, so adding the ride cannot move them.
+#[test]
+fn hats_unchanged_by_ride() {
+    let hash = |kind, accent| fnv1a(&hat_render(kind, accent, 1, ms(1000.0)));
+    assert_eq!(
+        hash(HatKind::Closed, false),
+        10007451823363822274,
+        "closed plain"
+    );
+    assert_eq!(
+        hash(HatKind::Closed, true),
+        15593455684581083118,
+        "closed accent"
+    );
+    assert_eq!(
+        hash(HatKind::Open, false),
+        15616646834503362329,
+        "open plain"
+    );
+    assert_eq!(
+        hash(HatKind::Open, true),
+        11074481127065425725,
+        "open accent"
+    );
+}
