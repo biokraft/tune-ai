@@ -2,8 +2,10 @@
 #![forbid(unsafe_code)]
 
 mod audio;
+mod loudness;
 
 pub use audio::{Audio, decode_file};
+pub use loudness::{Loudness, measure_loudness};
 
 /// Everything that can go wrong while reading or measuring audio.
 #[derive(Debug, thiserror::Error)]
