@@ -546,3 +546,60 @@ fn seek_resets_and_matches_fresh_engine() {
     let b = run(&mut used, frames);
     assert!(a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()));
 }
+
+#[test]
+fn slide_on_last_loop_step_wraps_to_loop_start() {
+    // Looping bar 0, whose step 15 slides into step 0 (a note): the second
+    // pass must sound exactly like play-through into an identical bar.
+    let looped = compiled(&slide_song(""));
+    let through = compiled(
+        r#"
+[song]
+name = "through"
+bpm = 120
+[tracks.acid]
+instrument = "acid303"
+[patterns.last_slide]
+track = "acid"
+steps = "C2 . . . . . . . . . . . . . . C2~"
+[[sections]]
+name = "a"
+bars = 3
+play = { acid = "last_slide" }
+"#,
+    );
+    let mut a = Engine::new(looped.clone());
+    a.set_loop(Some(0..1));
+    let out_a = run(&mut a, 2 * BAR);
+    let mut b = Engine::new(through.clone());
+    let out_b = run(&mut b, 3 * BAR);
+    let second = 2 * BAR as usize..4 * BAR as usize;
+    assert!(out_a[second.clone()] == out_b[second.clone()]);
+    let tail = 4 * BAR as usize - 2 * 6000..4 * BAR as usize;
+    assert!(rms(&out_a[tail]) > 1e-3, "slide tail must keep sounding");
+
+    // Loop start is a rest: no gate across the wrap.
+    let rest = compiled(
+        r#"
+[song]
+name = "rest"
+bpm = 120
+[tracks.acid]
+instrument = "acid303"
+[patterns.p]
+track = "acid"
+steps = ". . . . . . . . . . . . . . . C2~"
+[[sections]]
+name = "a"
+bars = 1
+play = { acid = "p" }
+"#,
+    );
+    let (mut e, log) = probe_engine(&rest, "acid");
+    e.set_loop(Some(0..1));
+    run(&mut e, 2 * BAR);
+    let steps = log.lock().unwrap().steps();
+    assert_eq!(steps[31].2.step, 15);
+    assert!(!steps[31].2.next_has_gate);
+    assert!(!steps[15].2.next_has_gate);
+}
