@@ -3,7 +3,7 @@ mod common;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
-use common::{MINI, MIXED, compile_song, compiled, run, song, variant_of};
+use common::{MINI, MIXED, compile_song, compiled, drop_lane, run, song, variant_of};
 use tune_dsp::DistortionMode;
 use tune_engine::{
     AudioOut, CompiledSong, Engine, LiveError, LiveProcessor, ParamTarget, RenderOptions,
@@ -679,11 +679,7 @@ fn swap_builds_missing_units() {
             .unwrap()
             .params
             .shift_remove("send.delay");
-        for section in &mut s.sections {
-            section
-                .automation
-                .retain(|l| !(l.track == "acid" && l.param == "send.delay"));
-        }
+        drop_lane(s, "acid", "send.delay");
     });
     let echo = |feedback: f64| {
         let mut e = Engine::new(dry.clone());

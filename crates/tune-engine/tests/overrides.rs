@@ -6,7 +6,8 @@ mod common;
 use std::sync::Arc;
 
 use common::{
-    Event, MINI, MIXED, compile_song, compiled, probe_engine, probe_engine_fx, run, variant_of,
+    Event, MINI, MIXED, bits, compile_song, compiled, drop_lane, probe_engine, probe_engine_fx,
+    run, variant_of,
 };
 use tune_dsp::acid303::ACID303_PARAMS;
 use tune_dsp::{DIST_PARAMS, MASTER_GAIN, STRIP_SEND_DELAY};
@@ -168,10 +169,6 @@ fn param_target_resolves() {
     assert!(s.param_target(9, "acid303.cutoff").is_none());
 }
 
-fn bits(x: &[f32]) -> Vec<u32> {
-    x.iter().map(|v| v.to_bits()).collect()
-}
-
 /// The clip variant of `mixed.toml` without its static master gain (so
 /// the master gain sits at 0 dB), then `edit`.
 fn clip_mixed(edit: impl FnOnce(&mut Song)) -> Arc<CompiledSong> {
@@ -184,11 +181,7 @@ fn clip_mixed(edit: impl FnOnce(&mut Song)) -> Arc<CompiledSong> {
 
 /// Removes the acid's `send.delay` lane, so its static send holds.
 fn drop_send_lane(s: &mut Song) {
-    for section in &mut s.sections {
-        section
-            .automation
-            .retain(|l| !(l.track == "acid" && l.param == "send.delay"));
-    }
+    drop_lane(s, "acid", "send.delay");
 }
 
 const MASTER_GAIN_KNOB: ParamTarget = ParamTarget::Mix {
