@@ -153,4 +153,31 @@ describe("AcidStepSequencer", () => {
       "claude",
     );
   });
+
+  it("handled keys do not reach document listeners", () => {
+    setup();
+    const seen = vi.fn();
+    document.addEventListener("keydown", seen);
+    const n = screen.getByRole("button", { name: "Step 1 note" });
+    for (const key of ["Delete", "Backspace", "ArrowUp", "ArrowLeft", "a", "s", "r"]) {
+      fireEvent.keyDown(n, { key });
+    }
+    document.removeEventListener("keydown", seen);
+    expect(seen).not.toHaveBeenCalled();
+  });
+
+  it("Backspace toggles rest like Delete", () => {
+    const { onChange } = setup();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Step 1 note" }), { key: "Backspace" });
+    expect(onChange).toHaveBeenLastCalledWith(0, { note: null, accent: false, slide: false });
+  });
+
+  it("unhandled keys still propagate", () => {
+    setup();
+    const seen = vi.fn();
+    document.addEventListener("keydown", seen);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Step 1 note" }), { key: "x" });
+    document.removeEventListener("keydown", seen);
+    expect(seen).toHaveBeenCalledTimes(1);
+  });
 });
