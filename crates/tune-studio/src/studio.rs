@@ -46,6 +46,10 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_RATE: u32 = 48_000;
 /// After a failed write, how long the tick waits before trying again.
 const FLUSH_RETRY: Duration = Duration::from_secs(1);
+/// After a knob's release, how long a live value for the same param counts
+/// as a straggler from that gesture (calls can arrive out of order) and is
+/// dropped instead of starting a new drag.
+const RELEASE_GUARD: Duration = Duration::from_millis(200);
 
 /// What the studio tells every subscriber.
 #[derive(Clone, Debug, Serialize)]
@@ -292,6 +296,8 @@ struct Actor {
     /// Half-open, clamped to the song.
     loop_bars: Option<[u32; 2]>,
     drag: Option<Drag>,
+    /// The last knob released: track, param and when.
+    released: Option<(String, String, Instant)>,
     /// The last watcher's epoch.
     epoch: u64,
     /// When the last write of pending edits failed, if it did.
@@ -312,6 +318,7 @@ impl Actor {
             cursor_bar: 0,
             loop_bars: None,
             drag: None,
+            released: None,
             epoch: 0,
             flush_failed_at: None,
             last_state: None,
@@ -472,6 +479,7 @@ impl Actor {
         self.cursor_bar = 0;
         self.loop_bars = None;
         self.drag = None;
+        self.released = None;
         self.flush_failed_at = None;
         Ok(())
     }
@@ -539,6 +547,13 @@ impl Actor {
         if effective_value(self.core()?.song(), &path).is_none() {
             return Err(EditError::NoSuchTarget(path.to_string()).into());
         }
+        if self
+            .released
+            .as_ref()
+            .is_some_and(|(t, p, at)| *t == track && *p == param && at.elapsed() < RELEASE_GUARD)
+        {
+            return Ok(Value::Null);
+        }
         self.drag = Some(Drag {
             track,
             param,
@@ -562,6 +577,7 @@ impl Actor {
         {
             self.drag = None;
         }
+        self.released = Some((track.clone(), param.clone(), Instant::now()));
         let bar = self.current_bar();
         let core = &mut self.song.as_mut().ok_or(StudioError::NoSong)?.core;
         if core.is_automated(track, param, bar) {
