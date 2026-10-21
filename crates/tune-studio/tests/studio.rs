@@ -558,3 +558,71 @@ fn shutdown_writes_pending_edits() {
         Err(StudioError::Closed)
     ));
 }
+
+/// Starts the processor once, then refuses: a device that went away
+/// between two plays.
+struct OnceOut {
+    slot: Slot,
+    started: bool,
+}
+
+impl AudioOut for OnceOut {
+    fn sample_rate(&mut self, wanted: u32) -> Result<u32, String> {
+        Ok(wanted)
+    }
+
+    fn start(&mut self, processor: LiveProcessor) -> Result<Box<dyn Send>, String> {
+        if self.started {
+            return Err("the device is gone".into());
+        }
+        self.started = true;
+        *lock(&self.slot) = Some(processor);
+        Ok(Box::new(Parked(self.slot.clone())))
+    }
+}
+
+/// A failed play stops the old playback, and every client hears of it.
+#[test]
+fn failed_play_publishes_stopped_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.toml");
+    fs::write(&path, MINI).unwrap();
+    let config = StudioConfig {
+        audio: Box::new(OnceOut {
+            slot: Slot::default(),
+            started: false,
+        }),
+        songs_root: dir.path().to_owned(),
+    };
+    let studio = tune_studio::Studio::spawn(config, Some(path)).unwrap();
+    let events = studio.subscribe();
+    studio.call(play(Some(0))).unwrap();
+    assert!(matches!(
+        studio.call(play(Some(1))),
+        Err(StudioError::Audio(_))
+    ));
+    let mut playing = None;
+    while let Ok(e) = events.recv_timeout(Duration::from_millis(200)) {
+        if let Event::State(s) = e {
+            playing = Some(s.playing);
+        }
+    }
+    assert_eq!(playing, Some(false), "the last state says stopped");
+}
+
+/// An undo that changes no value still moves the history (here: a save
+/// that only added a comment), so the state goes out.
+#[test]
+fn comment_only_undo_publishes_state() {
+    let f = fixture(MINI);
+    let commented = format!("# a note\n{MINI}");
+    fs::write(&f.path, &commented).unwrap();
+    match f.wait("external change", |e| matches!(e, Event::ExternalChange(_))) {
+        Event::ExternalChange(ext) => assert!(ext.changes.is_empty()),
+        _ => unreachable!(),
+    }
+    f.state("undoable state", |s| s.can_undo && !s.can_redo);
+    assert_eq!(f.call(Command::Undo), json!([]));
+    f.state("redoable state", |s| s.can_redo);
+    assert_eq!(f.disk(), MINI);
+}

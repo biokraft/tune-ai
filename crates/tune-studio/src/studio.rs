@@ -103,6 +103,7 @@ impl Studio {
                     let _ = ready_tx.send(Err(e));
                     return;
                 }
+                actor.last_state = Some(actor.state());
                 let _ = ready_tx.send(Ok(()));
                 actor.run(&rx);
             })
@@ -292,6 +293,8 @@ struct Actor {
     epoch: u64,
     /// When the last write of pending edits failed, if it did.
     flush_failed_at: Option<Instant>,
+    /// The state last broadcast, to catch a change that went out unshown.
+    last_state: Option<StudioState>,
 }
 
 impl Actor {
@@ -308,6 +311,7 @@ impl Actor {
             drag: None,
             epoch: 0,
             flush_failed_at: None,
+            last_state: None,
         }
     }
 
@@ -317,7 +321,15 @@ impl Actor {
             let wait = next_tick.saturating_duration_since(Instant::now());
             match rx.recv_timeout(wait) {
                 Ok(Msg::Call(cmd, reply)) => {
+                    // A drag changes nothing shown; skip building the state.
+                    let shown = !matches!(
+                        cmd,
+                        Command::SetParam { commit: false, .. } | Command::ListSongs
+                    );
                     let result = self.handle(cmd);
+                    if shown {
+                        self.publish_if_stale();
+                    }
                     let _ = reply.send(result);
                 }
                 Ok(Msg::Subscribe(tx)) => {
@@ -325,7 +337,10 @@ impl Actor {
                         self.subscribers.push(tx);
                     }
                 }
-                Ok(Msg::Disk { epoch, reload }) => self.on_disk(epoch, reload),
+                Ok(Msg::Disk { epoch, reload }) => {
+                    self.on_disk(epoch, reload);
+                    self.publish_if_stale();
+                }
                 Ok(Msg::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
                 Err(RecvTimeoutError::Timeout) => {}
             }
@@ -812,7 +827,19 @@ impl Actor {
 
     fn emit_state(&mut self) {
         let state = self.state();
+        self.last_state = Some(state.clone());
         self.emit(Event::State(state));
+    }
+
+    /// Broadcasts the state if it differs from the last one sent. Runs after
+    /// every command and file change, so a path that changed something and
+    /// then failed (a play the device refused after the old playback
+    /// stopped, a seek into a full queue) or changed only the history (an
+    /// undo of a comment-only save) still reaches every client.
+    fn publish_if_stale(&mut self) {
+        if self.last_state.as_ref() != Some(&self.state()) {
+            self.emit_state();
+        }
     }
 
     /// Sends `event` to every subscriber, dropping those that went away.
