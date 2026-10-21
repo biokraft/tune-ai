@@ -17,7 +17,7 @@ function notice(patch: Partial<ExternalChange>): ExternalChange {
   };
 }
 
-function setup(n: ExternalChange | null, offered = n?.offered ?? []) {
+function setup(n: ExternalChange | null, offered = n?.offered ?? [], canUndo = true) {
   const onUndo = vi.fn();
   const onResolve = vi.fn();
   const onDismiss = vi.fn();
@@ -25,6 +25,7 @@ function setup(n: ExternalChange | null, offered = n?.offered ?? []) {
     <ChangeNotice
       notice={n}
       offered={offered}
+      canUndo={canUndo}
       song={song}
       onUndo={onUndo}
       onResolve={onResolve}
@@ -49,6 +50,17 @@ describe("ChangeNotice", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops Undo once it would revert something else", () => {
+    setup(
+      notice({ changes: [{ path: "tracks.acid.acid303.resonance", old: 70, new: 90 }] }),
+      [],
+      false,
+    );
+    expect(screen.getByText("Claude changed 1 thing: Resonance 70 → 90%")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
   });
 
   it("names other kinds of change in plain words", () => {
@@ -96,6 +108,7 @@ describe("ChangeNotice", () => {
       <ChangeNotice
         notice={null}
         offered={[]}
+        canUndo
         song={song}
         onUndo={() => {}}
         onResolve={() => {}}

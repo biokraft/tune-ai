@@ -83,6 +83,24 @@ describe("createStudioStore", () => {
     expect(store.get()).toBe(before);
   });
 
+  it("a later human edit keeps the notice but takes back its Undo", () => {
+    const client = new FakeClient();
+    const store = createStudioStore(client);
+    client.emit(stateEvent());
+    client.emit(goldenExternal);
+    expect(store.get().noticeUndoable).toBe(true);
+    client.emit({
+      event: "applied",
+      source: "human",
+      changes: [{ path: "tracks.acid.acid303.cutoff", old: 500, new: 820 }],
+    });
+    // Undo now reverts the producer's edit, not the notice's change.
+    expect(store.get().notice).not.toBeNull();
+    expect(store.get().noticeUndoable).toBe(false);
+    client.emit(goldenExternal);
+    expect(store.get().noticeUndoable).toBe(true);
+  });
+
   it("an unreadable file sets no notice", () => {
     const client = new FakeClient();
     const store = createStudioStore(client);
