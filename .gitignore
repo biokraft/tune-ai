@@ -26,3 +26,6 @@ samples/user/
 .idea/
 .vscode/
 /scratch/
+
+# Per-song edit log (who changed what, when): local, never committed
+songs/*/edits.jsonl
