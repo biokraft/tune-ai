@@ -18,7 +18,9 @@ mod set;
 mod view;
 
 pub use command::{Command, DrumHitDto};
-pub use core::{OWN_WRITE_RING, PendingEdit, StudioCore, UNDO_DEPTH, UndoEntry, WRITE_DEBOUNCE};
+pub use core::{
+    ExternalChange, OWN_WRITE_RING, PendingEdit, StudioCore, UNDO_DEPTH, UndoEntry, WRITE_DEBOUNCE,
+};
 pub use diff::{Change, diff_songs, is_whole_replace};
 pub use doc::{EditError, SongDoc, effective_value};
 pub use error::{ErrorView, StudioError};
