@@ -11,6 +11,21 @@ tasks:
     cmds:
       - cargo fmt --all -- --check
 
+  install:
+    desc: Install JS dependencies from the lockfile
+    cmds:
+      - pnpm install --frozen-lockfile
+
+  js:check:
+    desc: ESLint, Prettier, TypeScript and Vitest across the workspace
+    cmds:
+      - pnpm lint && pnpm format:check && pnpm -r typecheck && pnpm -r test
+
+  ui:build:
+    desc: Build the desktop frontend into apps/desktop/dist
+    cmds:
+      - test -f apps/desktop/package.json || exit 0; pnpm --filter @tune/desktop build
+
   lint:
     desc: Clippy with warnings denied
     cmds:
@@ -31,9 +46,27 @@ tasks:
     desc: Everything that must pass before a commit
     cmds:
       - task: fmt:check
+      - task: install
+      - task: js:check
+      - task: ui:build
       - task: lint
       - task: test
       - task: privacy
+
+  studio:
+    desc: "Open the studio in a native window (needs SONG=songs/<name>/song.toml)"
+    requires:
+      vars: [SONG]
+    cmds:
+      - cd apps/desktop && TUNE_ROOT={{.ROOT_DIR}} TUNE_SONG={{.ROOT_DIR}}/{{.SONG}} pnpm tauri dev
+
+  serve:
+    desc: "Serve the studio to a browser (needs SONG=songs/<name>/song.toml)"
+    requires:
+      vars: [SONG]
+    cmds:
+      - task: ui:build
+      - cargo run --release -p tune-cli -- serve {{.SONG}}
 
   demo:
     desc: Render the demo 303 line and play it
@@ -41,3 +74,10 @@ tasks:
       - mkdir -p scratch
       - cargo run --release -p tune-cli -- render-303 --demo --out scratch/demo.wav
       - afplay scratch/demo.wav
+
+  first-acid:
+    desc: Render the first acid track and play it
+    cmds:
+      - mkdir -p scratch
+      - cargo run --release -p tune-cli -- render songs/first-acid/song.toml --out scratch/first-acid.wav
+      - afplay scratch/first-acid.wav

@@ -1,0 +1,15 @@
+[package]
+name = "tune-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cpal = "0.18.2"
+tune-engine = { path = "../tune-engine" }
+
+[dev-dependencies]
+tune-song = { path = "../tune-song" }

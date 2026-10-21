@@ -37,3 +37,13 @@
   purpose and without fee, and asks that a modified version carry a
   reference to the original. This port is a modified version, so the
   original is credited here and in the `fft.rs` module header.
+
+## Barlow and Barlow Condensed (typefaces)
+
+- Project: Barlow, a superfamily by Jeremy Tribby
+- URL: https://github.com/jpt/barlow
+- License: SIL Open Font License 1.1
+- Packaged for self-hosting by the `@fontsource/barlow` and
+  `@fontsource/barlow-condensed` npm packages (no network fetches at run time).
+- Use: Barlow Condensed 600 for labels and section names, Barlow 500 for
+  values. The font files are bundled into app builds.

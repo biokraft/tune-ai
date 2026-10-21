@@ -21,6 +21,20 @@ pub struct ParamSpec {
 }
 
 impl ParamSpec {
+    /// Accepts `plain` when it lies in `min..=max` (ends inclusive); NaN is rejected.
+    pub fn check(&self, plain: f64) -> Result<(), ParamError> {
+        if (self.min..=self.max).contains(&plain) {
+            Ok(())
+        } else {
+            Err(ParamError::OutOfRange {
+                id: self.id.to_owned(),
+                value: plain,
+                min: self.min,
+                max: self.max,
+            })
+        }
+    }
+
     /// Maps `normalized` (clamped to 0..=1) to the plain range.
     pub fn to_plain(&self, normalized: f64) -> f64 {
         let n = normalized.clamp(0.0, 1.0);
@@ -44,6 +58,18 @@ impl ParamSpec {
             Curve::Exponential => (p / self.min).ln() / (self.max / self.min).ln(),
         }
     }
+}
+
+/// Finds the spec with `id` in `table`, with its index.
+pub fn find_spec(
+    table: &'static [ParamSpec],
+    id: &str,
+) -> Result<(usize, &'static ParamSpec), ParamError> {
+    table
+        .iter()
+        .enumerate()
+        .find(|(_, s)| s.id == id)
+        .ok_or_else(|| ParamError::UnknownId(id.to_owned()))
 }
 
 /// Failure to look up or set a parameter.
@@ -126,5 +152,31 @@ mod tests {
             max: 2394.0,
         };
         assert!(e.to_string().contains("cutoff"));
+    }
+
+    #[test]
+    fn check_accepts_bounds_rejects_outside_and_nan() {
+        assert!(CUTOFF.check(314.0).is_ok());
+        assert!(CUTOFF.check(2394.0).is_ok());
+        assert!(matches!(
+            CUTOFF.check(313.9),
+            Err(ParamError::OutOfRange { .. })
+        ));
+        assert!(matches!(
+            CUTOFF.check(f64::NAN),
+            Err(ParamError::OutOfRange { .. })
+        ));
+    }
+
+    #[test]
+    fn find_spec_returns_index() {
+        use crate::acid303::ACID303_PARAMS;
+        let (i, spec) = find_spec(ACID303_PARAMS, "acid303.cutoff").unwrap();
+        assert_eq!(i, 2);
+        assert_eq!(spec.id, "acid303.cutoff");
+        assert!(matches!(
+            find_spec(ACID303_PARAMS, "acid303.nope"),
+            Err(ParamError::UnknownId(_))
+        ));
     }
 }

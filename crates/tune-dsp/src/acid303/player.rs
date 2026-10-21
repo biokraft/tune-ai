@@ -7,7 +7,8 @@
 //! its absolute note, so the player calls `trigger_note` / `slide_to_note` /
 //! `release_note` directly.
 
-use super::math::{beats_to_seconds, clip, round_to_int};
+use super::gate::AcidGate;
+use super::math::{beats_to_seconds, round_to_int};
 use super::pattern::AcidPattern;
 use super::voice::Acid303;
 
@@ -30,10 +31,8 @@ pub struct AcidPlayer {
     count_down: i32,
     /// `AcidSequencer::driftError`.
     drift_error: f64,
-    /// `Open303::noteOffCountDown`: samples until the gate closes.
-    note_off_count_down: i32,
-    /// `Open303::slideToNextNote`.
-    slide_to_next_note: bool,
+    /// Gate countdown and pending slide (`noteOffCountDown`, `slideToNextNote`).
+    gate: AcidGate,
     /// Whether the first tick has started the voice.
     started: bool,
 }
@@ -42,7 +41,6 @@ impl AcidPlayer {
     /// A player at step 0, in the state `AcidSequencer::start` and the
     /// sequencer branch of `Open303::noteOn` leave.
     pub fn new(pattern: AcidPattern, bpm: f64, sample_rate: f64) -> Self {
-        assert!(!pattern.steps.is_empty(), "AcidPattern has no steps");
         Self {
             pattern,
             pending: None,
@@ -51,8 +49,7 @@ impl AcidPlayer {
             step: 0,
             count_down: -1,
             drift_error: 0.0,
-            note_off_count_down: i32::MAX,
-            slide_to_next_note: false,
+            gate: AcidGate::new(),
             started: false,
         }
     }
@@ -60,7 +57,6 @@ impl AcidPlayer {
     /// Replaces the pattern from the next step boundary on, keeping the step
     /// position (wrapped to the new length).
     pub fn set_pattern(&mut self, pattern: AcidPattern) {
-        assert!(!pattern.steps.is_empty(), "AcidPattern has no steps");
         self.pending = Some(pattern);
     }
 
@@ -83,12 +79,8 @@ impl AcidPlayer {
             self.started = true;
         }
 
-        // Open303::getSample, sequencer branch. The C++ int would overflow
-        // after ~2^31 samples of an endless tie; wrap like it does in practice.
-        self.note_off_count_down = self.note_off_count_down.wrapping_sub(1);
-        if self.note_off_count_down == 0 {
-            voice.release_note();
-        }
+        // Open303::getSample, sequencer branch: close the gate when due.
+        self.gate.tick(voice);
 
         // AcidSequencer::getNote:
         if self.count_down > 0 {
@@ -113,40 +105,16 @@ impl AcidPlayer {
 
         if let Some(p) = self.pending.take() {
             self.pattern = p;
-            self.step %= self.pattern.steps.len();
+            self.step %= self.pattern.steps().len();
         }
-        let len = self.pattern.steps.len();
-        let note = &self.pattern.steps[self.step];
+        let len = self.pattern.steps().len();
+        let note = &self.pattern.steps()[self.step];
         self.step = (self.step + 1) % len;
         // AcidSequencer::getNextScheduledNote:
-        let next_has_gate = self.pattern.steps[self.step].note.is_some();
+        let next_has_gate = self.pattern.steps()[self.step].note.is_some();
 
-        // back in Open303::getSample:
-        match note.note {
-            Some(n) => {
-                let key = clip(i32::from(n), 0, 127) as u8;
-                if !self.slide_to_next_note {
-                    voice.trigger_note(key, note.accent);
-                } else {
-                    voice.slide_to_note(key, note.accent);
-                }
-
-                if note.slide && next_has_gate {
-                    self.note_off_count_down = i32::MAX;
-                    self.slide_to_next_note = true;
-                } else {
-                    self.note_off_count_down = self.step_length_in_samples();
-                    self.slide_to_next_note = false;
-                }
-            }
-            None if self.slide_to_next_note => {
-                // Only reachable after set_pattern put a rest where a slide
-                // was heading (the C++ would hang the note): end it here.
-                voice.release_note();
-                self.note_off_count_down = i32::MAX;
-                self.slide_to_next_note = false;
-            }
-            None => {}
-        }
+        // back in Open303::getSample: trigger or slide, and arm the gate.
+        let gate_samples = self.step_length_in_samples();
+        self.gate.on_step(voice, note, next_has_gate, gate_samples);
     }
 }

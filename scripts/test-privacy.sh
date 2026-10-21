@@ -45,6 +45,31 @@ for ext in wav mp3 flac aif aiff ogg m4a WAV Mp3; do
   run_case "audio .$ext" 1 "x.$ext: audio file"
 done
 
+for name in x.wav.tmp x.flac.tmp; do
+  new_repo
+  : > "$T/$name"
+  git -C "$T" add -f "$name"
+  run_case "audio temp $name" 1 "$name: audio file"
+done
+
+# add_case <name> <path> <want-exit> <want-substring-or-empty>
+add_case() {
+  new_repo
+  mkdir -p "$T/$(dirname "$2")"
+  echo "x" > "$T/$2"
+  git -C "$T" add -f "$2"
+  run_case "$1" "$3" "$4"
+}
+
+add_case "audio aac" x.aac 1 "x.aac: audio file"
+add_case "local config" tune.local.toml 1 "tune.local.toml: local config"
+add_case "nested local config" songs/a/dev.local.toml 1 "dev.local.toml: local config"
+add_case "refs folder" refs/notes.txt 1 "refs/notes.txt: reference folder"
+add_case "image png" shot.png 1 "shot.png: image file"
+add_case "image upper jpg" docs/a.JPG 1 "docs/a.JPG: image file"
+add_case "image webp" docs/a.webp 1 "docs/a.webp: image file"
+add_case "app icon allowed" apps/desktop/src-tauri/icons/32x32.png 0 ""
+
 new_repo
 echo "see ${U1}someone/file" > "$T/a.txt"; git -C "$T" add a.txt
 run_case "users home path" 1 "a.txt: home path"

@@ -13,7 +13,7 @@
 //! notes with `#` (never `b`), orders suffixes `!~` and separates steps by
 //! single spaces; it parses back to an equal pattern. (An [`AcidStep`] built
 //! by hand with a note above 127 prints with an octave above 9, which does
-//! not parse; the player clamps such notes to 127.)
+//! not parse; [`AcidPattern::new`] rejects such notes.)
 //!
 //! [`Display`]: std::fmt::Display
 
@@ -37,7 +37,7 @@ pub struct AcidStep {
 /// A loop of 1..=[`MAX_STEPS`] steps.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AcidPattern {
-    pub steps: Vec<AcidStep>,
+    steps: Vec<AcidStep>,
 }
 
 /// Why a pattern string did not parse.
@@ -49,9 +49,32 @@ pub enum PatternError {
     ModifierOnRest { index: usize },
     #[error("a pattern needs 1 to {MAX_STEPS} steps, got {0}")]
     Length(usize),
+    #[error("step {index}: note {note} is above the MIDI maximum of 127")]
+    BadNote { index: usize, note: u8 },
 }
 
 impl AcidPattern {
+    /// Builds a pattern from steps: 1 to [`MAX_STEPS`] of them, every note
+    /// at most 127. The only constructor ([`parse`](Self::parse) uses it).
+    pub fn new(steps: Vec<AcidStep>) -> Result<Self, PatternError> {
+        if steps.is_empty() || steps.len() > MAX_STEPS {
+            return Err(PatternError::Length(steps.len()));
+        }
+        if let Some((index, note)) = steps
+            .iter()
+            .enumerate()
+            .find_map(|(i, s)| s.note.filter(|&n| n > 127).map(|n| (i, n)))
+        {
+            return Err(PatternError::BadNote { index, note });
+        }
+        Ok(Self { steps })
+    }
+
+    /// The steps, in play order.
+    pub fn steps(&self) -> &[AcidStep] {
+        &self.steps
+    }
+
     /// Parses the step notation described in the module docs.
     pub fn parse(s: &str) -> Result<Self, PatternError> {
         let tokens: Vec<&str> = s.split_whitespace().collect();
@@ -63,7 +86,7 @@ impl AcidPattern {
             .enumerate()
             .map(|(index, token)| parse_step(index, token))
             .collect::<Result<_, _>>()?;
-        Ok(Self { steps })
+        Self::new(steps)
     }
 }
 
@@ -147,7 +170,7 @@ fn parse_step(index: usize, token: &str) -> Result<AcidStep, PatternError> {
 
 impl fmt::Display for AcidPattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, step) in self.steps.iter().enumerate() {
+        for (i, step) in self.steps().iter().enumerate() {
             if i > 0 {
                 f.write_str(" ")?;
             }
@@ -198,7 +221,7 @@ mod tests {
     fn parses_the_example() {
         let p = AcidPattern::parse("C2 . D#2! C3~ Bb1!~").unwrap();
         assert_eq!(
-            p.steps,
+            p.steps(),
             vec![
                 step(Some(36), false, false),
                 step(None, false, false),
@@ -237,8 +260,8 @@ mod tests {
         let notes = |s: &str| -> Vec<Option<u8>> {
             AcidPattern::parse(s)
                 .unwrap()
-                .steps
-                .into_iter()
+                .steps()
+                .iter()
                 .map(|st| st.note)
                 .collect()
         };
@@ -310,8 +333,41 @@ mod tests {
             AcidPattern::parse(&tokens(65)),
             Err(PatternError::Length(65))
         );
-        assert_eq!(AcidPattern::parse(&tokens(64)).unwrap().steps.len(), 64);
-        assert_eq!(AcidPattern::parse(&tokens(1)).unwrap().steps.len(), 1);
+        assert_eq!(AcidPattern::parse(&tokens(64)).unwrap().steps().len(), 64);
+        assert_eq!(AcidPattern::parse(&tokens(1)).unwrap().steps().len(), 1);
+    }
+
+    #[test]
+    fn new_validates() {
+        let rest = || step(None, false, false);
+        assert_eq!(AcidPattern::new(vec![]), Err(PatternError::Length(0)));
+        assert_eq!(
+            AcidPattern::new(vec![rest(); 65]),
+            Err(PatternError::Length(65))
+        );
+        assert_eq!(
+            AcidPattern::new(vec![step(Some(128), false, false)]),
+            Err(PatternError::BadNote {
+                index: 0,
+                note: 128
+            })
+        );
+        assert_eq!(
+            AcidPattern::new(vec![rest(), step(Some(255), false, false)]),
+            Err(PatternError::BadNote {
+                index: 1,
+                note: 255
+            })
+        );
+        assert_eq!(
+            AcidPattern::new(vec![rest(); 64]).unwrap().steps().len(),
+            64
+        );
+        assert!(AcidPattern::new(vec![step(Some(127), true, true)]).is_ok());
+        assert_eq!(
+            AcidPattern::parse(&vec!["C2"; 65].join(" ")),
+            Err(PatternError::Length(65))
+        );
     }
 
     #[test]

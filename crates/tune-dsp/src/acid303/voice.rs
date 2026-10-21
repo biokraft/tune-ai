@@ -30,7 +30,8 @@ use super::math::{
 use super::one_pole::{OnePoleFilter, OnePoleMode};
 use super::teebee::{FilterMode, TeeBeeFilter};
 use super::wavetable::Waveform;
-use crate::param::{ParamError, ParamSpec};
+use crate::param::ParamError;
+use crate::param::find_spec;
 
 /// `Open303::oversampling`.
 const OVERSAMPLING: i32 = 4;
@@ -385,12 +386,28 @@ impl Acid303 {
     ///
     /// [`ACID303_PARAMS`]: super::ACID303_PARAMS
     pub fn set_param(&mut self, id: &str, plain: f64) -> Result<(), ParamError> {
-        let spec = super::ACID303_PARAMS
-            .iter()
-            .find(|s| s.id == id)
-            .ok_or_else(|| ParamError::UnknownId(id.to_owned()))?;
-        check_range(spec, plain)?;
-        match id {
+        let (index, spec) = find_spec(super::ACID303_PARAMS, id)?;
+        spec.check(plain)?;
+        self.set_param_at(index, plain);
+        Ok(())
+    }
+
+    /// Sets the parameter at `index` of [`ACID303_PARAMS`] in plain units,
+    /// clamped to its range (NaN is treated as the minimum). Infallible, for
+    /// callers that resolved the index up front.
+    ///
+    /// # Panics
+    /// If `index` is out of range of [`ACID303_PARAMS`].
+    ///
+    /// [`ACID303_PARAMS`]: super::ACID303_PARAMS
+    pub fn set_param_at(&mut self, index: usize, plain: f64) {
+        let spec = &super::ACID303_PARAMS[index];
+        let plain = if plain.is_nan() {
+            spec.min
+        } else {
+            plain.clamp(spec.min, spec.max)
+        };
+        match spec.id {
             "acid303.waveform" => self.set_waveform(plain),
             "acid303.tuning" => self.set_tuning(plain),
             "acid303.cutoff" => self.set_cutoff(plain),
@@ -400,9 +417,8 @@ impl Acid303 {
             "acid303.accent" => self.set_accent(plain),
             "acid303.volume" => self.set_volume(plain),
             "acid303.slide_time" => self.set_slide_time(plain),
-            _ => unreachable!("ACID303_PARAMS id `{id}` has no setter"),
+            id => unreachable!("ACID303_PARAMS id `{id}` has no setter"),
         }
-        Ok(())
     }
 
     /// [`Acid303::new`] (identical to the C++ constructor) followed by
@@ -511,6 +527,37 @@ impl Acid303 {
     }
 
     // audio processing
+
+    /// Clears all DSP state: the voice then sounds exactly like a freshly
+    /// constructed one with the same parameters. Parameters (cutoff,
+    /// resonance, levels, slide time, filter mode, tuning, ...) are kept.
+    ///
+    /// Cleared: oscillator phase, filter and highpass/allpass/notch/anti-alias
+    /// memories, the amp and main envelopes, the pitch slew limiter and the
+    /// two envelope RCs, the note list and current note, the accent gain, and
+    /// `idle` (set true, so the next trigger also resets phase and filters).
+    pub fn reset(&mut self) {
+        self.oscillator.reset_phase();
+        self.filter.reset();
+        self.amp_env.reset_state();
+        self.main_env.reset_state();
+        self.pitch_slew_limiter.reset();
+        self.amp_de_clicker.reset();
+        self.rc1.reset();
+        self.rc2.reset();
+        self.highpass1.reset();
+        self.highpass2.reset();
+        self.allpass.reset();
+        self.notch.reset();
+        self.anti_alias_filter.reset();
+
+        self.osc_freq = 440.0;
+        self.accent_gain = 0.0;
+        self.current_note = -1;
+        self.current_vel = 0;
+        self.idle = true;
+        self.note_list.clear();
+    }
 
     /// `getSample` without the sequencer branch.
     #[inline]
@@ -624,7 +671,7 @@ impl Acid303 {
     /// keeps its phase running), and `trigger_note` no longer resets the
     /// oscillator phase and filter states. `AcidPlayer` calls it to match the
     /// C++ sequencer.
-    pub fn wake(&mut self) {
+    pub(crate) fn wake(&mut self) {
         self.idle = false;
     }
 
@@ -750,18 +797,5 @@ impl Acid303 {
             self.sample_rate,
         );
         self.n2 = 1.0; // "test" in the C++
-    }
-}
-
-fn check_range(spec: &ParamSpec, plain: f64) -> Result<(), ParamError> {
-    if (spec.min..=spec.max).contains(&plain) {
-        Ok(())
-    } else {
-        Err(ParamError::OutOfRange {
-            id: spec.id.to_owned(),
-            value: plain,
-            min: spec.min,
-            max: spec.max,
-        })
     }
 }
