@@ -93,11 +93,18 @@ export function createStudioStore(client: StudioClient): StudioStore {
     set({ highlights: next });
   };
 
+  const adopt = (state: StudioState) =>
+    set({ state, selectedSection: clampSelection(state, view.selectedSection) });
+
+  /** State events seen; a `get_state` result older than one of them is dropped. */
+  let stateEvents = 0;
+
   const onEvent = (e: StudioEvent) => {
     switch (e.event) {
       case "state": {
         const { event: _, ...state } = e;
-        set({ state, selectedSection: clampSelection(state, view.selectedSection) });
+        stateEvents += 1;
+        adopt(state);
         break;
       }
       case "playhead": {
@@ -140,8 +147,20 @@ export function createStudioStore(client: StudioClient): StudioStore {
     }
   };
 
+  const report = (err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    // The lost-connection banner already says this.
+    if (message !== LOST_CONNECTION) set({ message });
+  };
+
   client.subscribe(onEvent);
   client.onLost?.(() => set({ connection: "lost" }));
+  // A transport may drop events sent before it listened (Tauri does), so ask for the state
+  // too. A state event that arrives first is as new or newer, and wins.
+  const seenBefore = stateEvents;
+  client.call<StudioState | null>({ cmd: "get_state" }).then((state) => {
+    if (state && stateEvents === seenBefore) adopt(state);
+  }, report);
 
   return {
     get: () => view,
@@ -151,11 +170,7 @@ export function createStudioStore(client: StudioClient): StudioStore {
     },
     send(cmd) {
       const p = client.call(cmd);
-      p.catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        // The lost-connection banner already says this.
-        if (message !== LOST_CONNECTION) set({ message });
-      });
+      p.catch(report);
       return p;
     },
     select(i) {

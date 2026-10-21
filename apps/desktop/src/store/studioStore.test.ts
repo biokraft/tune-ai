@@ -31,6 +31,31 @@ describe("createStudioStore", () => {
     expect(notified).toBe(2);
   });
 
+  it("asks for the state at start, for a transport that dropped the first state event", async () => {
+    const client = new FakeClient();
+    // The host emitted the first state before the webview listened (Tauri does not buffer).
+    client.emit(stateEvent());
+    const { event: _, ...state } = stateEvent();
+    client.results.get_state = state;
+    const store = createStudioStore(client);
+    expect(client.named("get_state")).toHaveLength(1);
+    await vi.waitFor(() => expect(store.get().state?.song?.name).toBe("mini"));
+    expect(store.get().state).toEqual(state);
+  });
+
+  it("a state event that arrives before the get_state result wins", async () => {
+    const client = new FakeClient();
+    let answer!: (v: unknown) => void;
+    client.results.get_state = new Promise((resolve) => (answer = resolve));
+    const store = createStudioStore(client);
+    client.emit(stateEvent((s) => (s.cursor_bar = 3)));
+    const { event: _, ...older } = stateEvent();
+    answer(older);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.get().state?.cursor_bar).toBe(3);
+  });
+
   it("external change highlights for 4 s", () => {
     vi.useFakeTimers();
     const client = new FakeClient();
@@ -166,7 +191,7 @@ describe("createStudioStore", () => {
     client.results.undo = new Error("nothing to undo");
     const store = createStudioStore(client);
     await expect(store.send({ cmd: "undo" })).rejects.toThrow("nothing to undo");
-    expect(client.calls).toEqual([{ cmd: "undo" }]);
+    expect(client.sent()).toEqual([{ cmd: "undo" }]);
     expect(store.get().message).toBe("nothing to undo");
   });
 

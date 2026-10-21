@@ -176,7 +176,7 @@ describe("App", () => {
     const { client } = setup();
     press({ key: "z", metaKey: true });
     press({ key: "z", metaKey: true, shiftKey: true });
-    expect(client.calls.map((c) => c.cmd)).toEqual(["undo", "redo"]);
+    expect(client.sent().map((c) => c.cmd)).toEqual(["undo", "redo"]);
   });
 
   it("undo from the transport or keyboard clears Claude's notice", () => {
@@ -229,7 +229,7 @@ describe("App", () => {
     act(() => {
       document.body.dispatchEvent(handled);
     });
-    expect(client.calls).toEqual([]);
+    expect(client.sent()).toEqual([]);
     input.remove();
     pop.remove();
   });

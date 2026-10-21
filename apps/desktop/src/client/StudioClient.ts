@@ -4,7 +4,11 @@ import type { Command, StudioEvent } from "./protocol";
 export interface StudioClient {
   /** Runs one command; resolves with its result, rejects with the studio's error. */
   call<T = unknown>(cmd: Command): Promise<T>;
-  /** Every event the studio sends, starting with the current state. Returns the unsubscribe. */
+  /**
+   * Every event the studio sends after the listener is in place, starting with the current
+   * state where the transport delivers it (Tauri may not; the store also calls `get_state`).
+   * Returns the unsubscribe.
+   */
   subscribe(h: (e: StudioEvent) => void): () => void;
   /** Called once when the connection ends for good (WebSocket only). Returns the unsubscribe. */
   onLost?(h: () => void): () => void;
