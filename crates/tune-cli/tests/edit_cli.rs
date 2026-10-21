@@ -130,6 +130,23 @@ fn set_unknown_path() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("does not exist in this song"));
 }
 
+#[test]
+fn set_param_typo_names_the_track() {
+    let (_d, song) = fixture();
+    let out = tune()
+        .args(["set", song.to_str().unwrap(), "tracks.acid.acid303.cutof=1"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(
+            "`acid303.cutof` is not a parameter of track `acid` (acid303); see `tune params --json`"
+        ),
+        "{stderr}"
+    );
+}
+
 fn write_log(dir: &Path) {
     let lines = [
         r#"{"ts":"2026-10-21T10:00:01.000Z","source":"human","path":"song.bpm","old":120,"new":121}"#,
