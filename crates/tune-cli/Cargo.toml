@@ -23,6 +23,7 @@ hound = "3.5"
 jiff = { version = "=0.2.37", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
+toml = { version = "=1.1.2", default-features = false, features = ["std", "serde", "parse", "preserve_order"] }
 tokio = { version = "=1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tower-http = { version = "=0.6.11", default-features = false, features = ["fs"] }
 tune-analysis = { path = "../tune-analysis" }
