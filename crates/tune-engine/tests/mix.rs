@@ -9,7 +9,10 @@ use common::{MINI, compile_song, compiled, run, song};
 use tune_analysis::{Audio, measure_loudness};
 use tune_dsp::acid303::ACID303_PARAMS;
 use tune_dsp::{MASTER_GAIN, STRIP_SEND_DELAY, db2amp};
-use tune_engine::{CompiledSong, Engine, MIX_TRACK, ParamTarget, RenderOptions, Rendered, render};
+use tune_engine::{
+    CLIP_KNEE, CompiledSong, Engine, MIX_TRACK, ParamTarget, RenderOptions, Rendered, pan_gains,
+    render,
+};
 use tune_song::{MasterMode, MixUnit, Song, parse_song};
 
 const MIXED: &str = include_str!("../../tune-song/tests/fixtures/mixed.toml");
@@ -236,11 +239,15 @@ fn ducking_follows_kick_hits() {
                 checked += 1;
             }
         }
+        // From the end of the release to the next kick (over the three
+        // off-beat steps without a hit) the acid is not ducked at all.
         let back = h + ATTACK + RELEASE;
+        let next = c.clock.step_start(step + 4);
+        let range = 2 * back as usize..2 * next as usize;
         assert_eq!(
-            bits(&[at(deep, back).0, at(deep, back).1]),
-            bits(&[at(flat, back).0, at(flat, back).1]),
-            "step {step}: still ducked after the release"
+            first_difference(&deep[range.clone()], &flat[range]),
+            None,
+            "step {step}: ducked between kicks (frame offset from {back})"
         );
     }
     assert!(checked > 0, "no loud acid frame at a kick");
@@ -256,6 +263,85 @@ fn muted_source_still_ducks() {
         s.tracks.get_mut("kick").unwrap().mute = true;
     }));
     assert_eq!(bits(stem(&heard, "acid")), bits(stem(&muted, "acid")));
+}
+
+#[test]
+fn no_source_hits_no_ducking() {
+    // Section b stops playing the kick: no hits there, so no dip in it.
+    // (Section a's kicks still duck the idle 303's ~1e-39 residue, and the
+    // last release ends long before bar 2.)
+    let depth = |db: f64| {
+        clip_variant(move |s| {
+            set_param(s, "acid", "duck.depth", db);
+            s.sections[1].play.shift_remove("kick");
+        })
+    };
+    let (c, deep) = render_all(&depth(12.0));
+    let (_, flat) = render_all(&depth(0.0));
+    let b = 2 * c.clock.bar_start(2) as usize;
+    let (deep, flat) = (&stem(&deep, "acid")[b..], &stem(&flat, "acid")[b..]);
+    assert!(deep.iter().any(|v| v.abs() > 1e-2), "the acid plays in b");
+    assert_eq!(first_difference(deep, flat), None, "ducked without a hit");
+}
+
+#[test]
+fn delay_send_is_post_fader() {
+    // Only the acid is heard, at -6 dB, through a clean delay (no
+    // feedback, no filters) with the send at 0 dB. The master runs at
+    // -12 dB so the clipper stays linear: the mix with the send minus the
+    // mix without it is the delay's return, which must be the acid after
+    // its fader (`y·gain`), three steps late, in the left channel.
+    let base = |s: &mut Song| {
+        drop_lane(s, "acid", "send.delay");
+        for t in ["kick", "hat", "ride"] {
+            s.tracks.get_mut(t).unwrap().mute = true;
+        }
+        s.tracks.get_mut("acid").unwrap().gain_db = -6.0;
+        s.mix.params.insert("master.gain".into(), -12.0);
+    };
+    let off = clip_variant(|s| {
+        base(s);
+        remove_param(s, "acid", "send.delay");
+    });
+    let on = clip_variant(|s| {
+        base(s);
+        set_param(s, "acid", "send.delay", 0.0);
+        for (id, v) in [
+            ("delay.feedback", 0.0),
+            ("delay.low_cut", 20.0),
+            ("delay.high_cut", 20_000.0),
+        ] {
+            s.mix.params.insert(id.into(), v);
+        }
+    });
+    let from_b = |s: &Song| {
+        let opts = RenderOptions {
+            start_bar: 2,
+            end_bar: 4,
+            stems: true,
+        };
+        render(compile_song(s), &opts).unwrap()
+    };
+    let (off, on) = (from_b(&off), from_b(&on));
+    assert!(on.meter.pre_clip_peak <= CLIP_KNEE, "{:?}", on.meter);
+    let master = db2amp(-12.0);
+    let pan_left = pan_gains(0.0).0;
+    let dry = stem(&on, "acid");
+    let mut checked = 0;
+    for f in 18_000..on.mix.len() as u64 / 2 {
+        let ret = f64::from(at(&on.mix, f).0) - f64::from(at(&off.mix, f).0);
+        // The stem is `y·gain·pan`; the send taps `y·gain`.
+        let sent = f64::from(at(dry, f - 18_000).0) / pan_left;
+        let want = sent * master;
+        assert!(
+            (ret - want).abs() < 1e-6,
+            "frame {f}: return {ret}, want {want}"
+        );
+        if want.abs() > 1e-2 {
+            checked += 1;
+        }
+    }
+    assert!(checked > 1000, "only {checked} loud echo frames");
 }
 
 #[test]
