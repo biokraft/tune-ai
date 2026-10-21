@@ -30,6 +30,8 @@ enum Command {
     Play(PlayArgs),
     /// Edit song values by path, logged as Claude's edits.
     Set(SetArgs),
+    /// Show the edit log: what the producer and Claude changed.
+    Changes(ChangesArgs),
     /// List every instrument and effect parameter.
     Params(JsonArgs),
     /// Render an acid 303 pattern to a stereo 24-bit WAV.
@@ -44,6 +46,28 @@ struct SetArgs {
     /// Edits as PATH=VALUE, e.g. tracks.acid.acid303.cutoff=820 (all or nothing).
     #[arg(required = true, value_name = "PATH=VALUE")]
     assignments: Vec<String>,
+    /// Print JSON instead of text.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum SourceArg {
+    Human,
+    Claude,
+    External,
+}
+
+#[derive(Args)]
+struct ChangesArgs {
+    /// Song file (TOML).
+    song: PathBuf,
+    /// Only changes after this RFC 3339 time.
+    #[arg(long, value_name = "RFC3339")]
+    since: Option<String>,
+    /// Only changes from this source.
+    #[arg(long, value_enum)]
+    source: Option<SourceArg>,
     /// Print JSON instead of text.
     #[arg(long)]
     json: bool,
@@ -294,6 +318,16 @@ fn main() -> ExitCode {
             json: a.json,
         }),
         Command::Set(a) => cmd::set::run(&a.song, &a.assignments, a.json),
+        Command::Changes(a) => cmd::changes::run(&cmd::changes::Args {
+            song: &a.song,
+            since: a.since.as_deref(),
+            source: a.source.map(|s| match s {
+                SourceArg::Human => tune_studio::Source::Human,
+                SourceArg::Claude => tune_studio::Source::Claude,
+                SourceArg::External => tune_studio::Source::External,
+            }),
+            json: a.json,
+        }),
         Command::Params(a) => cmd::params::run(a.json),
         Command::Render303(a) => finish(a.json, run(&a)),
     }

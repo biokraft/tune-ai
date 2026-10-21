@@ -6,6 +6,7 @@ use tune_song::Song;
 
 use crate::report::{Failure, load_failures};
 
+pub mod changes;
 pub mod info;
 pub mod params;
 pub mod play;
