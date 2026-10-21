@@ -4640,6 +4640,7 @@ version = "0.1.0"
 dependencies = [
  "open303-ref",
  "thiserror 2.0.21",
+ "tune-analysis",
 ]
 
 [[package]]
