@@ -12,3 +12,4 @@ thiserror = "2"
 
 [dev-dependencies]
 open303-ref = { path = "../open303-ref" }
+tune-analysis = { path = "../tune-analysis" }
