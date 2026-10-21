@@ -77,6 +77,12 @@ impl DecayEnvelope {
         self.y = self.y_init;
     }
 
+    /// Clears the running output back to what [`new`](Self::new) leaves,
+    /// keeping the time constant.
+    pub fn reset_state(&mut self) {
+        self.y = 1.0;
+    }
+
     fn calculate_coefficient(&mut self) {
         self.c = (-1.0 / (0.001 * self.tau * self.sample_rate)).exp();
         if self.normalize_sum {

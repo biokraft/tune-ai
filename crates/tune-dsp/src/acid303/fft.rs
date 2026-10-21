@@ -115,6 +115,7 @@ impl FourierTransformerRadix2 {
 /// arguments. Calling the same routine keeps the twiddle factors, and so the
 /// whole transform, bit-identical to the reference.
 #[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
 fn sin_cos_pair(x: f64) -> (f64, f64) {
     #[repr(C)]
     struct SinCos {

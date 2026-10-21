@@ -1,7 +1,7 @@
 //! Oversampled distortion: drive, shaper, DC blocker, dry/wet mix, output gain.
 
 use crate::acid303::{EllipticQuarterBandFilter, OnePoleFilter, OnePoleMode, math::db2amp};
-use crate::param::{Curve, ParamError, ParamSpec};
+use crate::param::{Curve, ParamError, ParamSpec, find_spec};
 
 /// Distortion curve applied to the driven signal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -9,6 +9,27 @@ pub enum DistortionMode {
     Soft,
     Hard,
     Overdrive,
+}
+
+impl DistortionMode {
+    /// Parses `"soft"`, `"hard"` or `"overdrive"`.
+    pub fn from_name(s: &str) -> Option<Self> {
+        match s {
+            "soft" => Some(Self::Soft),
+            "hard" => Some(Self::Hard),
+            "overdrive" => Some(Self::Overdrive),
+            _ => None,
+        }
+    }
+
+    /// The name [`DistortionMode::from_name`] accepts.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Soft => "soft",
+            Self::Hard => "hard",
+            Self::Overdrive => "overdrive",
+        }
+    }
 }
 
 /// User-facing parameters of [`Distortion`], in plain units.
@@ -105,20 +126,34 @@ impl Distortion {
 
     /// Sets a parameter in plain units (see [`DIST_PARAMS`]).
     pub fn set_param(&mut self, id: &str, plain: f64) -> Result<(), ParamError> {
-        let spec = DIST_PARAMS
-            .iter()
-            .find(|s| s.id == id)
-            .ok_or_else(|| ParamError::UnknownId(id.to_owned()))?;
-        if !(spec.min..=spec.max).contains(&plain) {
-            return Err(ParamError::OutOfRange {
-                id: spec.id.to_owned(),
-                value: plain,
-                min: spec.min,
-                max: spec.max,
-            });
-        }
-        self.apply(spec.id, plain);
+        let (index, spec) = find_spec(DIST_PARAMS, id)?;
+        spec.check(plain)?;
+        self.set_param_at(index, plain);
         Ok(())
+    }
+
+    /// Sets the parameter at `index` of [`DIST_PARAMS`] in plain units,
+    /// clamped to its range (NaN is treated as the minimum).
+    ///
+    /// # Panics
+    /// If `index` is out of range of [`DIST_PARAMS`].
+    pub fn set_param_at(&mut self, index: usize, plain: f64) {
+        let spec = &DIST_PARAMS[index];
+        let plain = if plain.is_nan() {
+            spec.min
+        } else {
+            plain.clamp(spec.min, spec.max)
+        };
+        self.apply(spec.id, plain);
+    }
+
+    /// Clears the filter states and the dry delay. Parameters and mode stay.
+    pub fn reset(&mut self) {
+        self.up_filter = EllipticQuarterBandFilter::new();
+        self.down_filter = EllipticQuarterBandFilter::new();
+        self.dc_blocker.reset();
+        self.dry_delay = [0.0; LATENCY];
+        self.dry_pos = 0;
     }
 
     fn apply(&mut self, id: &str, plain: f64) {
@@ -292,5 +327,34 @@ mod tests {
         let skip = (0.1 * SR) as usize;
         let ratio = rms(&out[skip..]) / rms(&input[skip..]);
         assert!((ratio - 1.0).abs() < 0.01, "ratio {ratio}");
+    }
+
+    #[test]
+    fn reset_restores_fresh_state() {
+        let mut d = make(DistortionMode::Overdrive, 30.0, 0.7, -3.0);
+        let mut s: u64 = 0x1234_5678_9abc_def0;
+        for _ in 0..SR as usize {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            d.process((s >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0);
+        }
+        d.reset();
+        let mut fresh = make(DistortionMode::Overdrive, 30.0, 0.7, -3.0);
+        for x in sine(0.8, 440.0, 4000) {
+            assert_eq!(d.process(x).to_bits(), fresh.process(x).to_bits());
+        }
+    }
+
+    #[test]
+    fn mode_names_round_trip() {
+        for m in [
+            DistortionMode::Soft,
+            DistortionMode::Hard,
+            DistortionMode::Overdrive,
+        ] {
+            assert_eq!(DistortionMode::from_name(m.name()), Some(m));
+        }
+        assert_eq!(DistortionMode::from_name("fuzz"), None);
     }
 }

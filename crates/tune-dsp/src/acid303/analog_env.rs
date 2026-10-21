@@ -336,6 +336,15 @@ impl AnalogEnvelope {
         self.time = 0.0;
     }
 
+    /// Clears the running state (time, last output, gate) back to what
+    /// [`new`](Self::new) leaves, keeping every time and level parameter.
+    pub fn reset_state(&mut self) {
+        self.time = 0.0;
+        self.previous_output = 0.0;
+        self.output_is_zero = true;
+        self.note_is_on = false;
+    }
+
     fn calculate_accumulated_times(&mut self) {
         self.att_plus_hld = self.attack_time + self.hold_time;
         self.att_plus_hld_plus_dec = self.att_plus_hld + self.decay_time;

@@ -1,0 +1,716 @@
+//! The sample-by-sample song player shared by offline and realtime output.
+//!
+//! [`Engine::process`] never allocates: everything is sized when the engine
+//! is built. The order of work inside one sample is fixed (see
+//! [`Engine::process`]), because offline and live playback must agree bit
+//! for bit.
+
+use std::ops::Range;
+use std::sync::Arc;
+
+use tune_dsp::ParamSpec;
+use tune_song::FxSpec;
+
+use crate::clock::hit_seed;
+use crate::compile::{CompiledFx, CompiledSong, CompiledTrack, ParamTarget};
+use crate::instrument::{Cell, Effect, Instrument, StepCtx};
+use crate::live::SongUpdate;
+use crate::mixer::Meter;
+use crate::tracks::{make_effect, make_instrument};
+
+/// The live DSP objects of one track, with its knob overrides.
+pub struct TrackRuntime {
+    pub instrument: Box<dyn Instrument>,
+    pub fx: Vec<Box<dyn Effect>>,
+    /// One override per instrument param in plain units; `NaN` is none.
+    overrides: Vec<f64>,
+    /// One override table per fx slot, like `overrides`. It travels with
+    /// the fx chain: a swap that rebuilds the chain drops it.
+    fx_overrides: Vec<Vec<f64>>,
+}
+
+impl TrackRuntime {
+    /// Fresh instrument and fx chain for `track`, with its static params set
+    /// and room for an override on every param (none set).
+    pub fn build(track: &CompiledTrack, sample_rate: f64) -> Self {
+        let mut rt = Self {
+            instrument: make_instrument(track.kind, sample_rate),
+            fx: track
+                .fx
+                .iter()
+                .map(|fx| make_effect(&fx.spec, sample_rate))
+                .collect(),
+            overrides: vec![f64::NAN; track.params.len()],
+            fx_overrides: track
+                .fx
+                .iter()
+                .map(|fx| vec![f64::NAN; fx.params.len()])
+                .collect(),
+        };
+        rt.apply_static(track);
+        rt
+    }
+
+    /// Sets every instrument and fx param to the track's static value.
+    fn apply_static(&mut self, track: &CompiledTrack) {
+        for (index, &plain) in track.params.iter().enumerate() {
+            self.instrument.set_param_at(index, plain);
+        }
+        for (fx, spec) in self.fx.iter_mut().zip(&track.fx) {
+            for (index, &plain) in spec.params.iter().enumerate() {
+                fx.set_param_at(index, plain);
+            }
+        }
+    }
+
+    /// Sets one param in plain units.
+    fn set_target(&mut self, target: ParamTarget, plain: f64) {
+        match target {
+            ParamTarget::Instrument(index) => self.instrument.set_param_at(index, plain),
+            ParamTarget::Fx { slot, index } => self.fx[slot].set_param_at(index, plain),
+        }
+    }
+
+    /// The override slot of `target` and its spec, if the runtime has both.
+    fn override_slot(&mut self, target: ParamTarget) -> Option<(&mut f64, &'static ParamSpec)> {
+        match target {
+            ParamTarget::Instrument(index) => {
+                let spec = self.instrument.params().get(index)?;
+                Some((self.overrides.get_mut(index)?, spec))
+            }
+            ParamTarget::Fx { slot, index } => {
+                let spec = self.fx.get(slot)?.params().get(index)?;
+                Some((self.fx_overrides.get_mut(slot)?.get_mut(index)?, spec))
+            }
+        }
+    }
+
+    /// Sets every overridden param to its override.
+    fn apply_overrides(&mut self) {
+        for (index, &plain) in self.overrides.iter().enumerate() {
+            if !plain.is_nan() {
+                self.instrument.set_param_at(index, plain);
+            }
+        }
+        for (fx, table) in self.fx.iter_mut().zip(&self.fx_overrides) {
+            for (index, &plain) in table.iter().enumerate() {
+                if !plain.is_nan() {
+                    fx.set_param_at(index, plain);
+                }
+            }
+        }
+    }
+
+    /// Clears every override, setting each param it held back to the
+    /// track's static value.
+    fn clear_overrides(&mut self, track: &CompiledTrack) {
+        for (index, plain) in self.overrides.iter_mut().enumerate() {
+            if !plain.is_nan() {
+                *plain = f64::NAN;
+                self.instrument.set_param_at(index, track.params[index]);
+            }
+        }
+        for ((fx, table), spec) in self
+            .fx
+            .iter_mut()
+            .zip(&mut self.fx_overrides)
+            .zip(&track.fx)
+        {
+            for (index, plain) in table.iter_mut().enumerate() {
+                if !plain.is_nan() {
+                    *plain = f64::NAN;
+                    fx.set_param_at(index, spec.params[index]);
+                }
+            }
+        }
+    }
+
+    /// How many overrides are set.
+    fn overrides_set(&self) -> u32 {
+        let set = |table: &[f64]| table.iter().filter(|v| !v.is_nan()).count() as u32;
+        set(&self.overrides) + self.fx_overrides.iter().map(|t| set(t)).sum::<u32>()
+    }
+
+    fn reset(&mut self) {
+        self.instrument.reset();
+        for fx in &mut self.fx {
+            fx.reset();
+        }
+    }
+
+    /// A silent stand-in left behind when a swap moves a runtime out of the
+    /// old list. Neither building nor dropping it touches the heap: the
+    /// instrument is zero-sized and the fx chain is empty.
+    fn placeholder() -> Self {
+        Self {
+            instrument: Box::new(Vacant),
+            fx: Vec::new(),
+            overrides: Vec::new(),
+            fx_overrides: Vec::new(),
+        }
+    }
+}
+
+/// The zero-sized instrument behind [`TrackRuntime::placeholder`].
+struct Vacant;
+
+impl Instrument for Vacant {
+    fn params(&self) -> &'static [ParamSpec] {
+        &[]
+    }
+    fn set_param_at(&mut self, _: usize, _: f64) {}
+    fn on_step(&mut self, _: &Cell, _: &StepCtx) {}
+    fn process(&mut self) -> f64 {
+        0.0
+    }
+    fn reset(&mut self) {}
+}
+
+/// Whether two fx chains are built alike: the same effects in the same
+/// slots, each with what its constructor takes (a distortion's mode). Params
+/// may differ; the static reset after a swap sets them.
+fn same_fx_chain(a: &[CompiledFx], b: &[CompiledFx]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| match (&x.spec, &y.spec) {
+            (FxSpec::Distortion { mode: m, .. }, FxSpec::Distortion { mode: n, .. }) => m == n,
+        })
+}
+
+/// Plays a [`CompiledSong`]: arrangement, automation, mixer and master clipper.
+pub struct Engine {
+    song: Arc<CompiledSong>,
+    tracks: Vec<TrackRuntime>,
+    /// Song sample position of the next sample.
+    pos: u64,
+    /// The next step to fire.
+    step: u64,
+    /// Section of the last step fired.
+    section: usize,
+    /// Set by `new`, `seek` and swaps: the next step re-applies static params
+    /// even if the section stays the same.
+    needs_static: bool,
+    /// Loop as half-open step range.
+    looping: Option<(u64, u64)>,
+    finished: bool,
+    any_solo: bool,
+    gate_samples: i32,
+    meter: Meter,
+    /// A swap waiting for the next step boundary.
+    pending: Option<Box<SongUpdate>>,
+    /// The last applied swap, holding the old song, until it is taken.
+    retired: Option<Box<SongUpdate>>,
+    swaps_applied: u64,
+    /// The generation of the song playing (see [`generation`](Self::generation)).
+    generation: u64,
+    /// Knob overrides set across all runtimes.
+    overrides_active: u32,
+}
+
+static REST: Cell = Cell::Rest;
+
+impl Engine {
+    /// An engine at bar 0 with fresh runtimes for every track.
+    pub fn new(song: Arc<CompiledSong>) -> Self {
+        let sample_rate = f64::from(song.clock.sample_rate);
+        let tracks = song
+            .tracks
+            .iter()
+            .map(|t| TrackRuntime::build(t, sample_rate))
+            .collect();
+        Self::from_parts(song, tracks)
+    }
+
+    /// An engine at bar 0 playing `tracks`, one runtime per song track in
+    /// song order. The runtimes are used as they are (not reset).
+    pub fn from_parts(song: Arc<CompiledSong>, tracks: Vec<TrackRuntime>) -> Self {
+        assert_eq!(
+            tracks.len(),
+            song.tracks.len(),
+            "one runtime per track is required"
+        );
+        Self {
+            any_solo: song.tracks.iter().any(|t| t.solo),
+            gate_samples: song.clock.gate_samples(),
+            song,
+            tracks,
+            pos: 0,
+            step: 0,
+            section: 0,
+            needs_static: true,
+            looping: None,
+            finished: false,
+            meter: Meter::default(),
+            pending: None,
+            retired: None,
+            swaps_applied: 0,
+            generation: 0,
+            overrides_active: 0,
+        }
+    }
+
+    /// Queues `update` to replace the song at the next step boundary and
+    /// returns the swap it replaces, if one was still pending. The update
+    /// must be built at the engine's sample rate.
+    ///
+    /// The swap applies only once the previous one has been taken with
+    /// [`take_retired_swap`](Self::take_retired_swap), so the engine never
+    /// drops a song itself. Applying it, at step boundary `k`:
+    /// - every new track takes the old runtime with the same id and
+    ///   instrument kind (keeping the old fx chain if it is built alike, see
+    ///   `same_fx_chain`); other tracks get the update's fresh runtimes;
+    /// - the new clock takes over at step `k` (the step index survives a bpm
+    ///   change) and static params are re-applied;
+    /// - the loop is clamped to the new end, and dropped when it starts at
+    ///   or past it;
+    /// - if `k` lies at or past the new end, playback jumps to the loop start
+    ///   when a loop remains and finishes otherwise.
+    ///
+    /// A finished engine applies a swap at once and stays finished at the
+    /// new end; [`seek`](Self::seek) restarts it.
+    ///
+    /// Knob overrides travel with the runtimes a swap keeps (an fx chain's
+    /// overrides only when the chain is kept). An update made to clear the
+    /// overrides clears them all when it lands; an update that replaces such
+    /// a pending one inherits that.
+    pub fn queue_swap(&mut self, mut update: Box<SongUpdate>) -> Option<Box<SongUpdate>> {
+        debug_assert_eq!(
+            update.song.clock.sample_rate, self.song.clock.sample_rate,
+            "a swap must keep the sample rate"
+        );
+        if self.pending.as_ref().is_some_and(|p| p.clear_overrides) {
+            update.clear_overrides = true;
+        }
+        self.pending.replace(update)
+    }
+
+    pub fn has_pending_swap(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    pub fn has_retired_swap(&self) -> bool {
+        self.retired.is_some()
+    }
+
+    /// The last applied swap's update, now holding the old song and every
+    /// runtime the new song did not take. Drop it off the audio thread.
+    pub fn take_retired_swap(&mut self) -> Option<Box<SongUpdate>> {
+        self.retired.take()
+    }
+
+    /// Swaps applied since the engine was built.
+    pub fn swaps_applied(&self) -> u64 {
+        self.swaps_applied
+    }
+
+    /// The generation of the song playing: 0 for the song the engine was
+    /// built with, then that of each applied swap's update (assigned by the
+    /// [`LiveController`](crate::live::LiveController)).
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Overrides param `target` of track `track` with `plain` (clamped to the
+    /// param's range), or clears the override with `None` (or a NaN), which
+    /// sets the param back to its static value; a lane then takes it over
+    /// again from the next sample. An override wins over static params and
+    /// lanes and is applied every sample, before `on_step` (see
+    /// [`process`](Self::process)). A track or target outside the song is
+    /// ignored. Never allocates. Overrides are live-only: offline renders
+    /// build their own engine and never see them.
+    pub fn set_override(&mut self, track: usize, target: ParamTarget, plain: Option<f64>) {
+        let Some(rt) = self.tracks.get_mut(track) else {
+            return;
+        };
+        let Some((slot, spec)) = rt.override_slot(target) else {
+            return;
+        };
+        let was_set = !slot.is_nan();
+        match plain.filter(|v| !v.is_nan()) {
+            Some(v) => {
+                *slot = v.clamp(spec.min, spec.max);
+                if !was_set {
+                    self.overrides_active += 1;
+                }
+            }
+            None => {
+                *slot = f64::NAN;
+                if was_set {
+                    self.overrides_active -= 1;
+                    let track = &self.song.tracks[track];
+                    let plain = match target {
+                        ParamTarget::Instrument(index) => track.params[index],
+                        ParamTarget::Fx { slot, index } => track.fx[slot].params[index],
+                    };
+                    rt.set_target(target, plain);
+                }
+            }
+        }
+    }
+
+    /// Clears every override (see [`set_override`](Self::set_override)).
+    pub fn clear_overrides(&mut self) {
+        if self.overrides_active == 0 {
+            return;
+        }
+        for (rt, track) in self.tracks.iter_mut().zip(&self.song.tracks) {
+            rt.clear_overrides(track);
+        }
+        self.overrides_active = 0;
+    }
+
+    /// Knob overrides currently set.
+    pub fn overrides_active(&self) -> u32 {
+        self.overrides_active
+    }
+
+    /// Jumps to the start of 0-based `bar` (clamped to the song's end) and
+    /// resets every instrument and effect. The loop, meter and knob
+    /// overrides are kept.
+    ///
+    /// Audio after a seek starts from reset instrument state (silent filters,
+    /// envelopes and delay lines), so only the param values match play-through,
+    /// not the samples.
+    pub fn seek(&mut self, bar: u32) {
+        let bar = bar.min(self.song.total_bars);
+        for rt in &mut self.tracks {
+            rt.reset();
+        }
+        self.step = 16 * u64::from(bar);
+        self.pos = self.song.clock.step_start(self.step);
+        self.section = section_of(&self.song, self.step);
+        self.needs_static = true;
+        self.finished = false;
+    }
+
+    /// Loops the half-open bar range, clamped to the song; an empty range
+    /// (after clamping) removes the loop. The jump back happens when the
+    /// playhead reaches the loop's end.
+    pub fn set_loop(&mut self, bars: Option<Range<u32>>) {
+        let total = self.song.total_bars;
+        self.looping = bars.and_then(|r| {
+            let (start, end) = (r.start.min(total), r.end.min(total));
+            (start < end).then(|| (16 * u64::from(start), 16 * u64::from(end)))
+        });
+    }
+
+    /// Fills interleaved stereo `out` (an even length).
+    ///
+    /// Per sample, in this order:
+    /// 0. At a step boundary (or when finished), apply a pending swap (see
+    ///    [`queue_swap`](Self::queue_swap)); the rest of the sample then runs
+    ///    on the new song.
+    /// 1. When finished, write silence.
+    /// 2. At a step boundary: wrap at the loop end (nothing is reset); finish
+    ///    at the song end; re-apply static params on a section change (or the
+    ///    first step after `new`/`seek`); apply the section's lanes for this
+    ///    sample; apply the knob overrides; fire `on_step` on every track in
+    ///    order; advance the step. Elsewhere: apply the section's lanes, then
+    ///    the overrides, for this sample. Lanes and overrides run exactly once
+    ///    per sample (overrides only when one is set), always before the
+    ///    tracks' `on_step`, so a hit reads the overridden value.
+    /// 3. Process every track (instrument, then fx in order), write its stem
+    ///    and add it to the master when audible.
+    /// 4. Meter, soft-clip, write, advance the position.
+    pub fn process(&mut self, out: &mut [f32]) {
+        for frame in out.chunks_exact_mut(2) {
+            let (l, r) = self.frame(|_, _, _| {});
+            frame[0] = l;
+            frame[1] = r;
+        }
+    }
+
+    /// Like [`process`](Self::process), also writing one interleaved stereo
+    /// stem per track (each as long as `mix`). Stems ignore mute and solo and
+    /// skip the clipper.
+    ///
+    /// Stems need a fixed track list, so no swap may be pending.
+    pub fn process_stems(&mut self, mix: &mut [f32], stems: &mut [&mut [f32]]) {
+        assert!(self.pending.is_none(), "no swaps while rendering stems");
+        assert_eq!(stems.len(), self.tracks.len(), "one stem per track");
+        for stem in stems.iter() {
+            assert_eq!(stem.len(), mix.len(), "stems must match the mix length");
+        }
+        for (i, frame) in mix.chunks_exact_mut(2).enumerate() {
+            let (l, r) = self.frame(|t, sl, sr| {
+                stems[t][2 * i] = sl as f32;
+                stems[t][2 * i + 1] = sr as f32;
+            });
+            frame[0] = l;
+            frame[1] = r;
+        }
+    }
+
+    /// One frame; `stem(track, l, r)` receives every track's output.
+    fn frame(&mut self, mut stem: impl FnMut(usize, f64, f64)) -> (f32, f32) {
+        if self.pending.is_some()
+            && self.retired.is_none()
+            && (self.finished || self.pos == self.song.clock.step_start(self.step))
+        {
+            self.apply_swap();
+        }
+        if self.finished {
+            return self.silence(&mut stem);
+        }
+        let song = &*self.song;
+        if self.pos == song.clock.step_start(self.step) {
+            if let Some((start, end)) = self.looping
+                && self.step == end
+            {
+                self.step = start;
+                self.pos = song.clock.step_start(start);
+            }
+            let total_steps = 16 * u64::from(song.total_bars);
+            if self.step == total_steps {
+                self.finished = true;
+                return self.silence(&mut stem);
+            }
+            let section = section_of(song, self.step);
+            if section != self.section || self.needs_static {
+                for (rt, track) in self.tracks.iter_mut().zip(&song.tracks) {
+                    rt.apply_static(track);
+                }
+                self.section = section;
+                self.needs_static = false;
+            }
+            apply_lanes(song, section, self.pos, &mut self.tracks);
+            if self.overrides_active > 0 {
+                apply_overrides(&mut self.tracks);
+            }
+            let step = self.step;
+            // Across the loop wrap the next cell is the loop start's.
+            let next_step = match self.looping {
+                Some((start, end)) if step + 1 == end => start,
+                _ => step + 1,
+            };
+            let next_section = section_of(song, next_step);
+            for (t, (rt, track)) in self.tracks.iter_mut().zip(&song.tracks).enumerate() {
+                let next = cell_at(song, next_section, t, next_step);
+                let ctx = StepCtx {
+                    step,
+                    next_has_gate: matches!(next, Cell::Note(n) if n.note.is_some()),
+                    gate_samples: self.gate_samples,
+                    seed: hit_seed(track.seed, step),
+                };
+                rt.instrument.on_step(cell_at(song, section, t, step), &ctx);
+            }
+            self.step += 1;
+        } else {
+            apply_lanes(song, self.section, self.pos, &mut self.tracks);
+            if self.overrides_active > 0 {
+                apply_overrides(&mut self.tracks);
+            }
+        }
+
+        let (mut ml, mut mr) = (0.0, 0.0);
+        for (t, (rt, track)) in self.tracks.iter_mut().zip(&song.tracks).enumerate() {
+            let mut y = rt.instrument.process();
+            for fx in &mut rt.fx {
+                y = fx.process(y);
+            }
+            let l = y * track.gain * track.pan_gains.0;
+            let r = y * track.gain * track.pan_gains.1;
+            stem(t, l, r);
+            if !track.mute && (!self.any_solo || track.solo) {
+                ml += l;
+                mr += r;
+            }
+        }
+        let (cl, cr) = self.meter.clip_frame(ml, mr);
+        self.pos += 1;
+        (cl as f32, cr as f32)
+    }
+
+    /// Applies the pending swap at the current step boundary (see
+    /// [`queue_swap`](Self::queue_swap)). Moves boxes and vectors only: it
+    /// never allocates or frees.
+    fn apply_swap(&mut self) {
+        let Some(mut update) = self.pending.take() else {
+            return;
+        };
+        let u = &mut *update;
+        debug_assert!(u.spare.is_empty() && u.spare.capacity() >= u.song.tracks.len());
+        for (j, new) in u.song.tracks.iter().enumerate() {
+            let fresh = u.tracks[j].take().expect("one fresh runtime per track");
+            let old = self
+                .song
+                .tracks
+                .iter()
+                .position(|t| t.id == new.id && t.kind == new.kind);
+            let rt = match old {
+                None => fresh,
+                Some(i) => {
+                    let mut kept =
+                        std::mem::replace(&mut self.tracks[i], TrackRuntime::placeholder());
+                    let mut unused = fresh;
+                    if !same_fx_chain(&self.song.tracks[i].fx, &new.fx) {
+                        std::mem::swap(&mut kept.fx, &mut unused.fx);
+                        std::mem::swap(&mut kept.fx_overrides, &mut unused.fx_overrides);
+                    }
+                    u.tracks[j] = Some(unused);
+                    kept
+                }
+            };
+            u.spare.push(rt);
+        }
+        std::mem::swap(&mut self.tracks, &mut u.spare);
+        std::mem::swap(&mut self.song, &mut u.song);
+        self.generation = u.generation;
+        let clear = u.clear_overrides;
+        self.retired = Some(update);
+        self.swaps_applied += 1;
+        self.overrides_active = self.tracks.iter().map(TrackRuntime::overrides_set).sum();
+        if clear {
+            self.clear_overrides();
+        }
+
+        let song = &*self.song;
+        self.any_solo = song.tracks.iter().any(|t| t.solo);
+        self.gate_samples = song.clock.gate_samples();
+        let total_steps = 16 * u64::from(song.total_bars);
+        self.looping = self
+            .looping
+            .and_then(|(start, end)| (start < total_steps).then(|| (start, end.min(total_steps))));
+        self.needs_static = true;
+        if self.finished || self.step >= total_steps {
+            match self.looping {
+                Some((start, _)) if !self.finished => self.step = start,
+                _ => {
+                    self.finished = true;
+                    self.step = total_steps;
+                }
+            }
+        }
+        self.pos = song.clock.step_start(self.step);
+        self.section = section_of(song, self.step);
+    }
+
+    fn silence(&self, stem: &mut impl FnMut(usize, f64, f64)) -> (f32, f32) {
+        for t in 0..self.tracks.len() {
+            stem(t, 0.0, 0.0);
+        }
+        (0.0, 0.0)
+    }
+
+    /// Song sample position of the next sample.
+    pub fn position(&self) -> u64 {
+        self.pos
+    }
+
+    /// 0-based bar of the playhead (`total_bars` at the end).
+    pub fn bar(&self) -> u32 {
+        let total = self.song.total_bars;
+        if self.pos >= self.song.end_sample() {
+            return total;
+        }
+        ((self.song.clock.step_at(self.pos) / 16) as u32).min(total)
+    }
+
+    pub fn finished(&self) -> bool {
+        self.finished
+    }
+
+    pub fn meter(&self) -> Meter {
+        self.meter
+    }
+
+    pub fn reset_meter(&mut self) {
+        self.meter = Meter::default();
+    }
+
+    pub fn song(&self) -> &Arc<CompiledSong> {
+        &self.song
+    }
+}
+
+/// Index of the section containing `step` (the last one for steps past the
+/// end), by binary search on section start steps.
+fn section_of(song: &CompiledSong, step: u64) -> usize {
+    song.sections
+        .partition_point(|s| 16 * u64::from(s.start_bar) <= step)
+        .saturating_sub(1)
+}
+
+/// The cell track `t` plays at `step` in `section`: `Rest` when the section
+/// does not play the track or the step lies past the end; otherwise the
+/// pattern restarted at the section start.
+fn cell_at(song: &CompiledSong, section: usize, t: usize, step: u64) -> &Cell {
+    if step >= 16 * u64::from(song.total_bars) {
+        return &REST;
+    }
+    let s = &song.sections[section];
+    match s.play[t] {
+        None => &REST,
+        Some(p) => {
+            let pattern = &song.patterns[p];
+            let offset = step - 16 * u64::from(s.start_bar);
+            &pattern[(offset % pattern.len() as u64) as usize]
+        }
+    }
+}
+
+/// Applies every override of every track.
+fn apply_overrides(tracks: &mut [TrackRuntime]) {
+    for rt in tracks {
+        rt.apply_overrides();
+    }
+}
+
+/// Applies every lane of `section` at song sample `pos`.
+fn apply_lanes(song: &CompiledSong, section: usize, pos: u64, tracks: &mut [TrackRuntime]) {
+    let s = &song.sections[section];
+    if s.lanes.is_empty() {
+        return;
+    }
+    let start = song.clock.bar_start(s.start_bar);
+    let x = pos.saturating_sub(start) as f64 / (16.0 * song.clock.samples_per_step);
+    for lane in &s.lanes {
+        let plain = lane.spec.to_plain(lane_value(&lane.points, x));
+        tracks[lane.track].set_target(lane.target, plain);
+    }
+}
+
+/// The normalized lane value at bar offset `x`: the first point's value
+/// before it, linear between points, the last point's value after it, and
+/// the later point where two share a bar.
+fn lane_value(points: &[(f64, f64)], x: f64) -> f64 {
+    let i = points.partition_point(|&(bar, _)| bar <= x);
+    if i == 0 {
+        return points[0].1;
+    }
+    if i == points.len() {
+        return points[i - 1].1;
+    }
+    let (b0, v0) = points[i - 1];
+    let (b1, v1) = points[i];
+    v0 + (v1 - v0) * (x - b0) / (b1 - b0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lane_value_shapes() {
+        let ramp = [(0.0, 0.0), (1.0, 1.0)];
+        assert_eq!(lane_value(&ramp, 0.0), 0.0);
+        assert_eq!(lane_value(&ramp, 0.5), 0.5);
+        assert_eq!(lane_value(&ramp, 1.0), 1.0);
+        assert_eq!(lane_value(&ramp, 1.7), 1.0);
+        let single = [(0.5, 0.3)];
+        assert_eq!(lane_value(&single, 0.0), 0.3);
+        assert_eq!(lane_value(&single, 0.9), 0.3);
+        let jump = [(1.0, 0.2), (1.0, 0.9), (2.0, 0.5)];
+        assert_eq!(lane_value(&jump, 0.99), 0.2);
+        assert_eq!(lane_value(&jump, 1.0), 0.9);
+        assert!((lane_value(&jump, 1.5) - 0.7).abs() < 1e-15);
+        assert_eq!(lane_value(&jump, 3.0), 0.5);
+    }
+
+    #[test]
+    fn engine_is_send() {
+        fn send<T: Send>() {}
+        send::<Engine>();
+        send::<TrackRuntime>();
+        send::<Arc<CompiledSong>>();
+    }
+}

@@ -1,0 +1,50 @@
+/* Instrument theme: a gunmetal faceplate in a dark club. Dark only.
+   Colour carries meaning: red is sounding now, amber is slide or loop, cyan is Claude. */
+@import "@fontsource/barlow-condensed/latin-600.css";
+@import "@fontsource/barlow/latin-500.css";
+
+:root {
+  color-scheme: dark;
+
+  /* Instrument palette (HSL channels, used as hsl(var(--x))). */
+  --chassis: 216 8% 12%; /* #1D1F22 app background */
+  --faceplate: 216 10% 19%; /* #2C3036 panel, top of the brushed gradient */
+  --faceplate-hi: 215 9% 25%; /* #3A3F46 panel, bottom of the gradient */
+  --silkscreen: 44 37% 88%; /* #ECE6D6 labels and values */
+  --led: 5 100% 60%; /* #FF4433 playhead, lit step, accent, value arc */
+  --slide: 39 100% 56%; /* #FFB01F slide flags, loop range */
+  --claude: 188 77% 57%; /* #3FD0E6 changes from Claude */
+
+  /* shadcn naming, mapped onto the palette. */
+  --background: var(--chassis);
+  --foreground: var(--silkscreen);
+  --card: var(--faceplate);
+  --card-foreground: var(--silkscreen);
+  --popover: var(--faceplate);
+  --popover-foreground: var(--silkscreen);
+  --primary: var(--led);
+  --primary-foreground: 210 8% 9%;
+  --secondary: var(--faceplate);
+  --secondary-foreground: var(--silkscreen);
+  --muted: 216 9% 16%;
+  --muted-foreground: 216 3% 61%;
+  --accent: var(--faceplate-hi);
+  --accent-foreground: var(--silkscreen);
+  --destructive: var(--led);
+  --destructive-foreground: 210 8% 9%;
+  --border: 214 9% 30%;
+  --input: 214 9% 30%;
+  --ring: var(--silkscreen);
+  --radius: 0.375rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

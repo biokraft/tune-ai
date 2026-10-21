@@ -1,0 +1,22 @@
+[package]
+name = "tune-studio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+indexmap = { version = "2.14", features = ["serde"] }
+jiff = { version = "=0.2.37", default-features = false, features = ["std"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+toml_edit = { version = "=0.25.17", default-features = false, features = ["parse", "display"] }
+tune-dsp = { path = "../tune-dsp" }
+tune-engine = { path = "../tune-engine" }
+tune-song = { path = "../tune-song" }
+
+[dev-dependencies]
+tempfile = "3"

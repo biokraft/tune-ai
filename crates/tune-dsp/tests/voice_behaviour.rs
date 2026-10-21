@@ -368,3 +368,89 @@ fn longer_slide_time_glides_slower() {
         "long slide should still be well below the target: {s}"
     );
 }
+
+fn notes_output(v: &mut Acid303) -> Vec<u64> {
+    let mut out = Vec::new();
+    for note in [45u8, 52, 57] {
+        v.trigger_note(note, false);
+        out.extend((0..(FS / 3.0) as usize).map(|_| v.get_sample().to_bits()));
+    }
+    out
+}
+
+#[test]
+fn set_param_at_matches_set_param() {
+    for (i, spec) in tune_dsp::acid303::ACID303_PARAMS.iter().enumerate() {
+        let mut a = Acid303::new(FS);
+        let mut b = Acid303::new(FS);
+        a.set_param(spec.id, spec.max).unwrap();
+        b.set_param_at(i, spec.max);
+        assert_eq!(notes_output(&mut a), notes_output(&mut b), "{}", spec.id);
+    }
+}
+
+#[test]
+fn set_param_at_clamps() {
+    let mut v = Acid303::new(FS);
+    v.set_param_at(2, 1e9);
+    assert_eq!(v.cutoff(), 2394.0);
+}
+
+/// Plays the fixed probe used by the reset tests: trigger, slide at 6000,
+/// release at 12 000, 48 000 samples in all.
+fn probe(v: &mut Acid303) -> Vec<f64> {
+    v.trigger_note(36, true);
+    let mut out = Vec::with_capacity(48_000);
+    for i in 0..48_000 {
+        if i == 6000 {
+            v.slide_to_note(48, false);
+        }
+        if i == 12_000 {
+            v.release_note();
+        }
+        out.push(v.get_sample());
+    }
+    out
+}
+
+fn configured() -> Acid303 {
+    let mut v = Acid303::with_param_defaults(FS);
+    v.set_resonance(85.0);
+    v.set_env_mod(60.0);
+    v.set_accent(100.0);
+    v
+}
+
+#[test]
+fn reset_matches_fresh_voice() {
+    let mut a = configured();
+    // 1 s of accented and sliding notes to dirty every piece of state:
+    for i in 0..48_000 {
+        match i {
+            0 => a.trigger_note(36, true),
+            8000 => a.slide_to_note(43, true),
+            16_000 => a.release_note(),
+            24_000 => a.trigger_note(31, false),
+            32_000 => a.slide_to_note(55, false),
+            _ => {}
+        }
+        a.get_sample();
+    }
+    a.reset();
+    let mut b = configured();
+    let (ra, rb) = (probe(&mut a), probe(&mut b));
+    assert!(ra.iter().any(|x| x.abs() > 1e-3), "probe is silent");
+    assert!(
+        ra.iter().zip(&rb).all(|(x, y)| x.to_bits() == y.to_bits()),
+        "reset voice differs from a fresh one"
+    );
+}
+
+#[test]
+fn reset_is_silent() {
+    let mut a = configured();
+    a.trigger_note(36, true);
+    render(&mut a, 5000);
+    a.reset();
+    assert!(render(&mut a, 4800).iter().all(|&x| x == 0.0));
+}

@@ -123,7 +123,7 @@ fn key_octave(note: u8) -> (i32, i32) {
 /// returns (C++, Rust).
 fn render_both(pattern: &str, bpm: f64, settings: &[(RefParam, f64)]) -> (Vec<f64>, Vec<f64>) {
     let pat = AcidPattern::parse(pattern).unwrap();
-    assert!(pat.steps.len() <= SEQ_MAX_STEPS);
+    assert!(pat.steps().len() <= SEQ_MAX_STEPS);
 
     let mut r = RefOpen303::new(FS);
     // The C++ constructor leaves the normalizers n1/n2 uninitialised and only
@@ -141,11 +141,11 @@ fn render_both(pattern: &str, bpm: f64, settings: &[(RefParam, f64)]) -> (Vec<f6
 
     r.seq_set_mode(seq_mode::KEY_SYNC);
     r.seq_set_bpm(bpm);
-    for (i, st) in pat.steps.iter().enumerate() {
+    for (i, st) in pat.steps().iter().enumerate() {
         let (key, octave) = st.note.map_or((0, 0), key_octave);
         r.seq_set_step(i, key, octave, st.accent, st.slide, st.note.is_some());
     }
-    r.seq_set_num_steps(pat.steps.len());
+    r.seq_set_num_steps(pat.steps().len());
     r.note_on(ROOT, 100); // starts the sequencer, holds the root
 
     let mut player = AcidPlayer::new(pat, bpm, FS);

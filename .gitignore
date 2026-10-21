@@ -9,12 +9,14 @@ refs/
 samples/user/
 **/renders/
 *.wav
+*.wav.tmp
 *.mp3
 *.flac
 *.aif
 *.aiff
 *.ogg
 *.m4a
+*.aac
 
 # Local settings and secrets
 .env
@@ -25,3 +27,13 @@ samples/user/
 .idea/
 .vscode/
 /scratch/
+
+# Per-song edit log (who changed what, when): local, never committed
+songs/*/edits.jsonl
+
+# Tauri generated schemas
+apps/desktop/src-tauri/gen/
+
+# Atomic song writes go through a temp file next to song.toml
+*.tune-tmp
+.song.toml.tune-tmp
