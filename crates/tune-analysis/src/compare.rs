@@ -3,7 +3,10 @@
 use serde_json::{Map, Value, json};
 
 use crate::report::{Analysis, TRUE_PEAK_MAX_DBTP, r2};
-use crate::spectral::BANDS;
+use crate::spectral::{BANDS, SIDE_MID_LIMIT_DB};
+
+/// A band level at or below this is treated as "no content" and not compared.
+const NO_CONTENT_DB: f64 = -100.0;
 
 /// Ours minus reference. `None` when either side lacks the quantity.
 #[derive(Clone, Debug, PartialEq)]
@@ -14,7 +17,7 @@ pub struct Deltas {
     pub crest_db: Option<f64>,
     pub bands: [Option<f64>; 6],
     pub low_end_ratio_db: Option<f64>,
-    pub side_to_mid_db: f64,
+    pub side_to_mid_db: Option<f64>,
     /// `log2(ours median / reference median)`.
     pub centroid_median_oct: Option<f64>,
     /// Ours `range_oct` minus the reference's.
@@ -55,9 +58,26 @@ pub fn compare(ours: &Analysis, reference: &Analysis) -> Comparison {
     let (ol, rl) = (&ours.loudness, &reference.loudness);
     let (os, rs) = (&ours.spectral, &reference.spectral);
     let mut bands = [None; 6];
+    let mut empty = [false; 6];
     for (i, b) in bands.iter_mut().enumerate() {
-        *b = diff(os.bands[i], rs.bands[i]);
+        if let (Some(a), Some(r)) = (os.bands[i], rs.bands[i]) {
+            if a <= NO_CONTENT_DB || r <= NO_CONTENT_DB {
+                empty[i] = true;
+            } else {
+                *b = Some(a - r);
+            }
+        }
     }
+    let (so, sr) = (os.stereo.side_to_mid_db, rs.stereo.side_to_mid_db);
+    let (so_mono, sr_mono) = (so.abs() >= SIDE_MID_LIMIT_DB, sr.abs() >= SIDE_MID_LIMIT_DB);
+    // Both mono: they agree (0). Exactly one mono: not comparable.
+    let width = if so_mono && sr_mono {
+        Some(0.0)
+    } else if so_mono || sr_mono {
+        None
+    } else {
+        Some(so - sr)
+    };
     let deltas = Deltas {
         integrated_lu: diff(ol.integrated_lufs, rl.integrated_lufs),
         true_peak_db: ol.true_peak_dbtp - rl.true_peak_dbtp,
@@ -65,7 +85,7 @@ pub fn compare(ours: &Analysis, reference: &Analysis) -> Comparison {
         crest_db: diff(ol.crest_db, rl.crest_db),
         bands,
         low_end_ratio_db: diff(os.low_end.ratio_db, rs.low_end.ratio_db),
-        side_to_mid_db: os.stereo.side_to_mid_db - rs.stereo.side_to_mid_db,
+        side_to_mid_db: width,
         centroid_median_oct: oct(os.brightness.median_hz, rs.brightness.median_hz),
         centroid_range_oct: diff(os.brightness.range_oct, rs.brightness.range_oct),
     };
@@ -90,6 +110,13 @@ pub fn compare(ours: &Analysis, reference: &Analysis) -> Comparison {
         v.push(format!("crest factor {d:+.1} dB vs reference: {word}"));
     }
     for (i, band) in BANDS.iter().enumerate() {
+        if empty[i] {
+            v.push(format!(
+                "{}: one side has no content there, not compared",
+                band.label
+            ));
+            continue;
+        }
         if let Some(d) = deltas.bands[i].filter(|d| d.abs() >= 1.5) {
             let prefix = if d.abs() < 3.0 { "slightly " } else { "" };
             let word = if d > 0.0 {
@@ -116,8 +143,9 @@ pub fn compare(ours: &Analysis, reference: &Analysis) -> Comparison {
             "low end below 120 Hz is not mono (correlation {c:.2}): keep kick and bass centred"
         ));
     }
-    if deltas.side_to_mid_db.abs() >= 3.0 {
-        let d = deltas.side_to_mid_db;
+    if so_mono != sr_mono {
+        v.push("width: one side is mono, not compared".to_string());
+    } else if let Some(d) = width.filter(|d| d.abs() >= 3.0) {
         let word = if d > 0.0 { "wider" } else { "narrower" };
         v.push(format!("side/mid {d:+.1} dB vs reference: {word}"));
     }
@@ -136,7 +164,7 @@ pub fn compare(ours: &Analysis, reference: &Analysis) -> Comparison {
             "filter movement {o:.1} oct vs {r:.1} oct in the reference: {word}"
         ));
     }
-    if v.is_empty() {
+    if !numeric_verdict_fired(&v) {
         v.push("matches the reference within tolerance".to_string());
     }
     Comparison {
@@ -168,11 +196,15 @@ impl Comparison {
                 "crest_db": num(d.crest_db),
                 "bands": Value::Object(bands),
                 "low_end_ratio_db": num(d.low_end_ratio_db),
-                "side_to_mid_db": num(Some(d.side_to_mid_db)),
+                "side_to_mid_db": num(d.side_to_mid_db),
                 "centroid_median_oct": num(d.centroid_median_oct),
                 "centroid_range_oct": num(d.centroid_range_oct),
             },
             "verdicts": self.verdicts,
         })
     }
+}
+
+fn numeric_verdict_fired(v: &[String]) -> bool {
+    v.iter().any(|s| !s.ends_with(", not compared"))
 }

@@ -42,7 +42,7 @@ fn identical_inputs_match() {
     assert_eq!(d.crest_db, Some(0.0));
     assert!(d.bands.iter().all(|b| *b == Some(0.0)));
     assert_eq!(d.low_end_ratio_db, Some(0.0));
-    assert_eq!(d.side_to_mid_db, 0.0);
+    assert_eq!(d.side_to_mid_db, Some(0.0));
     assert_eq!(d.centroid_median_oct, Some(0.0));
     assert_eq!(d.centroid_range_oct, Some(0.0));
     assert_eq!(c.verdicts, vec!["matches the reference within tolerance"]);
@@ -146,4 +146,51 @@ fn true_peak_just_over_shows_two_decimals() {
         "{:?}",
         c.verdicts
     );
+}
+
+#[test]
+fn empty_air_band_not_compared() {
+    let mut x = vec![0.0f32; SR as usize * 5];
+    for hz in [40.0, 150.0, 500.0, 2000.0, 6000.0] {
+        for (o, v) in x.iter_mut().zip(sine(SR, hz, -20.0, 5.0, 0.0)) {
+            *o += v;
+        }
+    }
+    let r = analyze(&mono(SR, x), None).unwrap();
+    let o = analyze(&six_sine(None), None).unwrap();
+    let c = compare(&o, &r);
+    assert_eq!(c.deltas.bands[5], None);
+    assert!(
+        c.verdicts
+            .contains(&"air: one side has no content there, not compared".to_string()),
+        "{:?}",
+        c.verdicts
+    );
+    assert!(
+        !c.verdicts
+            .iter()
+            .any(|v| v.starts_with("air") && (v.contains("+9") || v.contains("-9"))),
+        "{:?}",
+        c.verdicts
+    );
+    assert!(c.to_json()["deltas"]["bands"]["air"].is_null());
+}
+
+#[test]
+fn mono_reference_width_not_compared() {
+    let r = analyze(&six_sine(None), None).unwrap();
+    let base = &six_sine(None).channels[0];
+    let l = base.clone();
+    let rr: Vec<f32> = base.iter().map(|v| v * 0.5).collect();
+    let o = analyze(&common::stereo(SR, l, rr), None).unwrap();
+    let c = compare(&o, &r);
+    assert_eq!(c.deltas.side_to_mid_db, None);
+    assert!(
+        c.verdicts
+            .contains(&"width: one side is mono, not compared".to_string()),
+        "{:?}",
+        c.verdicts
+    );
+    assert!(!c.verdicts.iter().any(|v| v.starts_with("side/mid")));
+    assert!(c.to_json()["deltas"]["side_to_mid_db"].is_null());
 }
