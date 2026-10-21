@@ -93,7 +93,8 @@ sends -> delay and reverb buses -> master gain -> clip or limit.
 - `master = "limit"` is for loud masters; `master.ceiling` defaults to -1.5 dB.
   Its 84-frame lookahead (1.75 ms at 48 kHz) is not compensated.
 - A studio send knob on a track with no static send and no lane is silent
-  until released. Stems carry dry tracks only.
+  until released. Stems carry dry tracks only (no buses, no limiter); in limit
+  mode they run 84 frames (the lookahead) ahead of the mix.
 - A hot reload keeps the reverb tail and the limiter. Only a bpm change or a
   delay bus appearing or going restarts the delay (its echoes stop). A
   master-mode switch crossfades clipper and limiter over 10 ms, with no silent
