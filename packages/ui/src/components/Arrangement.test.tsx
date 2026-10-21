@@ -142,6 +142,15 @@ describe("Arrangement", () => {
     expect(container.querySelectorAll("polyline")).toHaveLength(2);
   });
 
+  it("lane curves stay visible above compact cells", () => {
+    setup([sec("a", 0, 16)]);
+    const cell = screen.getByRole("button", { name: "acid in section 1" });
+    expect(parseFloat(cell.style.width)).toBeLessThan(16 * 12);
+    const overlay = screen.getByTestId("lane-overlay");
+    expect(overlay).toHaveClass("pointer-events-none");
+    expect(overlay).toHaveClass("z-10");
+  });
+
   it("playhead x", () => {
     setup([sec("a", 0, 16)], { playhead: 4.5 });
     expect(screen.getByTestId("playhead")).toHaveAttribute("x1", "54");
