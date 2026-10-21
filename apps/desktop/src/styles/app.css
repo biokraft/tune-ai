@@ -1,0 +1,17 @@
+@import "@tune/ui/src/theme/tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  background: hsl(var(--chassis));
+  color: hsl(var(--silkscreen));
+  font-family: Barlow, sans-serif;
+}

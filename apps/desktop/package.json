@@ -1,0 +1,32 @@
+{
+  "name": "@tune/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "@tune/ui": "workspace:*",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.3.4",
+    "autoprefixer": "10.4.20",
+    "jsdom": "29.1.1",
+    "postcss": "8.5.31",
+    "tailwindcss": "3.4.17",
+    "vite": "6.4.4",
+    "vitest": "4.1.10"
+  }
+}
