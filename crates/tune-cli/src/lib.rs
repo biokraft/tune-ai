@@ -3,5 +3,6 @@
 #![forbid(unsafe_code)]
 
 pub mod cmd;
+pub mod ears;
 pub mod render;
 pub mod report;

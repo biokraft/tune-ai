@@ -4612,6 +4612,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tower-http",
+ "tune-analysis",
  "tune-audio",
  "tune-dsp",
  "tune-engine",
