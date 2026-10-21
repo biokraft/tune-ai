@@ -32,3 +32,7 @@ songs/*/edits.jsonl
 
 # Tauri generated schemas
 apps/desktop/src-tauri/gen/
+
+# Atomic song writes go through a temp file next to song.toml
+*.tune-tmp
+.song.toml.tune-tmp
