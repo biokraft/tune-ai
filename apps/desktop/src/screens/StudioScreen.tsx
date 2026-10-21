@@ -243,6 +243,7 @@ function Mixer({ song, highlights, automatedIn, fire, send }: MixerProps) {
         <MixerStrip
           key={t.id}
           track={t}
+          noDuck={whyNoDuck(song.mix.duck_source, t.id)}
           fire={fire}
           send={send}
           highlights={highlights}
@@ -262,9 +263,19 @@ function Mixer({ song, highlights, automatedIn, fire, send }: MixerProps) {
   );
 }
 
+/**
+ * Why `track` gets no duck knob: the duck source would duck itself, and without a source nothing
+ * ducks. Validation refuses both, so a drag would be heard but its release never written.
+ */
+function whyNoDuck(source: string | null, track: string): string | null {
+  if (source === null) return "No kick";
+  return source === track ? "Duck source" : null;
+}
+
 /** One mixer channel; re-renders only when its track changes. */
 const MixerStrip = memo(function MixerStrip({
   track,
+  noDuck,
   fire,
   send,
   highlights,
@@ -272,6 +283,7 @@ const MixerStrip = memo(function MixerStrip({
   onHelp,
 }: {
   track: TrackView;
+  noDuck: string | null;
   fire(cmd: Command): void;
   send(cmd: Command): Promise<unknown>;
   highlights: Map<string, HighlightKind>;
@@ -286,6 +298,7 @@ const MixerStrip = memo(function MixerStrip({
       strip={strip}
       onParam={(id, v, commit) => (commit ? drag.commit(id, v) : drag.change(id, v))}
       onHelp={onHelp}
+      noDuck={noDuck}
       automated={(id) => lanes?.some((l) => l.track === track.id && l.param === id) ?? false}
       highlight={(id) => highlights.get(`tracks.${track.id}.${id}`) ?? null}
       onMix={(patch) =>

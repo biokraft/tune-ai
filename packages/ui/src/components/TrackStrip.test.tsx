@@ -74,4 +74,10 @@ describe("TrackStrip", () => {
     act(() => screen.getByRole("slider", { name: "Duck" }).focus());
     expect(onHelp).toHaveBeenCalledWith(expect.objectContaining({ id: "duck.depth" }));
   });
+  it("leaves out the duck knob, with the reason, when the track cannot duck", () => {
+    render(<TrackStrip track={track} onMix={vi.fn()} strip={stripParams} noDuck="Duck source" />);
+    expect(screen.queryByRole("slider", { name: "Duck" })).toBeNull();
+    expect(screen.getByRole("slider", { name: "Delay" })).toBeInTheDocument();
+    expect(screen.getByText("Duck source")).toBeInTheDocument();
+  });
 });

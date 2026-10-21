@@ -18,6 +18,11 @@ export type TrackStripProps = {
   automated?(id: string): boolean;
   /** Called with the spec on focus and with null on blur (drives a help strip). */
   onHelp?(spec: ParamSpecView | null): void;
+  /**
+   * Why this track cannot duck (it is the duck source, or there is none): the duck knob is left
+   * out and this short reason shows in its place.
+   */
+  noDuck?: string | null;
 };
 
 /** The strip params that get a knob on the channel, in panel order. */
@@ -56,6 +61,7 @@ export function TrackStrip({
   highlight,
   automated,
   onHelp,
+  noDuck = null,
 }: TrackStripProps) {
   // Live values while a knob is held; cleared on commit so the prop takes over again.
   const [gain, setGain] = useState<number | null>(null);
@@ -116,6 +122,16 @@ export function TrackStrip({
             className="flex items-center border-l border-silkscreen/20 pl-1"
           >
             {STRIP_KNOBS.map((id) => {
+              if (id === "duck.depth" && noDuck) {
+                return (
+                  <span
+                    key={id}
+                    className="w-14 text-center font-value text-xs leading-tight text-silkscreen/50"
+                  >
+                    {noDuck}
+                  </span>
+                );
+              }
               const spec = strip.find((p) => p.id === id);
               if (!spec) return null;
               return (
