@@ -19,7 +19,9 @@ use tune_studio::{
 
 const MINI: &str = include_str!("../../tune-song/tests/fixtures/mini.toml");
 /// The longest any test waits for one thing.
-const WAIT: Duration = Duration::from_secs(2);
+// Generous: FSEvents delivery can take seconds while the machine is busy
+// (e.g. under `task verify`), and a deadline only costs time on failure.
+const WAIT: Duration = Duration::from_secs(10);
 const RATE: u32 = 48_000;
 /// Frames per `process` call when pulling, like a small device buffer.
 const BLOCK: usize = 512;
