@@ -3,6 +3,7 @@
 
 mod audio;
 mod canvas;
+mod compare;
 mod loudness;
 mod report;
 mod sections;
@@ -10,6 +11,7 @@ mod spectral;
 pub mod spectrogram;
 
 pub use audio::{Audio, decode_file};
+pub use compare::{Comparison, Deltas, compare};
 pub use loudness::{Loudness, measure_loudness};
 pub use report::{ACID_LUFS, Analysis, TRUE_PEAK_MAX_DBTP, Targets, analyze, classify_targets};
 pub use sections::{BarMap, SectionReport, SectionSpan, analyze_sections};
