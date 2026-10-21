@@ -38,6 +38,8 @@ enum Command {
     Params(JsonArgs),
     /// Measure loudness, balance and brightness, and draw a spectrogram.
     Analyze(AnalyzeArgs),
+    /// List the reference tracks configured outside git.
+    Refs(JsonArgs),
     /// Render an acid 303 pattern to a stereo 24-bit WAV.
     #[command(name = "render-303")]
     Render303(Render303),
@@ -393,6 +395,7 @@ fn main() -> ExitCode {
             png: a.png,
             json: a.json,
         }),
+        Command::Refs(a) => cmd::refs::run(a.json),
         Command::Params(a) => cmd::params::run(a.json),
         Command::Render303(a) => finish(a.json, run(&a)),
     }

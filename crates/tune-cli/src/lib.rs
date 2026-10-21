@@ -4,5 +4,6 @@
 
 pub mod cmd;
 pub mod ears;
+pub mod refs;
 pub mod render;
 pub mod report;
