@@ -346,6 +346,52 @@ fn compare_song_by_ref_name() {
     assert_eq!(v["ours"]["source"]["bars"], serde_json::json!([3, 4]));
 }
 
+/// The reference's directory, as given and canonicalised (macOS temp dirs
+/// live under a `/var` -> `/private/var` link).
+fn dir_strings(dir: &Path) -> [String; 2] {
+    [
+        dir.display().to_string(),
+        dir.canonicalize().unwrap().display().to_string(),
+    ]
+}
+
+#[test]
+fn compare_by_name_shows_the_configured_path() {
+    let dir = ref_dir();
+    std::fs::write(
+        dir.path().join("tune.local.toml"),
+        "[refs]\nr = \"~/ref.wav\"\nbad = \"~/bad.mp3\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("bad.mp3"), "not audio").unwrap();
+    let m = mini();
+    let ms = m.to_str().unwrap();
+    let out = compare_out(dir.path(), &[ms, "--ref", "r", "--bars", "3..4", "--json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json_of(&out.stdout);
+    assert_eq!(v["reference"]["source"]["path"], "~/ref.wav");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    for d in dir_strings(dir.path()) {
+        assert!(!stdout.contains(&d), "home path leaked: {stdout}");
+    }
+
+    let out = compare_out(dir.path(), &[ms, "--ref", "bad", "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    let all = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(all.contains("~/bad.mp3"), "{all}");
+    for d in dir_strings(dir.path()) {
+        assert!(!all.contains(&d), "home path leaked: {all}");
+    }
+}
+
 #[test]
 fn compare_png_default_path() {
     let dir = ref_dir();

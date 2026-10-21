@@ -8,8 +8,7 @@ use serde_json::{Value, json};
 use tune_analysis::spectrogram::compare_png;
 use tune_analysis::{Analysis, BANDS, Comparison, analyze};
 
-use crate::ears::{Input, load_input, png_path, title, write_png};
-use crate::refs::find_refs;
+use crate::ears::{Input, load_input, load_named_ref, png_path, title, write_png};
 use crate::report::{Failure, Success, finish};
 
 pub struct Args {
@@ -132,20 +131,12 @@ fn text(
 }
 
 fn load_reference(a: &Args) -> Result<(Input, Option<String>), Vec<Failure>> {
-    let (path, name) = match (&a.reference, &a.ref_name) {
-        (Some(p), None) => (p.clone(), None),
-        (None, Some(n)) => {
-            let cwd = std::env::current_dir().map_err(|e| fail(e.to_string()))?;
-            let home = std::env::var_os("HOME").map(PathBuf::from);
-            let refs = find_refs(&cwd, home.as_deref()).map_err(fail)?;
-            (refs.resolve(n).map_err(fail)?, Some(n.clone()))
-        }
+    let mut input = match (&a.reference, &a.ref_name) {
+        (Some(p), None) => load_input(p, None, None, None)?,
+        (None, Some(n)) => load_named_ref(n)?,
         _ => return Err(fail("give a reference path or --ref NAME, not both")),
     };
-    let mut input = load_input(&path, None, None, None)?;
-    if let Some(n) = &name {
-        input.stem.clone_from(n);
-    }
+    let name = a.ref_name.clone();
     if let Some(r) = &a.ref_seconds {
         let sr = f64::from(input.audio.sample_rate);
         let (lo, hi) = parse_seconds(r, input.audio.seconds()).map_err(fail)?;

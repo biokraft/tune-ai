@@ -130,8 +130,8 @@ fn expand(configured: &str, root: &Path, home: Option<&Path>) -> PathBuf {
 }
 
 impl Refs {
-    /// The file a reference name points to.
-    pub fn resolve(&self, name: &str) -> Result<PathBuf, String> {
+    /// The entry a reference name points to, when its file exists.
+    pub fn resolve(&self, name: &str) -> Result<&RefEntry, String> {
         let Some(e) = self.entries.iter().find(|e| e.name == name) else {
             let known: Vec<&str> = self.entries.iter().map(|e| e.name.as_str()).collect();
             let known = if known.is_empty() {
@@ -149,7 +149,7 @@ impl Refs {
                 e.configured
             ));
         }
-        Ok(e.path.clone())
+        Ok(e)
     }
 }
 
@@ -212,7 +212,7 @@ mod tests {
         let r = find_refs(d.path(), None).unwrap();
         assert_eq!(r.entries[0].path, d.path().join("music/x.mp3"));
         assert!(r.entries[0].exists);
-        assert_eq!(r.resolve("x").unwrap(), d.path().join("music/x.mp3"));
+        assert_eq!(r.resolve("x").unwrap().path, d.path().join("music/x.mp3"));
     }
 
     #[test]
