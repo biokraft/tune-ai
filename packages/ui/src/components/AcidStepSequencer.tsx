@@ -154,10 +154,15 @@ export function AcidStepSequencer({
         break;
       case "r":
       case "Delete":
+      case "Backspace":
         e.preventDefault();
         toggleRest();
         break;
+      default:
+        return;
     }
+    // Handled here; keep global shortcuts (e.g. delete the selected section) from also firing.
+    e.stopPropagation();
   };
 
   const toggle = cn(
