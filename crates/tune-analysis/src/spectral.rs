@@ -8,7 +8,7 @@ use crate::Audio;
 /// Band levels floor here so a silent band stays a finite number.
 const BAND_FLOOR_DB: f64 = -120.0;
 /// Side/mid floors (and caps) here, like the other silence levels.
-const SIDE_MID_LIMIT_DB: f64 = 200.0;
+pub(crate) const SIDE_MID_LIMIT_DB: f64 = 200.0;
 /// Below this per-second RMS the centroid is meaningless.
 const CENTROID_GATE_DB: f64 = -80.0;
 const RANGE_LO_HZ: f64 = 20.0;
