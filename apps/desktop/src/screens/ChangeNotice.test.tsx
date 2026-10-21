@@ -48,7 +48,9 @@ describe("ChangeNotice", () => {
     expect(
       screen.getByText("Claude changed 2 things: Cutoff 500 → 820 Hz, Resonance 70 → 90%"),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    const undo = screen.getByRole("button", { name: "Undo Claude's change" });
+    expect(undo).toHaveTextContent("Undo");
+    fireEvent.click(undo);
     expect(onUndo).toHaveBeenCalledTimes(1);
   });
 
@@ -59,7 +61,7 @@ describe("ChangeNotice", () => {
       false,
     );
     expect(screen.getByText("Claude changed 1 thing: Resonance 70 → 90%")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Undo Claude's change" })).toBeNull();
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
   });
 

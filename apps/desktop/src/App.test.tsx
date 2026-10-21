@@ -186,6 +186,7 @@ describe("App", () => {
         client.emit({
           ...structuredClone(goldenExternal),
           offered: [],
+          merged: [],
           changes: [{ path: "tracks.acid.acid303.resonance", old: 70, new: 90 }],
         }),
       );
@@ -195,8 +196,9 @@ describe("App", () => {
     press({ key: "z", metaKey: true });
     expect(notice()).toBeNull();
     claude();
-    // The transport's ↶ comes first; the notice's own Undo second.
-    fireEvent.click(screen.getAllByRole("button", { name: "Undo" })[0]!);
+    // Two buttons undo, each with its own name: the transport's ↶ and the notice's.
+    expect(screen.getByRole("button", { name: "Undo Claude's change" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     expect(notice()).toBeNull();
     expect(client.named("undo")).toHaveLength(2);
   });
