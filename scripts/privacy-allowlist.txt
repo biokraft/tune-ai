@@ -1,0 +1,4 @@
+LICENSE
+third_party/open303/License.txt
+THIRD_PARTY.md
+docs/superpowers/plans/2026-10-20-plan-1-foundation-and-acid303.md
