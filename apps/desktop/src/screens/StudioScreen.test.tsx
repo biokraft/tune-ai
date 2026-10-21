@@ -53,4 +53,37 @@ describe("StudioScreen mixer strips", () => {
     expect(ring("kick")).toBe("claude");
     expect(ring("acid")).toBeNull();
   });
+
+  it("badges a send knob that a lane automates in the sounding section", () => {
+    const client = new FakeClient();
+    render(<App store={createStudioStore(client)} />);
+    act(() =>
+      client.emit(
+        stateEvent((s) => {
+          s.song!.sections[0]!.lanes.push({
+            track: "kick",
+            param: "send.delay",
+            points: [[0, 0.5]],
+          });
+        }),
+      ),
+    );
+    const badge = (track: string) =>
+      within(within(strip(track)).getByRole("slider", { name: "Delay" })).queryByTestId(
+        "knob-lane",
+      );
+    expect(badge("kick")).toBeInTheDocument();
+    expect(badge("acid")).toBeNull();
+  });
+
+  it("shows the help of a focused send knob in the mixer's help line", () => {
+    setup();
+    act(() => within(strip("kick")).getByRole("slider", { name: "Delay" }).focus());
+    const mixer = screen.getByRole("complementary", { name: "Mixer" });
+    expect(
+      within(mixer).getByText(
+        "How much of this track goes to the shared dotted-eighth delay. -60 is off.",
+      ),
+    ).toBeInTheDocument();
+  });
 });

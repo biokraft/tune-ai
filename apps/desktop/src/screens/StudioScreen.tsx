@@ -5,9 +5,11 @@ import {
   TransportBar,
   type ArrangementProps,
   type DrumRow,
+  type ParamSpecView,
+  type SectionView,
   type TransportBarProps,
 } from "@tune/ui";
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import type { Command, SongView, StudioState, TrackView } from "../client/protocol";
 import {
   acidSection,
@@ -178,24 +180,13 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
           highlights={highlights}
           send={store.send}
         />
-        <aside aria-label="Mixer" className="flex flex-col gap-3">
-          <h2 className="font-label text-lg leading-none text-silkscreen/80">Mixer</h2>
-          {song.tracks.map((t) => (
-            <MixerStrip
-              key={t.id}
-              track={t}
-              fire={fire}
-              send={store.send}
-              highlights={highlights}
-            />
-          ))}
-          <MixPanel
-            song={song}
-            highlights={highlights}
-            automatedIn={automatedIn}
-            send={store.send}
-          />
-        </aside>
+        <Mixer
+          song={song}
+          highlights={highlights}
+          automatedIn={automatedIn}
+          fire={fire}
+          send={store.send}
+        />
       </div>
 
       <DrumSection song={song} section={section} highlights={highlights} fire={fire} />
@@ -233,17 +224,59 @@ const LiveArrangement = memo(function LiveArrangement({
   return <Arrangement {...rest} playhead={step !== null ? step / STEPS_PER_BAR : cursorBar} />;
 });
 
+type MixerProps = {
+  song: SongView;
+  highlights: Map<string, HighlightKind>;
+  automatedIn: number | null;
+  fire(cmd: Command): void;
+  send(cmd: Command): Promise<unknown>;
+};
+
+/** The channel strips and the effects panel; one help line serves every knob in the column. */
+function Mixer({ song, highlights, automatedIn, fire, send }: MixerProps) {
+  const [help, setHelp] = useState<ParamSpecView | null>(null);
+  const lanes = automatedIn === null ? undefined : song.sections[automatedIn]?.lanes;
+  return (
+    <aside aria-label="Mixer" className="flex flex-col gap-3">
+      <h2 className="font-label text-lg leading-none text-silkscreen/80">Mixer</h2>
+      {song.tracks.map((t) => (
+        <MixerStrip
+          key={t.id}
+          track={t}
+          fire={fire}
+          send={send}
+          highlights={highlights}
+          lanes={lanes}
+          onHelp={setHelp}
+        />
+      ))}
+      <MixPanel
+        song={song}
+        highlights={highlights}
+        automatedIn={automatedIn}
+        send={send}
+        help={help}
+        onHelp={setHelp}
+      />
+    </aside>
+  );
+}
+
 /** One mixer channel; re-renders only when its track changes. */
 const MixerStrip = memo(function MixerStrip({
   track,
   fire,
   send,
   highlights,
+  lanes,
+  onHelp,
 }: {
   track: TrackView;
   fire(cmd: Command): void;
   send(cmd: Command): Promise<unknown>;
   highlights: Map<string, HighlightKind>;
+  lanes: SectionView["lanes"] | undefined;
+  onHelp(spec: ParamSpecView | null): void;
 }) {
   const drag = useParamDrag(track.id, send, track.strip);
   const strip = track.strip.map((p) => ({ ...p, value: drag.valueOf(p) }));
@@ -252,6 +285,8 @@ const MixerStrip = memo(function MixerStrip({
       track={track}
       strip={strip}
       onParam={(id, v, commit) => (commit ? drag.commit(id, v) : drag.change(id, v))}
+      onHelp={onHelp}
+      automated={(id) => lanes?.some((l) => l.track === track.id && l.param === id) ?? false}
       highlight={(id) => highlights.get(`tracks.${track.id}.${id}`) ?? null}
       onMix={(patch) =>
         fire({

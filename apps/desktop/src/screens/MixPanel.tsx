@@ -11,6 +11,9 @@ export type MixPanelProps = {
   /** The section at the playhead (or cursor): its lanes mark knobs as automated. */
   automatedIn: number | null;
   send(cmd: Command): Promise<unknown>;
+  /** The knob in hand, when the parent also shows help for knobs outside this panel. */
+  help?: ParamSpecView | null;
+  onHelp?(spec: ParamSpecView | null): void;
 };
 
 /** Said on a bus nobody sends to: its knobs work, but only a release builds the bus. */
@@ -24,9 +27,13 @@ export const MixPanel = memo(function MixPanel({
   highlights,
   automatedIn,
   send,
+  help: sharedHelp,
+  onHelp: setSharedHelp,
 }: MixPanelProps) {
   const { mix } = song;
-  const [help, setHelp] = useState<ParamSpecView | null>(null);
+  const [ownHelp, setOwnHelp] = useState<ParamSpecView | null>(null);
+  const help = setSharedHelp ? (sharedHelp ?? null) : ownHelp;
+  const setHelp = setSharedHelp ?? setOwnHelp;
   const all = useMemo(
     () => [...mix.delay, ...mix.reverb, ...mix.master_params],
     [mix.delay, mix.reverb, mix.master_params],
