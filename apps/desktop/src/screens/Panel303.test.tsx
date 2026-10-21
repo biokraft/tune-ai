@@ -59,7 +59,7 @@ describe("Panel303", () => {
     fireEvent.keyDown(screen.getByRole("slider", { name: "Cutoff" }), { key: "ArrowUp" });
     expect(
       await screen.findByText(
-        "Cutoff is automated where the playhead is, so the change was not saved. Edit its lane in song.toml.",
+        "Cutoff follows its automation here — you heard your change, but it wasn't saved. Ask Claude to change the automation.",
       ),
     ).toBeInTheDocument();
   });
