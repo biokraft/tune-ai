@@ -28,6 +28,8 @@ const RULER_H = 20;
 const BLOCK_H = 34;
 const ROW_H = 30;
 const HANDLE_W = 6;
+/** Pattern cells are compact chips so the lane curves stay visible across the section. */
+const CHIP_W = 44;
 /** Pointer travel (px) below which a press is a click, not a drag. */
 const DRAG_SLOP = 4;
 
@@ -258,25 +260,6 @@ export function Arrangement(p: ArrangementProps) {
                 stroke="hsl(var(--border))"
                 opacity={0.4}
               />
-              {p.sections.map((s, i) =>
-                s.lanes
-                  .filter((l) => l.track === t.id && l.points.length > 1)
-                  .map((l) => (
-                    <polyline
-                      key={`${i}-${l.param}`}
-                      data-lane={l.param}
-                      fill="none"
-                      stroke="hsl(var(--slide))"
-                      strokeWidth={1}
-                      points={l.points
-                        .map(([bar, v]) => {
-                          const y = ROW_H - 4 - Math.min(1, Math.max(0, v)) * (ROW_H - 8);
-                          return `${(s.start_bar + bar) * PX_PER_BAR},${y}`;
-                        })
-                        .join(" ")}
-                    />
-                  )),
-              )}
             </g>
           ))}
           <line
@@ -315,9 +298,8 @@ export function Arrangement(p: ArrangementProps) {
                     style={{
                       left: x + 2,
                       top: RULER_H + BLOCK_H + r * ROW_H + 3,
-                      width: widthOf(i, s) - 4,
+                      width: Math.min(CHIP_W, widthOf(i, s) - 4),
                       height: ROW_H - 6,
-                      opacity: 0.9,
                     }}
                   >
                     {current ?? "—"}
@@ -367,6 +349,37 @@ export function Arrangement(p: ArrangementProps) {
             );
           }),
         )}
+        <svg
+          data-testid="lane-overlay"
+          width={width}
+          height={height}
+          className="pointer-events-none absolute left-0 top-0 z-10"
+          aria-hidden="true"
+        >
+          {p.tracks.map((t, r) => (
+            <g key={t.id} transform={`translate(0 ${RULER_H + BLOCK_H + r * ROW_H})`}>
+              {p.sections.map((s, i) =>
+                s.lanes
+                  .filter((l) => l.track === t.id && l.points.length > 1)
+                  .map((l) => (
+                    <polyline
+                      key={`${i}-${l.param}`}
+                      data-lane={l.param}
+                      fill="none"
+                      stroke="hsl(var(--slide))"
+                      strokeWidth={1}
+                      points={l.points
+                        .map(([bar, v]) => {
+                          const y = ROW_H - 4 - Math.min(1, Math.max(0, v)) * (ROW_H - 8);
+                          return `${(s.start_bar + bar) * PX_PER_BAR},${y}`;
+                        })
+                        .join(" ")}
+                    />
+                  )),
+              )}
+            </g>
+          ))}
+        </svg>
       </div>
     </div>
   );
