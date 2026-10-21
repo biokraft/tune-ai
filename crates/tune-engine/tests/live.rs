@@ -488,7 +488,9 @@ fn clearing_survives_a_replacing_swap() {
 #[test]
 fn fx_overrides_follow_the_fx_chain() {
     let hard = mini_with(|s| {
-        let FxSpec::Distortion { mode, .. } = &mut s.tracks.get_mut("acid").unwrap().fx[0];
+        let FxSpec::Distortion { mode, .. } = &mut s.tracks.get_mut("acid").unwrap().fx[0] else {
+            panic!("expected distortion")
+        };
         *mode = DistortionMode::Hard;
     });
     let (mut ctl, mut p) = live(compiled(MINI), 0, None);

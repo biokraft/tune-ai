@@ -1,7 +1,9 @@
 //! Track wrappers: the `tune-dsp` voices behind the engine's traits.
 
 use tune_dsp::acid303::{ACID303_PARAMS, Acid303, AcidGate, AcidStep};
-use tune_dsp::{Clap, DIST_PARAMS, Distortion, Hat, HatKind, Kick, ParamSpec};
+use tune_dsp::{
+    Clap, DIST_PARAMS, Distortion, EQ_PARAMS, Equalizer, Hat, HatKind, Kick, ParamSpec,
+};
 use tune_song::{FxSpec, InstrumentKind};
 
 use crate::instrument::{Cell, Effect, Instrument, StepCtx};
@@ -128,6 +130,21 @@ impl Effect for Distortion {
     }
 }
 
+impl Effect for Equalizer {
+    fn params(&self) -> &'static [ParamSpec] {
+        EQ_PARAMS
+    }
+    fn set_param_at(&mut self, index: usize, plain: f64) {
+        Equalizer::set_param_at(self, index, plain);
+    }
+    fn process(&mut self, x: f64) -> f64 {
+        Equalizer::process(self, x)
+    }
+    fn reset(&mut self) {
+        Equalizer::reset(self);
+    }
+}
+
 /// A fresh instrument of `kind` with every parameter at its default.
 pub fn make_instrument(kind: InstrumentKind, sample_rate: f64) -> Box<dyn Instrument> {
     match kind {
@@ -148,5 +165,6 @@ pub fn make_effect(fx: &FxSpec, sample_rate: f64) -> Box<dyn Effect> {
             d.set_mode(*mode);
             Box::new(d)
         }
+        FxSpec::Eq { .. } => Box::new(Equalizer::new(sample_rate)),
     }
 }

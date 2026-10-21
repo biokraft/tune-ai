@@ -5,11 +5,17 @@ use std::ops::RangeInclusive;
 
 use indexmap::{IndexMap, IndexSet};
 use tune_dsp::acid303::{AcidPattern, PatternError};
-use tune_dsp::{DistortionMode, DrumPattern, DrumPatternError, ParamSpec, find_spec};
+use tune_dsp::{
+    DIST_PARAMS, DistortionMode, DrumPattern, DrumPatternError, EQ_PARAMS, ParamSpec,
+    STRIP_DUCK_DEPTH, STRIP_PARAMS, find_spec,
+};
 
 use crate::error::Errors;
-use crate::model::{FxSpec, InstrumentKind, Lane, Pattern, PatternSteps, Section, Song, Track};
-use crate::raw::{At, RawFx, RawLane, RawPattern, RawSection, RawSong, RawTrack};
+use crate::model::{
+    FxSpec, InstrumentKind, Lane, MIX_TRACK_ID, MasterMode, Mix, MixUnit, Pattern, PatternSteps,
+    Section, Song, Track,
+};
+use crate::raw::{At, RawFx, RawLane, RawMix, RawPattern, RawSection, RawSong, RawTrack};
 
 const BPM: RangeInclusive<f64> = 40.0..=300.0;
 const BARS: RangeInclusive<i64> = 1..=1024;
@@ -66,6 +72,8 @@ pub(crate) fn validate(raw: RawSong, errors: &mut Errors) -> Option<Song> {
         })
         .collect();
 
+    let mix = mix(raw.mix.as_ref(), &shapes, errors);
+
     let mut tracks = IndexMap::new();
     for (id, t) in &raw.tracks {
         check_id(id, "track", errors);
@@ -73,6 +81,8 @@ pub(crate) fn validate(raw: RawSong, errors: &mut Errors) -> Option<Song> {
             tracks.insert(id.value.clone(), track);
         }
     }
+    let duck = Duck::of(&raw, &shapes);
+    check_duck_depths(&raw, &duck, errors);
 
     let mut patterns = IndexMap::new();
     for (id, p) in &raw.patterns {
@@ -86,7 +96,7 @@ pub(crate) fn validate(raw: RawSong, errors: &mut Errors) -> Option<Song> {
     match &raw.sections {
         Some(list) if !list.is_empty() => {
             for (i, s) in list.iter().enumerate() {
-                if let Some(sec) = section(i, s, &shapes, &pattern_owner, errors) {
+                if let Some(sec) = section(i, s, &shapes, &pattern_owner, &duck, errors) {
                     sections.push(sec);
                 }
             }
@@ -126,7 +136,130 @@ pub(crate) fn validate(raw: RawSong, errors: &mut Errors) -> Option<Song> {
         tracks,
         patterns,
         sections,
+        mix: mix?,
     })
+}
+
+/// Checks the `[mix]` table; a song without one gets [`Mix::default`].
+fn mix(
+    raw: Option<&RawMix>,
+    shapes: &IndexMap<&str, TrackShape>,
+    errors: &mut Errors,
+) -> Option<Mix> {
+    let Some(raw) = raw else {
+        return Some(Mix::default());
+    };
+    let master = match &raw.master {
+        None => Some(MasterMode::default()),
+        Some(m) => {
+            let mode = MasterMode::from_name(&m.value);
+            if mode.is_none() {
+                let expected: Vec<&str> = MasterMode::ALL.iter().map(|m| m.name()).collect();
+                errors.at(
+                    &m.span,
+                    format!(
+                        "unknown master mode `{}` (expected {})",
+                        m.value,
+                        expected.join(" or ")
+                    ),
+                );
+            }
+            mode
+        }
+    };
+    let duck_source = match &raw.duck_source {
+        None => Some(None),
+        Some(src) => match shapes.get(src.value.as_str()) {
+            None => {
+                errors.at(&src.span, unknown_track(&src.value));
+                None
+            }
+            // An unknown instrument already has its own error.
+            Some(shape) if shape.kind.is_some_and(|k| !k.is_drum()) => {
+                errors.at(
+                    &src.span,
+                    format!(
+                        "duck_source `{}` must be a drum track (ducking follows its hits)",
+                        src.value
+                    ),
+                );
+                None
+            }
+            Some(_) => Some(Some(src.value.clone())),
+        },
+    };
+    let before = errors.len();
+    let tables: Vec<&'static [ParamSpec]> = MixUnit::ALL.iter().map(|u| u.params()).collect();
+    let params = param_values(&raw.params, &tables, MIX_TRACK_ID, errors);
+    (errors.len() == before).then_some(())?;
+    Some(Mix {
+        master: master?,
+        duck_source: duck_source?,
+        params,
+    })
+}
+
+/// Who `duck.depth` follows, as far as the raw file tells.
+enum Duck<'a> {
+    /// `[mix] duck_source` is set (valid or not; a bad one has its own error).
+    Explicit(&'a At<String>),
+    /// The first kick track, if any.
+    FirstKick(Option<&'a str>),
+}
+
+impl<'a> Duck<'a> {
+    fn of(raw: &'a RawSong, shapes: &IndexMap<&'a str, TrackShape>) -> Self {
+        match raw.mix.as_ref().and_then(|m| m.duck_source.as_ref()) {
+            Some(src) => Self::Explicit(src),
+            None => Self::FirstKick(
+                shapes
+                    .iter()
+                    .find(|(_, s)| s.kind == Some(InstrumentKind::Kick))
+                    .map(|(id, _)| *id),
+            ),
+        }
+    }
+
+    /// The track that ducks the others, when there is one.
+    fn source(&self) -> Option<&'a str> {
+        match self {
+            Self::Explicit(src) => Some(src.value.as_str()),
+            Self::FirstKick(kick) => *kick,
+        }
+    }
+
+    /// No explicit source and no kick: nothing for `duck.depth` to follow.
+    fn missing(&self) -> bool {
+        matches!(self, Self::FirstKick(None))
+    }
+}
+
+const NO_DUCK_SOURCE: &str =
+    "`duck.depth` needs a kick to follow: add a kick track or set duck_source in [mix]";
+
+/// Every explicit `duck.depth` above 0 needs a source, and the source may
+/// not duck itself.
+fn check_duck_depths(raw: &RawSong, duck: &Duck<'_>, errors: &mut Errors) {
+    let depth = &STRIP_PARAMS[STRIP_DUCK_DEPTH];
+    for (id, t) in &raw.tracks {
+        for (param, v) in &t.params {
+            // An out-of-range depth already has its own error.
+            if param.value != depth.id || v.value <= 0.0 || depth.check(v.value).is_err() {
+                continue;
+            }
+            if duck.missing() {
+                errors.at(&v.span, NO_DUCK_SOURCE);
+            } else if duck.source() == Some(id.value.as_str()) {
+                errors.at(
+                    &v.span,
+                    format!(
+                        "track `{}` is the duck source and cannot duck itself",
+                        id.value
+                    ),
+                );
+            }
+        }
+    }
 }
 
 /// Track and pattern ids match `[a-z0-9_]+`.
@@ -167,7 +300,14 @@ fn track(id: &At<String>, t: &RawTrack, errors: &mut Errors) -> Option<Track> {
         kind
     });
 
-    let params = instrument.map(|kind| param_values(&t.params, kind.params(), kind.name(), errors));
+    let params = instrument.map(|kind| {
+        param_values(
+            &t.params,
+            &[kind.params(), STRIP_PARAMS],
+            kind.name(),
+            errors,
+        )
+    });
 
     let gain_db = ranged(
         t.gain_db.as_ref(),
@@ -231,19 +371,20 @@ fn ranged(
     }
 }
 
-/// Checks `{ "<param id>" = plain }` against `table`; `owner` names it in
-/// messages ("unknown parameter `x` for kick").
+/// Checks `{ "<param id>" = plain }` against `tables` (the first one that
+/// has the id wins); `owner` names them in messages ("unknown parameter `x`
+/// for kick").
 fn param_values(
     values: &[(At<String>, At<f64>)],
-    table: &'static [ParamSpec],
+    tables: &[&'static [ParamSpec]],
     owner: &str,
     errors: &mut Errors,
 ) -> IndexMap<String, f64> {
     let mut out = IndexMap::new();
     for (id, v) in values {
-        match find_spec(table, &id.value) {
-            Err(_) => errors.at(&id.span, unknown_param(&id.value, owner, table)),
-            Ok((_, spec)) => match spec.check(v.value) {
+        match find_in(tables, &id.value) {
+            None => errors.at(&id.span, unknown_param(&id.value, owner, tables)),
+            Some(spec) => match spec.check(v.value) {
                 Err(e) => errors.at(&v.span, e.to_string()),
                 Ok(()) => {
                     out.insert(id.value.clone(), v.value);
@@ -254,8 +395,15 @@ fn param_values(
     out
 }
 
-fn unknown_param(id: &str, owner: &str, table: &[ParamSpec]) -> String {
-    let known: Vec<&str> = table.iter().map(|s| s.id).collect();
+/// The spec with `id` in the first of `tables` that has it.
+fn find_in(tables: &[&'static [ParamSpec]], id: &str) -> Option<&'static ParamSpec> {
+    tables
+        .iter()
+        .find_map(|table| find_spec(table, id).ok().map(|(_, spec)| spec))
+}
+
+fn unknown_param(id: &str, owner: &str, tables: &[&[ParamSpec]]) -> String {
+    let known: Vec<&str> = tables.iter().flat_map(|t| t.iter()).map(|s| s.id).collect();
     format!(
         "unknown parameter `{id}` for {owner} (known: {})",
         known.join(", ")
@@ -283,12 +431,21 @@ fn fx_spec(raw: &RawFx, errors: &mut Errors) -> Option<FxSpec> {
                 }
             };
             let before = errors.len();
-            let params = param_values(&raw.params, tune_dsp::DIST_PARAMS, "distortion", errors);
+            let params = param_values(&raw.params, &[DIST_PARAMS], "distortion", errors);
             (errors.len() == before).then_some(())?;
             Some(FxSpec::Distortion {
                 mode: mode?,
                 params,
             })
+        }
+        "eq" => {
+            let before = errors.len();
+            if let Some(m) = &raw.mode {
+                errors.at(&m.span, "eq has no mode");
+            }
+            let params = param_values(&raw.params, &[EQ_PARAMS], "eq", errors);
+            (errors.len() == before).then_some(())?;
+            Some(FxSpec::Eq { params })
         }
         other => {
             errors.at(
@@ -363,6 +520,7 @@ fn section(
     s: &RawSection,
     shapes: &IndexMap<&str, TrackShape>,
     pattern_owner: &IndexMap<&str, Option<&str>>,
+    duck: &Duck<'_>,
     errors: &mut Errors,
 ) -> Option<Section> {
     let label = match &s.name {
@@ -402,7 +560,7 @@ fn section(
     let mut automation = Vec::new();
     let mut seen: IndexSet<(String, String)> = IndexSet::new();
     for raw in &s.automation {
-        if let Some(lane) = lane(raw, bars, shapes, errors) {
+        if let Some(lane) = lane(raw, bars, shapes, duck, errors) {
             let key = (lane.track.clone(), lane.param.clone());
             if !seen.insert(key) {
                 let param = raw.param.as_ref().expect("a built lane has a param");
@@ -432,10 +590,18 @@ fn lane(
     raw: &RawLane,
     bars: Option<u32>,
     shapes: &IndexMap<&str, TrackShape>,
+    duck: &Duck<'_>,
     errors: &mut Errors,
 ) -> Option<Lane> {
     let before = errors.len();
     let target = raw.param.as_ref().and_then(|p| resolve(p, shapes, errors));
+    if let (Some((track, param)), Some(p)) = (&target, &raw.param)
+        && track != MIX_TRACK_ID
+        && param == STRIP_PARAMS[STRIP_DUCK_DEPTH].id
+        && duck.missing()
+    {
+        errors.at(&p.span, NO_DUCK_SOURCE);
+    }
 
     let points = raw.points.as_ref()?;
     if points.value.is_empty() {
@@ -484,7 +650,8 @@ fn lane(
 }
 
 /// Splits `<track id>.<param id>` at the first `.` and resolves the param
-/// against the instrument table, then each fx table of the track.
+/// against the mix tables for the `mix` pseudo-track, else the instrument
+/// table, the strip table, then each fx table of the track.
 fn resolve(
     p: &At<String>,
     shapes: &IndexMap<&str, TrackShape>,
@@ -500,17 +667,27 @@ fn resolve(
         );
         return None;
     };
+    if track_id == MIX_TRACK_ID {
+        let tables: Vec<&'static [ParamSpec]> = MixUnit::ALL.iter().map(|u| u.params()).collect();
+        if find_in(&tables, param_id).is_none() {
+            errors.at(&p.span, unknown_param(param_id, MIX_TRACK_ID, &tables));
+            return None;
+        }
+        return Some((track_id.to_owned(), param_id.to_owned()));
+    }
     let Some(shape) = shapes.get(track_id) else {
         errors.at(&p.span, unknown_track(track_id));
         return None;
     };
     // An unknown instrument already has its own error.
     let kind = shape.kind?;
-    let found = std::iter::once(kind.params())
-        .chain(shape.fx_tables.iter().copied())
-        .any(|table| find_spec(table, param_id).is_ok());
-    if !found {
-        errors.at(&p.span, unknown_param(param_id, kind.name(), kind.params()));
+    let mut tables = vec![kind.params(), STRIP_PARAMS];
+    tables.extend(shape.fx_tables.iter().copied());
+    if find_in(&tables, param_id).is_none() {
+        errors.at(
+            &p.span,
+            unknown_param(param_id, kind.name(), &[kind.params(), STRIP_PARAMS]),
+        );
         return None;
     }
     Some((track_id.to_owned(), param_id.to_owned()))
@@ -535,7 +712,8 @@ impl TrackShape {
                 .fx
                 .iter()
                 .filter_map(|fx| match fx.kind.as_ref()?.value.as_str() {
-                    "distortion" => Some(tune_dsp::DIST_PARAMS),
+                    "distortion" => Some(DIST_PARAMS),
+                    "eq" => Some(EQ_PARAMS),
                     _ => None,
                 })
                 .collect(),

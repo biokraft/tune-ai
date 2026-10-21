@@ -53,6 +53,8 @@ impl<'de> Deserialize<'de> for Num {
 
 pub(crate) struct RawSong {
     pub song: Option<RawHeader>,
+    /// `None` when the file has no `[mix]` table (or it is not a table).
+    pub mix: Option<RawMix>,
     pub tracks: Vec<(At<String>, RawTrack)>,
     pub patterns: Vec<(At<String>, RawPattern)>,
     /// `None` when the file has no `sections` key at all.
@@ -64,6 +66,12 @@ pub(crate) struct RawHeader {
     pub bpm: Option<At<f64>>,
     pub seed: Option<At<u64>>,
     pub sample_rate: Option<At<i64>>,
+}
+
+pub(crate) struct RawMix {
+    pub master: Option<At<String>>,
+    pub duck_source: Option<At<String>>,
+    pub params: Vec<(At<String>, At<f64>)>,
 }
 
 pub(crate) struct RawTrack {
@@ -113,7 +121,7 @@ pub(crate) fn read(doc: &Spanned<DeTable<'_>>, errors: &mut Errors) -> RawSong {
         doc.get_ref(),
         doc.span(),
         "the song file",
-        &["song", "tracks", "patterns", "sections"],
+        &["song", "mix", "tracks", "patterns", "sections"],
         errors,
     );
 
@@ -129,6 +137,14 @@ pub(crate) fn read(doc: &Spanned<DeTable<'_>>, errors: &mut Errors) -> RawSong {
             sample_rate: f.opt(errors, "sample_rate", Kind::Int),
         }),
     };
+
+    let mix = root.get("mix").and_then(|v| {
+        Fields::open(v, "[mix]", MIX_KEYS, errors).map(|f| RawMix {
+            master: f.opt(errors, "master", Kind::Str),
+            duck_source: f.opt(errors, "duck_source", Kind::Str),
+            params: f.num_table(errors, "params"),
+        })
+    });
 
     let tracks = sub_tables(&root, "tracks", errors)
         .into_iter()
@@ -184,6 +200,7 @@ pub(crate) fn read(doc: &Spanned<DeTable<'_>>, errors: &mut Errors) -> RawSong {
 
     RawSong {
         song,
+        mix,
         tracks,
         patterns,
         sections,
@@ -191,6 +208,7 @@ pub(crate) fn read(doc: &Spanned<DeTable<'_>>, errors: &mut Errors) -> RawSong {
 }
 
 const HEADER_KEYS: &[&str] = &["name", "bpm", "seed", "sample_rate"];
+const MIX_KEYS: &[&str] = &["master", "duck_source", "params"];
 const TRACK_KEYS: &[&str] = &[
     "instrument",
     "params",

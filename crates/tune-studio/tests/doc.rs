@@ -140,10 +140,14 @@ fn set_param_inserts_missing_key() {
 fn set_fx_param() {
     let mut d = doc();
     d.set(&path("tracks.acid.dist.drive"), &json!(20)).unwrap();
-    let FxSpec::Distortion { params, .. } = &d.song().tracks["acid"].fx[0];
+    let FxSpec::Distortion { params, .. } = &d.song().tracks["acid"].fx[0] else {
+        panic!("expected distortion")
+    };
     assert_eq!(params["dist.drive"], 20.0);
     d.set(&path("tracks.acid.dist.mix"), &json!(0.5)).unwrap();
-    let FxSpec::Distortion { params, .. } = &d.song().tracks["acid"].fx[0];
+    let FxSpec::Distortion { params, .. } = &d.song().tracks["acid"].fx[0] else {
+        panic!("expected distortion")
+    };
     assert_eq!(params["dist.mix"], 0.5);
 }
 
@@ -302,7 +306,9 @@ fn bars_and_mode() {
     assert_eq!(d.song().total_bars(), 10);
     d.set(&path("tracks.acid.dist.mode"), &json!("hard"))
         .unwrap();
-    let FxSpec::Distortion { mode, .. } = &d.song().tracks["acid"].fx[0];
+    let FxSpec::Distortion { mode, .. } = &d.song().tracks["acid"].fx[0] else {
+        panic!("expected distortion")
+    };
     assert_eq!(*mode, DistortionMode::Hard);
     assert!(matches!(
         d.set(&path("sections[0].bars"), &json!(2.5)),

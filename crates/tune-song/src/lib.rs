@@ -17,7 +17,10 @@ mod write;
 use std::path::Path;
 
 pub use error::{LoadError, SongError};
-pub use model::{FxSpec, InstrumentKind, Lane, Pattern, PatternSteps, Section, Song, Track};
+pub use model::{
+    FxSpec, InstrumentKind, Lane, MIX_TRACK_ID, MasterMode, Mix, MixUnit, Pattern, PatternSteps,
+    Section, Song, Track, find_mix_param,
+};
 pub use watch::{RawReload, Reload, SongWatcher};
 
 /// Parses and validates a song file. On failure every problem is returned,
