@@ -9,7 +9,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tune_song::{Song, Track};
+use tune_dsp::STRIP_PARAMS;
+use tune_song::{MixUnit, Song, Track};
 
 use crate::doc::effective_value;
 use crate::path::{SongPath, TrackField};
@@ -22,7 +23,8 @@ pub struct Change {
     pub new: Value,
 }
 
-/// Every difference between `old` and `new`, in song-file order.
+/// Every difference between `old` and `new`, in song-file order (the mix
+/// right after `song.bpm`, as `[mix]` follows `[song]`).
 ///
 /// A changed section count or order gives one `sections` change. Otherwise
 /// sections are compared field by field (`bars`, `name`, `play.<t>`,
@@ -45,6 +47,19 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
     let p = SongPath::Bpm;
     let (a, b) = both(&p);
     push(p, a, b);
+
+    let mix_params = MixUnit::ALL.into_iter().flat_map(|unit| {
+        unit.params().iter().map(|spec| SongPath::MixParam {
+            param: spec.id.to_owned(),
+        })
+    });
+    for p in [SongPath::MixMaster, SongPath::MixDuckSource]
+        .into_iter()
+        .chain(mix_params)
+    {
+        let (a, b) = both(&p);
+        push(p, a, b);
+    }
 
     for name in union(old.tracks.keys(), new.tracks.keys()) {
         match (old.tracks.get(&name), new.tracks.get(&name)) {
@@ -132,12 +147,13 @@ fn union<'a>(
     out
 }
 
-/// Full ids of every param the track's instrument and fx chain have.
+/// Full ids of every param the track's instrument, strip and fx chain have.
 fn param_ids(track: &Track) -> Vec<String> {
     let mut ids: Vec<String> = track
         .instrument
         .params()
         .iter()
+        .chain(STRIP_PARAMS)
         .map(|s| s.id.to_owned())
         .collect();
     for fx in &track.fx {

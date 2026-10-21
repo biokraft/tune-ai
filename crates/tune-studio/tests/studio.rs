@@ -19,7 +19,9 @@ use tune_studio::{
 
 const MINI: &str = include_str!("../../tune-song/tests/fixtures/mini.toml");
 /// The longest any test waits for one thing.
-const WAIT: Duration = Duration::from_secs(2);
+// Generous: FSEvents delivery can take seconds while the machine is busy
+// (e.g. under `task verify`), and a deadline only costs time on failure.
+const WAIT: Duration = Duration::from_secs(10);
 const RATE: u32 = 48_000;
 /// Frames per `process` call when pulling, like a small device buffer.
 const BLOCK: usize = 512;
@@ -796,4 +798,84 @@ fn open_song_stays_under_root() {
         let open = Command::OpenSong { path: path.into() };
         assert_eq!(studio.call(open).unwrap(), Value::Null, "{path}");
     }
+}
+
+/// Every `OpenSong` starts a file watcher, and on macOS registering its
+/// FSEvents stream takes time in proportion to the number of entries in
+/// the directory of the running executable (measured: about 0.3 s per
+/// stream with 200k entries on an idle machine, seconds under load). Test
+/// binaries run from `target/debug/deps`, where the default unpacked split
+/// debuginfo leaves every codegen unit's `.rcgu.o` behind and incremental
+/// rebuilds never remove them: the directory grew past 200k entries and
+/// `OpenSong` took seconds, past the call timeout under load. The workspace builds with packed debuginfo so
+/// the objects are deleted after linking; this keeps the directory small.
+#[cfg(target_os = "macos")]
+#[test]
+fn test_binary_directory_stays_small() {
+    // Stale objects pile up by the hundreds per rebuild; a concurrent
+    // build's transient files stay far below this.
+    const MAX_ENTRIES: usize = 20_000;
+    let exe = std::env::current_exe().unwrap();
+    let dir = exe.parent().unwrap();
+    let entries = fs::read_dir(dir).unwrap().count();
+    assert!(
+        entries <= MAX_ENTRIES,
+        "{} holds {entries} entries (at most {MAX_ENTRIES}): every watcher \
+         start pays for them. Check `split-debuginfo = \"packed\"` in the \
+         workspace Cargo.toml and delete the stale `*.rcgu.o` files there.",
+        dir.display()
+    );
+}
+
+fn mix_knob(param: &str, value: f64, commit: bool) -> Command {
+    Command::SetParam {
+        track: "mix".into(),
+        param: param.into(),
+        value,
+        commit,
+    }
+}
+
+/// A mix knob is a live override like a track knob: heard while held,
+/// written on release (creating `[mix]`), and the override ends there.
+#[test]
+fn drag_mix_knob_overrides_live() {
+    let f = fixture(MINI);
+    f.call(play(Some(0)));
+    let reference = render_bars(MINI, 0, 1);
+    assert!(f.pull(4800) == reference[..9600], "capture matches render");
+
+    assert_eq!(f.call(mix_knob("master.gain", -12.0, false)), Value::Null);
+    assert!(f.pull(4800) != reference[9600..19_200], "the drag is heard");
+    sleep(Duration::from_millis(300));
+    assert_eq!(f.disk(), MINI, "a drag writes nothing");
+    assert_eq!(f.human_log_lines(), 0);
+
+    // Released at another value than the drag's, so the capture can tell
+    // a lingering override from the file.
+    assert_eq!(f.call(mix_knob("master.gain", -6.0, true)), Value::Null);
+    let text = f.disk_until(WAIT, "held master.gain", |t| {
+        parse_song(t).is_ok_and(|s| s.mix.params.get("master.gain") == Some(&-6.0))
+    });
+    assert!(
+        text.contains("[mix]\nparams = { \"master.gain\" = -6 }\n"),
+        "{text}"
+    );
+    match f.wait("applied", |e| matches!(e, Event::Applied { .. })) {
+        Event::Applied { source, changes } => {
+            assert_eq!(source, Source::Human);
+            assert_eq!(changes[0].path, SongPath::param("mix", "master.gain"));
+            assert_eq!((&changes[0].old, &changes[0].new), (&json!(0), &json!(-6)));
+        }
+        _ => unreachable!(),
+    }
+
+    // Let the release's swap land, then compare a fresh bar with the file.
+    f.pull(12_000);
+    sleep(Duration::from_millis(150));
+    f.call(Command::SeekBar { bar: 0 });
+    assert!(
+        f.pull(9600) == render_bars(&text, 0, 1)[..19_200],
+        "the file plays, not the dragged value"
+    );
 }

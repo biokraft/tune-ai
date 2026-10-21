@@ -8,3 +8,4 @@ export { dropIndex, formatPosition, PX_PER_BAR, snapBars, type SectionView } fro
 export { Arrangement, type ArrangementProps } from "./components/Arrangement";
 export { TrackStrip, type TrackStripProps } from "./components/TrackStrip";
 export { TransportBar, type TransportBarProps } from "./components/TransportBar";
+export { FxPanel, type FxPanelProps } from "./components/FxPanel";

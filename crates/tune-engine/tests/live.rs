@@ -3,12 +3,13 @@ mod common;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
-use common::{MINI, compile_song, compiled, song};
-use tune_dsp::DistortionMode;
+use common::{MINI, MIXED, compile_song, compiled, drop_lane, run, song, variant_of};
+use tune_dsp::{DistortionMode, db2amp};
 use tune_engine::{
-    AudioOut, CompiledSong, LiveError, LiveProcessor, ParamTarget, RenderOptions, live, render,
+    AudioOut, CompiledSong, Engine, LiveError, LiveProcessor, ParamTarget, RenderOptions,
+    SongUpdate, live, render,
 };
-use tune_song::FxSpec;
+use tune_song::{FxSpec, MasterMode};
 
 /// One bar at 120 BPM and 48 kHz.
 const BAR: u64 = 96_000;
@@ -16,6 +17,35 @@ const BAR: u64 = 96_000;
 const END: u64 = 4 * BAR;
 /// One step at 120 BPM and 48 kHz.
 const STEP: u64 = 6000;
+
+/// `songs/first-acid` as first mixed: limit mode, delay and reverb buses.
+const FIRST_ACID_MIXED: &str = include_str!("../../tune-song/tests/fixtures/first-acid-mixed.toml");
+
+/// An open hat once a bar into the reverb, through the limiter, with no
+/// delay bus: after a hit only the hat's decay and the reverb tail sound.
+const ROOM: &str = r#"
+[song]
+name = "room"
+bpm = 120
+seed = 3
+
+[mix]
+master = "limit"
+params = { "reverb.size" = 70, "master.gain" = 6 }
+
+[tracks.hat]
+instrument = "hat_open"
+params = { "send.reverb" = 0 }
+
+[patterns.h]
+track = "hat"
+steps = "x..............."
+
+[[sections]]
+name = "a"
+bars = 4
+play = { hat = "h" }
+"#;
 
 fn render_bars(song: &Arc<CompiledSong>, start_bar: u32, end_bar: u32) -> Vec<f32> {
     render(
@@ -488,7 +518,9 @@ fn clearing_survives_a_replacing_swap() {
 #[test]
 fn fx_overrides_follow_the_fx_chain() {
     let hard = mini_with(|s| {
-        let FxSpec::Distortion { mode, .. } = &mut s.tracks.get_mut("acid").unwrap().fx[0];
+        let FxSpec::Distortion { mode, .. } = &mut s.tracks.get_mut("acid").unwrap().fx[0] else {
+            panic!("expected distortion")
+        };
         *mode = DistortionMode::Hard;
     });
     let (mut ctl, mut p) = live(compiled(MINI), 0, None);
@@ -575,4 +607,217 @@ fn audio_out_drives_the_processor() {
     let other = Arc::new(CompiledSong::new(&song(MINI), 44_100));
     let (_ctl, p) = live(other, 0, None);
     assert!(device.start(p).is_err());
+}
+
+/// `mixed.toml` changed by `edit`.
+fn mixed_with(edit: impl FnOnce(&mut tune_song::Song)) -> Arc<CompiledSong> {
+    compile_song(&variant_of(MIXED, edit))
+}
+
+fn set_mix_param(s: &mut tune_song::Song, id: &str, plain: f64) {
+    s.mix.params.insert(id.into(), plain);
+}
+
+/// Queues `song` on `engine` and plays one step of the playing song, so the
+/// swap lands; drops the retired update. Returns what was played.
+fn swap_and_play(engine: &mut Engine, song: &Arc<CompiledSong>) -> Vec<f32> {
+    let applied = engine.swaps_applied();
+    assert!(engine.queue_swap(SongUpdate::new(song.clone())).is_none());
+    let step = engine.song().clock.samples_per_step.ceil() as u64;
+    let out = run(engine, step);
+    assert_eq!(engine.swaps_applied(), applied + 1);
+    drop(engine.take_retired_swap().expect("the swap landed"));
+    out
+}
+
+#[test]
+fn mix_live_matches_offline() {
+    let s = compiled(MIXED);
+    let expected = render_bars(&s, 0, s.total_bars);
+    let len = expected.len() as u64 / 2;
+    for block in [1usize, 61, 512, 4096] {
+        let (ctl, mut p) = live(s.clone(), 0, None);
+        let out = play(&mut p, len, block);
+        assert_eq!(ctl.position(), len, "block {block}");
+        assert_bits(&out, &expected);
+    }
+}
+
+#[test]
+fn swap_keeps_mix_when_alike() {
+    let feedback = mixed_with(|s| set_mix_param(s, "delay.feedback", 45.0));
+    let clip = mixed_with(|s| {
+        set_mix_param(s, "delay.feedback", 45.0);
+        s.mix.master = MasterMode::Clip;
+    });
+    let faster = mixed_with(|s| {
+        set_mix_param(s, "delay.feedback", 45.0);
+        s.mix.master = MasterMode::Clip;
+        s.bpm = 121.0;
+    });
+    let mut e = Engine::new(compiled(MIXED));
+    // Inside section `b`, with the delay ringing.
+    let mut out = run(&mut e, 2 * BAR + 1000);
+    out.extend(swap_and_play(&mut e, &feedback));
+    assert_eq!(e.mix_swaps_kept(), 1, "built alike: kept");
+    out.extend(swap_and_play(&mut e, &clip));
+    assert_eq!(e.mix_swaps_kept(), 1, "another master mode: replaced");
+    out.extend(swap_and_play(&mut e, &faster));
+    assert_eq!(e.mix_swaps_kept(), 1, "another bpm: replaced");
+    assert_eq!(e.swaps_applied(), 3);
+    let rest = run(&mut e, BAR);
+    assert!(!e.finished());
+    assert!(out.iter().chain(&rest).all(|x| x.is_finite()));
+    assert!(rest.iter().any(|&x| x != 0.0), "playback continues");
+}
+
+#[test]
+fn kept_mix_keeps_bus_tails() {
+    // A swap to the same song keeps every runtime, buses and limiter
+    // included, so playback goes on as if no swap had happened.
+    let a = compiled(MIXED);
+    let expected = render_bars(&a, 0, a.total_bars);
+    let mut e = Engine::new(a.clone());
+    let mut out = run(&mut e, 2 * BAR + 1000);
+    out.extend(swap_and_play(&mut e, &compiled(MIXED)));
+    assert_eq!(e.mix_swaps_kept(), 1);
+    let len = expected.len() as u64 / 2;
+    out.extend(run(&mut e, len - out.len() as u64 / 2));
+    assert_bits(&out, &expected);
+}
+
+#[test]
+fn swap_builds_missing_units() {
+    // From the clip mode to the limiter: the swap brings one.
+    let clip = mixed_with(|s| s.mix.master = MasterMode::Clip);
+    let mut e = Engine::new(clip);
+    run(&mut e, 2 * BAR + 1000);
+    swap_and_play(&mut e, &compiled(MIXED));
+    assert_eq!(e.mix_swaps_kept(), 0);
+    e.reset_meter();
+    run(&mut e, BAR / 2);
+    assert!(
+        e.meter().max_reduction_db > 0.0,
+        "the limiter runs after the swap"
+    );
+
+    // From no delay bus to one (all else alike): the delay's params are
+    // then heard.
+    let no_delay = mixed_with(|s| {
+        s.tracks
+            .get_mut("acid")
+            .unwrap()
+            .params
+            .shift_remove("send.delay");
+        drop_lane(s, "acid", "send.delay");
+    });
+    let echo = |feedback: f64| {
+        heard_after_swap(
+            &no_delay,
+            &mixed_with(|s| set_mix_param(s, "delay.feedback", feedback)),
+        )
+    };
+    assert_ne!(echo(10.0), echo(80.0), "the swap built the delay bus");
+
+    // From no reverb bus to one (all else alike): likewise.
+    let no_reverb = mixed_with(|s| {
+        for t in ["acid", "hat"] {
+            s.tracks
+                .get_mut(t)
+                .unwrap()
+                .params
+                .shift_remove("send.reverb");
+        }
+    });
+    let room = |damp: f64| {
+        heard_after_swap(
+            &no_reverb,
+            &mixed_with(|s| set_mix_param(s, "reverb.damp", damp)),
+        )
+    };
+    assert_ne!(room(0.0), room(100.0), "the swap built the reverb bus");
+}
+
+/// The longest run of frames in which both channels are exactly 0.0.
+fn longest_silence(x: &[f32]) -> usize {
+    let (mut run, mut longest) = (0, 0);
+    for f in x.chunks_exact(2) {
+        if f[0] == 0.0 && f[1] == 0.0 {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    longest
+}
+
+#[test]
+fn reload_in_the_drop_never_goes_silent() {
+    let limit = compiled(FIRST_ACID_MIXED);
+    let faster = compile_song(&variant_of(FIRST_ACID_MIXED, |s| s.bpm = 146.0));
+    let clip = compile_song(&variant_of(FIRST_ACID_MIXED, |s| {
+        s.mix.master = MasterMode::Clip;
+    }));
+    for (name, from, to) in [
+        ("bpm 145 -> 146", &limit, &faster),
+        ("clip -> limit", &clip, &limit),
+        ("limit -> clip", &limit, &clip),
+    ] {
+        let mut e = Engine::new(from.clone());
+        let bar = (16.0 * from.clock.samples_per_step) as u64;
+        // One bar into the drop (bar 81, 1-based), then the reload.
+        e.seek(80);
+        let before = run(&mut e, bar);
+        let loud = before.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!(loud > 0.5, "{name}: the drop is loud ({loud})");
+        assert!(e.queue_swap(SongUpdate::new(to.clone())).is_none());
+        let after = run(&mut e, bar);
+        assert_eq!(e.swaps_applied(), 1, "{name}");
+        let silent = longest_silence(&after);
+        assert!(
+            silent < 8,
+            "{name}: {silent} silent frames after the reload"
+        );
+        if to.mix.master == MasterMode::Limit {
+            // The swap lands within a step; a step and 20 ms on, the
+            // limiter alone holds the output (the clipper would allow
+            // -1 dBFS).
+            let settled = (from.clock.samples_per_step + 960.0) as usize;
+            let peak = after[2 * settled..]
+                .iter()
+                .fold(0.0f32, |m, x| m.max(x.abs()));
+            assert!(peak <= db2amp(-1.5) as f32, "{name}: peak {peak}");
+        }
+    }
+}
+
+#[test]
+fn bpm_reload_keeps_the_reverb_tail() {
+    // The same song played on without a reload is the reference: the hat,
+    // the reverb and the limiter all carry on, so until the next hit the
+    // output must not change by a bit.
+    let a = compiled(ROOM);
+    let faster = compile_song(&variant_of(ROOM, |s| s.bpm = 121.0));
+    let mut reference = Engine::new(a.clone());
+    let mut e = Engine::new(a);
+    let lead = 4 * STEP + 10;
+    assert_bits(&run(&mut e, lead), &run(&mut reference, lead));
+    assert!(e.queue_swap(SongUpdate::new(faster)).is_none());
+    // The swap lands at step 5; the next hit is 11 steps later.
+    let tail = 6 * STEP;
+    let heard = run(&mut e, tail);
+    assert_eq!(e.swaps_applied(), 1);
+    assert!(heard.iter().any(|&x| x.abs() > 1e-3), "the tail rings");
+    assert_bits(&heard, &run(&mut reference, tail));
+}
+
+/// Plays `from` into section `b`, swaps to `to` (which must replace the mix
+/// runtime) and returns the bar after the swap.
+fn heard_after_swap(from: &Arc<CompiledSong>, to: &Arc<CompiledSong>) -> Vec<f32> {
+    let mut e = Engine::new(from.clone());
+    run(&mut e, 2 * BAR + 1000);
+    swap_and_play(&mut e, to);
+    assert_eq!(e.mix_swaps_kept(), 0, "the mix is built anew");
+    run(&mut e, BAR)
 }

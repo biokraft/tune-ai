@@ -2,13 +2,14 @@
 //!
 //! A [`SongPath`] mirrors the TOML layout, so the producer, Claude and the
 //! edit log all name a value the same way: `song.bpm`,
-//! `tracks.acid.acid303.cutoff`, `sections[2].bars`. Sections are addressed
-//! by index because their names need not be unique.
+//! `tracks.acid.acid303.cutoff`, `mix.delay.feedback`, `sections[2].bars`.
+//! Sections are addressed by index because their names need not be unique.
 
 use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use tune_song::MIX_TRACK_ID;
 
 /// One addressable value (or read-only aggregate) of a song.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -17,9 +18,17 @@ pub enum SongPath {
     Bpm,
     /// `tracks.<t>.gain_db|pan|mute|solo`
     TrackField { track: String, field: TrackField },
-    /// `tracks.<t>.<param id>`, an instrument or fx param such as
-    /// `acid303.cutoff` or `dist.drive`.
+    /// `tracks.<t>.<param id>`, an instrument, strip or fx param such as
+    /// `acid303.cutoff`, `send.delay` or `dist.drive`.
     TrackParam { track: String, param: String },
+    /// `mix.<param id>`, a delay, reverb or master param such as
+    /// `delay.feedback`.
+    MixParam { param: String },
+    /// `mix.master`: `"clip"` or `"limit"`.
+    MixMaster,
+    /// `mix.duck_source`: a track id, or `null` for the default (the first
+    /// kick).
+    MixDuckSource,
     /// `tracks.<t>.dist.mode`
     FxMode { track: String },
     /// `tracks.<t>` (read-only: the track as a whole)
@@ -74,6 +83,21 @@ impl fmt::Display for TrackField {
 }
 
 impl SongPath {
+    /// `tracks.<track>.<param>`, or `mix.<param>` when `track` is the `mix`
+    /// pseudo-track: how a knob's `(track, param)` names its value.
+    pub fn param(track: &str, param: &str) -> SongPath {
+        if track == MIX_TRACK_ID {
+            Self::MixParam {
+                param: param.to_owned(),
+            }
+        } else {
+            Self::TrackParam {
+                track: track.to_owned(),
+                param: param.to_owned(),
+            }
+        }
+    }
+
     /// Whether [`SongDoc::set`](crate::SongDoc::set) refuses this path
     /// (it can still be read and diffed).
     pub fn is_read_only(&self) -> bool {
@@ -90,6 +114,9 @@ impl fmt::Display for SongPath {
             Self::Bpm => f.write_str("song.bpm"),
             Self::TrackField { track, field } => write!(f, "tracks.{track}.{field}"),
             Self::TrackParam { track, param } => write!(f, "tracks.{track}.{param}"),
+            Self::MixParam { param } => write!(f, "mix.{param}"),
+            Self::MixMaster => f.write_str("mix.master"),
+            Self::MixDuckSource => f.write_str("mix.duck_source"),
             Self::FxMode { track } => write!(f, "tracks.{track}.dist.mode"),
             Self::Track { track } => write!(f, "tracks.{track}"),
             Self::Pattern { pattern } => write!(f, "patterns.{pattern}.steps"),
@@ -109,7 +136,8 @@ impl FromStr for SongPath {
         parse(s).ok_or_else(|| {
             format!(
                 "unknown path `{s}` (expected e.g. song.bpm, tracks.<track>.gain_db, \
-                 tracks.<track>.<param id>, patterns.<pattern>.steps, sections[<i>].bars)"
+                 tracks.<track>.<param id>, mix.<param id>, patterns.<pattern>.steps, \
+                 sections[<i>].bars)"
             )
         })
     }
@@ -124,6 +152,9 @@ fn parse(s: &str) -> Option<SongPath> {
     }
     if let Some(rest) = s.strip_prefix("tracks.") {
         return parse_track(rest);
+    }
+    if let Some(rest) = s.strip_prefix("mix.") {
+        return parse_mix(rest);
     }
     if let Some(rest) = s.strip_prefix("patterns.") {
         let pattern = rest.strip_suffix(".steps")?;
@@ -170,12 +201,27 @@ fn parse_track(rest: &str) -> Option<SongPath> {
     if field == "dist.mode" {
         return Some(SongPath::FxMode { track });
     }
-    // A param id is `<prefix>.<name>`, e.g. `acid303.cutoff`.
-    let (prefix, name) = field.split_once('.')?;
-    (is_id(prefix) && is_id(name)).then(|| SongPath::TrackParam {
+    is_param_id(field).then(|| SongPath::TrackParam {
         track,
         param: field.to_owned(),
     })
+}
+
+/// Everything after `mix.`.
+fn parse_mix(rest: &str) -> Option<SongPath> {
+    match rest {
+        "master" => Some(SongPath::MixMaster),
+        "duck_source" => Some(SongPath::MixDuckSource),
+        _ => is_param_id(rest).then(|| SongPath::MixParam {
+            param: rest.to_owned(),
+        }),
+    }
+}
+
+/// A param id is `<prefix>.<name>`, e.g. `acid303.cutoff`.
+fn is_param_id(s: &str) -> bool {
+    s.split_once('.')
+        .is_some_and(|(prefix, name)| is_id(prefix) && is_id(name))
 }
 
 /// A decimal index without sign or leading zeros, so parsing then printing

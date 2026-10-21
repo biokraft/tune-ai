@@ -339,3 +339,151 @@ fn clipper_note_for_knee_and_warning_for_limiting() {
     let err = render_stderr(&hot);
     assert!(err.contains("warning: master clipper engaged on "), "{err}");
 }
+
+fn mixed() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/mixed.toml")
+}
+
+fn render_json(src: &Path) -> Value {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("x.wav");
+    let a = tune()
+        .arg("render")
+        .arg(src)
+        .arg("--out")
+        .arg(&out)
+        .arg("--json")
+        .assert()
+        .success();
+    json_of(&a.get_output().stdout)
+}
+
+fn spec_ids(list: &Value) -> Vec<String> {
+    list.as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn params_lists_mix_and_strip() {
+    let out = tune().args(["params", "--json"]).assert().success();
+    let v = json_of(&out.get_output().stdout);
+    let strip = spec_ids(&v["strip"]);
+    for id in ["send.delay", "duck.depth"] {
+        assert!(strip.contains(&id.to_string()), "{id} in {strip:?}");
+    }
+    for (unit, id) in [
+        ("delay", "delay.time"),
+        ("reverb", "reverb.size"),
+        ("master", "master.ceiling"),
+    ] {
+        assert!(spec_ids(&v["mix"][unit]).contains(&id.to_string()), "{id}");
+    }
+    assert!(spec_ids(&v["effects"]["eq"]).contains(&"eq.low_cut".to_string()));
+    assert!(spec_ids(&v["instruments"]["ride"]).contains(&"ride.decay".to_string()));
+    let text = tune().arg("params").assert().success();
+    let s = String::from_utf8(text.get_output().stdout.clone()).unwrap();
+    for h in ["strip\n", "mix delay\n", "mix reverb\n", "mix master\n"] {
+        assert!(
+            s.contains(&format!("\n{h}")) || s.starts_with(h),
+            "{h} in {s}"
+        );
+    }
+}
+
+#[test]
+fn render_reports_limiter() {
+    let v = render_json(&mixed());
+    assert_eq!(v["master"], "limit");
+    assert!(v["max_reduction_db"].as_f64().unwrap() > 0.0);
+    assert!(v["peak_dbfs"].as_f64().unwrap() <= -1.5 + 1e-9, "{v}");
+}
+
+#[test]
+fn render_mini_reports_clip() {
+    let v = render_json(&mini());
+    assert_eq!(v["master"], "clip");
+    assert_eq!(v["max_reduction_db"].as_f64().unwrap(), 0.0);
+    for k in [
+        "ok",
+        "files",
+        "frames",
+        "seconds",
+        "peak_dbfs",
+        "pre_clip_peak_dbfs",
+        "knee_samples",
+    ] {
+        assert!(v.get(k).is_some(), "{k}");
+    }
+}
+
+#[test]
+fn limit_mode_does_not_print_clipper_lines() {
+    let err = render_stderr(&mixed());
+    assert!(!err.contains("clipper"), "{err}");
+}
+
+fn render_text(src: &Path) -> (String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let a = tune()
+        .arg("render")
+        .arg(src)
+        .arg("--out")
+        .arg(dir.path().join("x.wav"))
+        .assert()
+        .success();
+    let o = a.get_output();
+    (
+        String::from_utf8(o.stdout.clone()).unwrap(),
+        String::from_utf8(o.stderr.clone()).unwrap(),
+    )
+}
+
+fn mixed_with_gain(db: &str) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let song = dir.path().join("hot.toml");
+    std::fs::copy(mixed(), &song).unwrap();
+    tune()
+        .args([
+            "set",
+            song.to_str().unwrap(),
+            &format!("mix.master.gain={db}"),
+        ])
+        .assert()
+        .success();
+    (dir, song)
+}
+
+#[test]
+fn limiter_note_in_text_mode() {
+    let (out, err) = render_text(&mixed());
+    assert!(
+        err.starts_with("note: limiter reduced peaks by up to "),
+        "{err}"
+    );
+    assert!(err.trim_end().ends_with(" dB"), "{err}");
+    assert!(!err.contains("warning:"), "{err}");
+    assert!(out.contains("limiter reduced peaks by "), "{out}");
+}
+
+#[test]
+fn limiter_warning_in_text_mode() {
+    let (_d, song) = mixed_with_gain("12");
+    let (_out, err) = render_text(&song);
+    assert!(
+        err.starts_with("warning: limiter reduced peaks by "),
+        "{err}"
+    );
+    assert!(err.contains(" dB: lower mix.master.gain"), "{err}");
+    assert!(!err.contains("note:"), "{err}");
+}
+
+#[test]
+fn limit_text_line_leads_with_reduction() {
+    let (out, _) = render_text(&mixed());
+    assert!(out.starts_with("rendered bars 1.."), "{out}");
+    assert!(out.contains("dBFS, limiter reduced peaks by "), "{out}");
+    assert!(!out.contains("pre-clip"), "{out}");
+}

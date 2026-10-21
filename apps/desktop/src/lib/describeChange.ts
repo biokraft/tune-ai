@@ -16,9 +16,30 @@ function findParam(song: SongView | null, track: string, id: string): ParamView 
   if (!t) return null;
   return (
     t.params.find((p) => p.id === id) ??
+    t.strip.find((p) => p.id === id) ??
     t.fx.flatMap((f) => f.params).find((p) => p.id === id) ??
     null
   );
+}
+
+/** Whether `id` is a strip param (send or duck) of `track`. */
+const isStrip = (song: SongView | null, track: string, id: string) =>
+  song?.tracks.find((x) => x.id === track)?.strip.some((p) => p.id === id) ?? false;
+
+/** A shared-mix param by id (`delay.feedback`), with the label it carries in a sentence. */
+function findMixParam(
+  song: SongView | null,
+  id: string,
+): { param: ParamView; label: string } | null {
+  const m = song?.mix;
+  const param = [...(m?.delay ?? []), ...(m?.reverb ?? []), ...(m?.master_params ?? [])].find(
+    (p) => p.id === id,
+  );
+  if (!param) return null;
+  // "Feedback" alone is ambiguous across buses: lead with the group ("Delay feedback").
+  const group = sentenceCase(id.slice(0, id.indexOf(".")));
+  const label = sentenceCase(param.label);
+  return { param, label: label.startsWith(group) ? label : `${group} ${label.toLowerCase()}` };
 }
 
 /** Whether a param on `track` is named without its track: the song's only 303 is implied. */
@@ -27,6 +48,7 @@ function implied(song: SongView | null, track: string): boolean {
   return acids.length === 1 && acids[0]!.id === track;
 }
 
+const MIX = /^mix\.(.+)$/;
 const TRACK = /^tracks\.([^.]+)(?:\.(.+))?$/;
 const SECTION = /^sections\[(\d+)\]\.(bars|name|lanes|play\.(.+))$/;
 const PATTERN = /^patterns\.(.+)\.steps$/;
@@ -62,6 +84,16 @@ export function describeChange(c: Change, song: SongView | null): string {
     }
   }
 
+  const mix = MIX.exec(c.path);
+  if (mix) {
+    const rest = mix[1]!;
+    if (rest === "master") return `Master mode ${span(c.old, c.new)}`;
+    if (rest === "duck_source") return `Duck source ${span(c.old, c.new)}`;
+    const found = findMixParam(song, rest);
+    if (!found) return `mix ${rest.replace(/\./g, " ")} ${span(c.old, c.new)}`;
+    return `${found.label} ${span(c.old, c.new, found.param.unit)}`;
+  }
+
   const track = TRACK.exec(c.path);
   if (track) {
     const [, t, rest] = track as unknown as [string, string, string | undefined];
@@ -81,7 +113,8 @@ export function describeChange(c: Change, song: SongView | null): string {
     const p = findParam(song, t, rest);
     if (!p) return `${t} ${rest} ${span(c.old, c.new)}`;
     const label = sentenceCase(p.label);
-    const named = implied(song, t) ? label : `${t} ${label}`;
+    // A send is never implied: "Delay" alone would read like the delay bus.
+    const named = implied(song, t) && !isStrip(song, t, rest) ? label : `${t} ${label}`;
     return `${named} ${span(c.old, c.new, p.unit)}`;
   }
 

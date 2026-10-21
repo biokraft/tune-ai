@@ -621,10 +621,7 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
             value,
             commit: true,
         } => {
-            let path = SongPath::TrackParam {
-                track: track.clone(),
-                param: param.clone(),
-            };
+            let path = SongPath::param(track, param);
             doc.set(&path, &Value::from(round_significant(*value)))?;
         }
         Command::SetFxMode { track, mode } => {

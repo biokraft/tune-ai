@@ -3,8 +3,8 @@
 
 use indexmap::IndexMap;
 use serde::Serialize;
-use tune_dsp::{Curve, DistortionMode, ParamSpec};
-use tune_song::{FxSpec, PatternSteps, Song};
+use tune_dsp::{Curve, DistortionMode, ParamSpec, STRIP_PARAMS};
+use tune_song::{FxSpec, MasterMode, MixUnit, PatternSteps, Song};
 
 use crate::command::DrumHitDto;
 use crate::diff::Change;
@@ -37,6 +37,26 @@ pub struct SongView {
     pub tracks: Vec<TrackView>,
     pub patterns: Vec<PatternView>,
     pub sections: Vec<SectionView>,
+    pub mix: MixView,
+}
+
+/// The `[mix]` table: the master stage, the duck source and the shared
+/// buses, with defaults filled in.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct MixView {
+    /// `"clip"` or `"limit"`.
+    pub master: String,
+    /// Every master mode, in the order the UI offers them.
+    pub masters: Vec<String>,
+    /// The track every `duck.depth` follows: the file's `duck_source`, else
+    /// the first kick; `None` when there is neither.
+    pub duck_source: Option<String>,
+    pub delay: Vec<ParamView>,
+    pub reverb: Vec<ParamView>,
+    pub master_params: Vec<ParamView>,
+    /// Whether some track sends to the bus (explicitly or by a lane).
+    pub delay_active: bool,
+    pub reverb_active: bool,
 }
 
 /// One mixer channel.
@@ -50,6 +70,8 @@ pub struct TrackView {
     pub solo: bool,
     /// The instrument's params, in table order.
     pub params: Vec<ParamView>,
+    /// The strip params (sends and ducking), in `STRIP_PARAMS` order.
+    pub strip: Vec<ParamView>,
     pub fx: Vec<FxView>,
 }
 
@@ -75,9 +97,11 @@ pub struct ParamView {
 /// One effect in a track's chain.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct FxView {
-    /// The fx `type`, e.g. `distortion`.
+    /// The fx `type`, e.g. `distortion` or `eq`.
     pub kind: String,
+    /// The distortion mode; empty for an eq, which has none.
     pub mode: String,
+    /// The modes to offer; empty for an eq.
     pub modes: Vec<String>,
     pub params: Vec<ParamView>,
 }
@@ -151,6 +175,7 @@ impl From<&Song> for SongView {
                     mute: t.mute,
                     solo: t.solo,
                     params: param_views(t.instrument.params(), &t.params),
+                    strip: param_views(STRIP_PARAMS, &t.params),
                     fx: t.fx.iter().map(fx_view).collect(),
                 })
                 .collect(),
@@ -198,7 +223,25 @@ impl From<&Song> for SongView {
                         .collect(),
                 })
                 .collect(),
+            mix: mix_view(song),
         }
+    }
+}
+
+fn mix_view(song: &Song) -> MixView {
+    let params = |unit: MixUnit| param_views(unit.params(), &song.mix.params);
+    MixView {
+        master: song.mix.master.name().to_owned(),
+        masters: MasterMode::ALL
+            .iter()
+            .map(|m| m.name().to_owned())
+            .collect(),
+        duck_source: song.duck_source().map(str::to_owned),
+        delay: params(MixUnit::Delay),
+        reverb: params(MixUnit::Reverb),
+        master_params: params(MixUnit::Master),
+        delay_active: song.bus_active(MixUnit::Delay),
+        reverb_active: song.bus_active(MixUnit::Reverb),
     }
 }
 
@@ -208,6 +251,12 @@ fn fx_view(fx: &FxSpec) -> FxView {
             kind: fx.type_name().to_owned(),
             mode: mode.name().to_owned(),
             modes: DIST_MODES.iter().map(|m| m.name().to_owned()).collect(),
+            params: param_views(fx.params_table(), params),
+        },
+        FxSpec::Eq { params } => FxView {
+            kind: fx.type_name().to_owned(),
+            mode: String::new(),
+            modes: Vec::new(),
             params: param_views(fx.params_table(), params),
         },
     }

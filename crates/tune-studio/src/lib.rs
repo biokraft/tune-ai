@@ -32,6 +32,6 @@ pub use path::{SongPath, TrackField};
 pub use set::{SetOutcome, parse_assignment, set_paths, write_atomic};
 pub use studio::{Event, PLAYHEAD_INTERVAL, Studio, StudioConfig, StudioHandle};
 pub use view::{
-    AcidStepView, FxView, LaneView, ParamView, PatternView, SectionView, SongView, StudioState,
-    TrackView,
+    AcidStepView, FxView, LaneView, MixView, ParamView, PatternView, SectionView, SongView,
+    StudioState, TrackView,
 };

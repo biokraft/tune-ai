@@ -9,8 +9,11 @@
 
 use serde_json::{Value, json};
 use toml_edit::{DocumentMut, InlineTable, Item, Table};
-use tune_dsp::{DIST_PARAMS, ParamSpec, find_spec};
-use tune_song::{FxSpec, InstrumentKind, PatternSteps, Song, SongError, Track, parse_song};
+use tune_dsp::{DIST_PARAMS, EQ_PARAMS, ParamSpec, STRIP_PARAMS, find_spec};
+use tune_song::{
+    FxSpec, InstrumentKind, MIX_TRACK_ID, PatternSteps, Song, SongError, Track, find_mix_param,
+    parse_song,
+};
 
 use crate::path::{SongPath, TrackField};
 
@@ -89,7 +92,9 @@ impl SongDoc {
     ///
     /// Numbers that are exact integers are written as integers. A param that
     /// the file leaves at its default is inserted (creating the `params`
-    /// table when absent). `sections[<i>].play.<t> = null` removes the key.
+    /// table when absent). A `mix.*` value in a file without `[mix]` creates
+    /// the table right after `[song]`. `sections[<i>].play.<t> = null` and
+    /// `mix.duck_source = null` remove the key.
     pub fn set(&mut self, path: &SongPath, value: &Value) -> Result<(), EditError> {
         if path.is_read_only() {
             return Err(EditError::ReadOnly(path.to_string()));
@@ -238,16 +243,22 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
             let t = song.tracks.get(track)?;
             let home = locate_param(t, param)?;
             let explicit = match home {
-                ParamHome::Instrument(_) => t.params.get(param),
-                ParamHome::Fx(i, _) => match &t.fx[i] {
-                    FxSpec::Distortion { params, .. } => params.get(param),
-                },
+                ParamHome::Instrument(_) | ParamHome::Strip(_) => t.params.get(param),
+                ParamHome::Fx(i, _) => t.fx[i].params().get(param),
             };
             num(explicit.copied().unwrap_or(home.spec().default))
         }
+        SongPath::MixParam { param } => {
+            let (_, _, spec) = find_mix_param(param)?;
+            num(song.mix.params.get(param).copied().unwrap_or(spec.default))
+        }
+        SongPath::MixMaster => Value::from(song.mix.master.name()),
+        SongPath::MixDuckSource => song.duck_source().map_or(Value::Null, Value::from),
         SongPath::FxMode { track } => {
             let t = song.tracks.get(track)?;
-            let (_, FxSpec::Distortion { mode, .. }) = distortion(t)?;
+            let (_, FxSpec::Distortion { mode, .. }) = distortion(t)? else {
+                return None;
+            };
             Value::from(mode.name())
         }
         SongPath::Track { track } => {
@@ -308,6 +319,8 @@ fn as_integer(v: f64) -> Option<i64> {
 /// Where a track's param lives.
 enum ParamHome {
     Instrument(&'static ParamSpec),
+    /// A strip param (`send.delay`), kept in the track's `params` table.
+    Strip(&'static ParamSpec),
     /// Index into the track's fx chain.
     Fx(usize, &'static ParamSpec),
 }
@@ -315,14 +328,19 @@ enum ParamHome {
 impl ParamHome {
     fn spec(&self) -> &'static ParamSpec {
         match self {
-            Self::Instrument(spec) | Self::Fx(_, spec) => spec,
+            Self::Instrument(spec) | Self::Strip(spec) | Self::Fx(_, spec) => spec,
         }
     }
 }
 
+/// Finds `param` on the instrument, then the strip, then each fx in chain
+/// order (the engine's order).
 fn locate_param(track: &Track, param: &str) -> Option<ParamHome> {
     if let Ok((_, spec)) = find_spec(track.instrument.params(), param) {
         return Some(ParamHome::Instrument(spec));
+    }
+    if let Ok((_, spec)) = find_spec(STRIP_PARAMS, param) {
+        return Some(ParamHome::Strip(spec));
     }
     track.fx.iter().enumerate().find_map(|(i, fx)| {
         find_spec(fx.params_table(), param)
@@ -336,7 +354,7 @@ fn is_known_param(param: &str) -> bool {
     InstrumentKind::ALL
         .iter()
         .map(|k| k.params())
-        .chain([DIST_PARAMS])
+        .chain([DIST_PARAMS, EQ_PARAMS])
         .any(|table| find_spec(table, param).is_ok())
 }
 
@@ -402,7 +420,7 @@ fn apply(
             };
             let v = toml_number(number()?);
             let owner = match home {
-                ParamHome::Instrument(_) => track_table(doc, track),
+                ParamHome::Instrument(_) | ParamHome::Strip(_) => track_table(doc, track),
                 ParamHome::Fx(i, _) => fx_table(doc, track, i),
             };
             owner
@@ -410,6 +428,36 @@ fn apply(
                 .ok_or_else(missing)?
                 .put(param, v);
         }
+        SongPath::MixParam { param } => {
+            if find_mix_param(param).is_none() {
+                return Err(EditError::UnknownParam {
+                    track: MIX_TRACK_ID.to_owned(),
+                    instrument: MIX_TRACK_ID,
+                    param: param.clone(),
+                });
+            }
+            let v = toml_number(number()?);
+            mix_table(doc)
+                .child_or_new("params")
+                .ok_or_else(missing)?
+                .put(param, v);
+        }
+        SongPath::MixMaster => {
+            let v = toml_edit::Value::from(string()?);
+            mix_table(doc).put("master", v);
+        }
+        SongPath::MixDuckSource => match value {
+            Value::Null => {
+                if let Some(mut mix) = root_child(doc, "mix") {
+                    mix.remove("duck_source");
+                }
+            }
+            Value::String(id) => {
+                let v = toml_edit::Value::from(id.as_str());
+                mix_table(doc).put("duck_source", v);
+            }
+            _ => return Err(bad("expected a track id or null")),
+        },
         SongPath::FxMode { track } => {
             let t = song.tracks.get(track).ok_or_else(missing)?;
             let (i, _) = distortion(t).ok_or_else(missing)?;
@@ -559,6 +607,38 @@ impl<'a> Slot<'a> {
 /// The table under `key` of the root table.
 fn root_child<'a>(doc: &'a mut DocumentMut, key: &str) -> Option<Slot<'a>> {
     Slot::of(doc.as_table_mut().get_mut(key)?)
+}
+
+/// The `[mix]` table, created right after `[song]` when the file has none.
+fn mix_table(doc: &mut DocumentMut) -> Slot<'_> {
+    if !doc.as_table().contains_key("mix") {
+        insert_mix_table(doc);
+    }
+    root_child(doc, "mix").expect("the file has a mix table now")
+}
+
+/// Adds an empty `[mix]` table rendered right after the `[song]` table
+/// (and anything nested in it), or first among the tables when `[song]`
+/// has no header. Later tables move down one place; the text is otherwise
+/// unchanged.
+fn insert_mix_table(doc: &mut DocumentMut) {
+    normalize_positions(doc);
+    // The root renders first, at rank 0.
+    let mut after = 0;
+    if let Some(Item::Table(song)) = doc.as_table().get("song") {
+        walk(song, &mut |t| {
+            after = after.max(t.position().unwrap_or(after))
+        });
+    }
+    walk_mut(doc.as_table_mut(), &mut |t| {
+        if let Some(p) = t.position().filter(|p| *p > after) {
+            t.set_position(Some(p + 1));
+        }
+    });
+    let mut mix = Table::new();
+    mix.set_position(Some(after + 1));
+    mix.decor_mut().set_prefix("\n");
+    doc.as_table_mut().insert("mix", Item::Table(mix));
 }
 
 fn track_table<'a>(doc: &'a mut DocumentMut, track: &str) -> Option<Slot<'a>> {

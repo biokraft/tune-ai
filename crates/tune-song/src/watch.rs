@@ -26,6 +26,9 @@ use crate::{Song, SongError, parse_song};
 const DEBOUNCE: Duration = Duration::from_millis(75);
 
 /// The outcome of one reload attempt.
+// One value per file change, moved once to the consumer: boxing the song
+// would only add an allocation.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum Reload {
     /// The file parsed and validated.
