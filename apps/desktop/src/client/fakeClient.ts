@@ -44,6 +44,11 @@ export class FakeClient implements StudioClient {
     for (const h of [...this.lost]) h();
   }
 
+  /** The calls apart from the store's `get_state` at start. */
+  sent(): Command[] {
+    return this.calls.filter((c) => c.cmd !== "get_state");
+  }
+
   /** The calls with a given command name. */
   named<C extends Command["cmd"]>(name: C): Extract<Command, { cmd: C }>[] {
     return this.calls.filter((c): c is Extract<Command, { cmd: C }> => c.cmd === name);
