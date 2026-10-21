@@ -10,6 +10,7 @@ import {
 import { memo, useCallback, useMemo } from "react";
 import type { Command, SongView, StudioState, TrackView } from "../client/protocol";
 import {
+  acidSection,
   currentSection,
   formatNumber,
   highlightedSteps,
@@ -46,6 +47,7 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
 
   // Numbers that follow the playhead only when it crosses a section boundary.
   const section = useStudioSelector(store, currentSection);
+  const acidShown = useStudioSelector(store, acidSection);
   const automatedIn = useStudioSelector(store, soundingSection);
   const selectedBars =
     view.selectedSection === null ? null : sectionBars(state, view.selectedSection);
@@ -169,7 +171,7 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-6 px-6 py-5">
         <Panel303
           song={song}
-          section={section}
+          section={acidShown}
           automatedIn={automatedIn}
           highlights={highlights}
           send={store.send}

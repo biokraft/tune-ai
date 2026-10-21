@@ -303,7 +303,7 @@ function TrackPanel({
           </>
         ) : (
           <p className="py-4 font-value text-sm text-silkscreen/70">
-            This section plays no 303 pattern. Pick one in the arrangement.
+            The 303 rests in this section.
           </p>
         )}
       </div>
