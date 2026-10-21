@@ -10,15 +10,37 @@ mod common;
 use common::{MINI, compiled};
 use tune_engine::{RenderOptions, render};
 
-const MIX_HASH: u64 = 0x3cb4_018b_5885_1398;
-const STEM_HASHES: [(&str, u64); 3] = [
-    ("kick", 0x8ef5_6289_e893_c6bd),
-    ("acid", 0x58c6_1ef2_b9f0_8921),
-    ("hat", 0xa834_18dc_bebd_21b6),
-];
-const PEAK_BITS: u64 = 0x3fe8_399f_f012_f8ba;
-const PRE_CLIP_PEAK_BITS: u64 = 0x3fe9_d80b_0101_da26;
-const KNEE_SAMPLES: u64 = 8440;
+const FIRST_ACID: &str = include_str!("../../../songs/first-acid/song.toml");
+
+/// What a whole-song render with stems is pinned by.
+#[derive(Debug, PartialEq)]
+struct Fingerprint {
+    /// FNV-1a of the mix.
+    mix: u64,
+    /// `(track id, FNV-1a of its stem)` in song order.
+    stems: Vec<(String, u64)>,
+    peak_bits: u64,
+    pre_clip_peak_bits: u64,
+    knee_samples: u64,
+}
+
+impl Fingerprint {
+    fn pinned(
+        mix: u64,
+        stems: &[(&str, u64)],
+        peak_bits: u64,
+        pre_clip_peak_bits: u64,
+        knee_samples: u64,
+    ) -> Self {
+        Self {
+            mix,
+            stems: stems.iter().map(|&(id, h)| (id.to_owned(), h)).collect(),
+            peak_bits,
+            pre_clip_peak_bits,
+            knee_samples,
+        }
+    }
+}
 
 /// 64-bit FNV-1a over the little-endian bytes of each sample's bits.
 fn fnv1a(samples: &[f32]) -> u64 {
@@ -32,35 +54,62 @@ fn fnv1a(samples: &[f32]) -> u64 {
     h
 }
 
-#[test]
-fn mini_renders_as_before() {
-    let song = compiled(MINI);
+/// Renders all of `src` with stems.
+fn fingerprint(src: &str) -> Fingerprint {
+    let song = compiled(src);
     let opts = RenderOptions {
         start_bar: 0,
         end_bar: song.total_bars,
         stems: true,
     };
     let r = render(song, &opts).unwrap();
-    let stems: Vec<(&str, u64)> = r
-        .stems
-        .iter()
-        .map(|(id, s)| (id.as_str(), fnv1a(s)))
-        .collect();
-    let got = (
-        fnv1a(&r.mix),
-        stems,
-        r.meter.peak.to_bits(),
-        r.meter.pre_clip_peak.to_bits(),
-        r.meter.knee_samples,
-    );
+    Fingerprint {
+        mix: fnv1a(&r.mix),
+        stems: r
+            .stems
+            .iter()
+            .map(|(id, s)| (id.clone(), fnv1a(s)))
+            .collect(),
+        peak_bits: r.meter.peak.to_bits(),
+        pre_clip_peak_bits: r.meter.pre_clip_peak.to_bits(),
+        knee_samples: r.meter.knee_samples,
+    }
+}
+
+#[test]
+fn mini_renders_as_before() {
     assert_eq!(
-        got,
-        (
-            MIX_HASH,
-            STEM_HASHES.to_vec(),
-            PEAK_BITS,
-            PRE_CLIP_PEAK_BITS,
-            KNEE_SAMPLES
+        fingerprint(MINI),
+        Fingerprint::pinned(
+            0x3cb4_018b_5885_1398,
+            &[
+                ("kick", 0x8ef5_6289_e893_c6bd),
+                ("acid", 0x58c6_1ef2_b9f0_8921),
+                ("hat", 0xa834_18dc_bebd_21b6),
+            ],
+            0x3fe8_399f_f012_f8ba,
+            0x3fe9_d80b_0101_da26,
+            8440,
+        )
+    );
+}
+
+#[test]
+fn first_acid_renders_as_before() {
+    assert_eq!(
+        fingerprint(FIRST_ACID),
+        Fingerprint::pinned(
+            0xcc4f_9320_a2f2_d1ff,
+            &[
+                ("kick", 0x313b_7bb2_7445_8115),
+                ("clap", 0x5a70_dbd6_8c24_f84d),
+                ("hat_closed", 0xe84f_482c_5657_c917),
+                ("hat_open", 0xa6fc_7e2b_c125_476f),
+                ("acid", 0x37a4_7856_7490_8b29),
+            ],
+            0x3fe7_cc36_17e4_de19,
+            0x3fe9_1f17_6fea_b576,
+            70718,
         )
     );
 }
