@@ -672,8 +672,9 @@ fn swap_builds_missing_units() {
         "the limiter runs after the swap"
     );
 
-    // From no delay bus to one: the delay's params are then heard.
-    let dry = mixed_with(|s| {
+    // From no delay bus to one (all else alike): the delay's params are
+    // then heard.
+    let no_delay = mixed_with(|s| {
         s.tracks
             .get_mut("acid")
             .unwrap()
@@ -682,13 +683,38 @@ fn swap_builds_missing_units() {
         drop_lane(s, "acid", "send.delay");
     });
     let echo = |feedback: f64| {
-        let mut e = Engine::new(dry.clone());
-        run(&mut e, 2 * BAR + 1000);
-        swap_and_play(
-            &mut e,
+        heard_after_swap(
+            &no_delay,
             &mixed_with(|s| set_mix_param(s, "delay.feedback", feedback)),
-        );
-        run(&mut e, BAR)
+        )
     };
     assert_ne!(echo(10.0), echo(80.0), "the swap built the delay bus");
+
+    // From no reverb bus to one (all else alike): likewise.
+    let no_reverb = mixed_with(|s| {
+        for t in ["acid", "hat"] {
+            s.tracks
+                .get_mut(t)
+                .unwrap()
+                .params
+                .shift_remove("send.reverb");
+        }
+    });
+    let room = |damp: f64| {
+        heard_after_swap(
+            &no_reverb,
+            &mixed_with(|s| set_mix_param(s, "reverb.damp", damp)),
+        )
+    };
+    assert_ne!(room(0.0), room(100.0), "the swap built the reverb bus");
+}
+
+/// Plays `from` into section `b`, swaps to `to` (which must replace the mix
+/// runtime) and returns the bar after the swap.
+fn heard_after_swap(from: &Arc<CompiledSong>, to: &Arc<CompiledSong>) -> Vec<f32> {
+    let mut e = Engine::new(from.clone());
+    run(&mut e, 2 * BAR + 1000);
+    swap_and_play(&mut e, to);
+    assert_eq!(e.mix_swaps_kept(), 0, "the mix is built anew");
+    run(&mut e, BAR)
 }

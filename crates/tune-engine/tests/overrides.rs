@@ -10,7 +10,7 @@ use common::{
     run, variant_of,
 };
 use tune_dsp::acid303::ACID303_PARAMS;
-use tune_dsp::{DIST_PARAMS, MASTER_GAIN, STRIP_SEND_DELAY};
+use tune_dsp::{DIST_PARAMS, MASTER_GAIN, STRIP_DUCK_DEPTH, STRIP_SEND_DELAY};
 use tune_engine::{CompiledSong, Engine, MIX_TRACK, ParamTarget};
 use tune_song::{MasterMode, MixUnit, Song};
 
@@ -208,11 +208,14 @@ fn mix_override_and_clear() {
     let ratio = e.meter().pre_clip_peak / control.meter().pre_clip_peak;
     assert!(ratio >= 3.9, "pre-clip peak ratio {ratio}");
 
+    // Clear mid-section `b` (bars 2 and 3), away from any static reset.
+    run(&mut e, bar / 2);
+    run(&mut control, bar / 2);
     e.set_override(MIX_TRACK, MASTER_GAIN_KNOB, None);
     assert_eq!(e.overrides_active(), 0);
     assert_eq!(
-        bits(&run(&mut e, bar)),
-        bits(&run(&mut control, bar)),
+        bits(&run(&mut e, bar / 2)),
+        bits(&run(&mut control, bar / 2)),
         "static again after the clear"
     );
 
@@ -271,4 +274,49 @@ fn strip_override_on_send() {
     e.set_override(acid, send, Some(0.0));
     e.clear_overrides();
     assert_eq!(e.overrides_active(), 0);
+}
+
+#[test]
+fn strip_clear_restores_static_mid_section() {
+    // Without sends the acid's strip feeds only the dry path, which holds
+    // no state after the ducker (whose envelope runs at any depth), so once
+    // an override clears, every frame matches an engine that never had one.
+    let s = clip_mixed(|s| {
+        let acid = s.tracks.get_mut("acid").unwrap();
+        acid.params.shift_remove("send.delay");
+        acid.params.shift_remove("send.reverb");
+        drop_lane(s, "acid", "send.delay");
+    });
+    let (acid, depth, _) = s.resolve_param("acid", "duck.depth").unwrap();
+    assert_eq!(depth, ParamTarget::Strip(STRIP_DUCK_DEPTH));
+    let bar = s.clock.bar_start(1);
+    let mut control = Engine::new(s.clone());
+    let mut e = Engine::new(s.clone());
+    // Into section `b` (bars 2 and 3), where the acid plays under the kick.
+    let lead = 2 * bar + 1000;
+    run(&mut e, lead);
+    run(&mut control, lead);
+
+    e.set_override(acid, depth, Some(24.0));
+    assert_ne!(
+        bits(&run(&mut e, bar / 2)),
+        bits(&run(&mut control, bar / 2)),
+        "the override deepens the duck"
+    );
+    e.set_override(acid, depth, None);
+    assert_eq!(e.overrides_active(), 0);
+    assert_eq!(
+        bits(&run(&mut e, bar / 4)),
+        bits(&run(&mut control, bar / 4)),
+        "static again after the clear"
+    );
+
+    // `clear_overrides` restores a strip param mid-section too.
+    e.set_override(acid, depth, Some(24.0));
+    run(&mut e, 100);
+    run(&mut control, 100);
+    e.clear_overrides();
+    assert_eq!(e.overrides_active(), 0);
+    let rest = s.end_sample() - (lead + bar / 2 + bar / 4 + 100);
+    assert_eq!(bits(&run(&mut e, rest)), bits(&run(&mut control, rest)));
 }
