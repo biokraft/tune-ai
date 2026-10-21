@@ -3,9 +3,11 @@
 
 mod audio;
 mod loudness;
+mod spectral;
 
 pub use audio::{Audio, decode_file};
 pub use loudness::{Loudness, measure_loudness};
+pub use spectral::{BANDS, Band, Brightness, LowEnd, Spectral, Stereo, measure_spectral};
 
 /// Everything that can go wrong while reading or measuring audio.
 #[derive(Debug, thiserror::Error)]

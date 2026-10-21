@@ -12,6 +12,7 @@ hound = "3.5"
 symphonia = { version = "=0.5.5", default-features = false, features = ["mp3", "aac", "isomp4", "flac", "pcm"] }
 ebur128 = "=0.1.10"
 thiserror = "2"
+realfft = "=3.5.0"
 
 [dev-dependencies]
 tempfile = "3"
