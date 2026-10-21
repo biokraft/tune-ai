@@ -322,7 +322,7 @@ play = { kick = "kick4", hat_closed = "hats8" }
 
 # Levels: measured with `tune analyze --sections` on the full render (bars
 # 1-144) of this file:
-# - whole song: -8.8 LUFS integrated, true peak -1.0 dBTP, the limiter's
+# - whole song: -8.8 LUFS integrated, true peak -1.5 dBTP, the limiter's
 #   largest reduction 8.6 dB (typically 1-2 dB). The acid target is -8 to
 #   -6 LUFS: the drop and drop_peak reach it (-7.3, -7.4 LUFS); the drums-only
 #   intro and outro (-10.6) and the breakdown (-11.0) pull the whole song
