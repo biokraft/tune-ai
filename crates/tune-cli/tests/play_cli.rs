@@ -90,6 +90,8 @@ fn hot_reload_end_to_end() {
     assert_eq!(playing["device"], "null");
     assert_eq!(playing["sample_rate"], 48_000);
 
+    // Let the file watcher arm (FSEvents) before the first edit.
+    std::thread::sleep(Duration::from_millis(300));
     std::fs::write(&song, original.replace("bpm = 120", "bpm = 121")).unwrap();
     let reloaded = p.expect("reloaded");
     assert!(reloaded["bar"].as_u64().unwrap() >= 1);
