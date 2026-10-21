@@ -26,7 +26,9 @@ import type { HighlightKind, StudioStore, StudioView } from "../store/studioStor
 import { usePlayheadPosition, usePlayheadStep, useStudioSelector } from "../store/useStudio";
 import { FileErrorBanner, LostBanner, MessageBanner } from "./Banners";
 import { ChangeNotice, hasChangeNotice } from "./ChangeNotice";
+import { MixPanel } from "./MixPanel";
 import { Panel303 } from "./Panel303";
+import { useParamDrag } from "./useParamDrag";
 
 export type StudioScreenProps = {
   view: StudioView & { state: StudioState & { song: SongView } };
@@ -179,8 +181,20 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
         <aside aria-label="Mixer" className="flex flex-col gap-3">
           <h2 className="font-label text-lg leading-none text-silkscreen/80">Mixer</h2>
           {song.tracks.map((t) => (
-            <MixerStrip key={t.id} track={t} fire={fire} />
+            <MixerStrip
+              key={t.id}
+              track={t}
+              fire={fire}
+              send={store.send}
+              highlights={highlights}
+            />
           ))}
+          <MixPanel
+            song={song}
+            highlights={highlights}
+            automatedIn={automatedIn}
+            send={store.send}
+          />
         </aside>
       </div>
 
@@ -223,13 +237,22 @@ const LiveArrangement = memo(function LiveArrangement({
 const MixerStrip = memo(function MixerStrip({
   track,
   fire,
+  send,
+  highlights,
 }: {
   track: TrackView;
   fire(cmd: Command): void;
+  send(cmd: Command): Promise<unknown>;
+  highlights: Map<string, HighlightKind>;
 }) {
+  const drag = useParamDrag(track.id, send, track.strip);
+  const strip = track.strip.map((p) => ({ ...p, value: drag.valueOf(p) }));
   return (
     <TrackStrip
       track={track}
+      strip={strip}
+      onParam={(id, v, commit) => (commit ? drag.commit(id, v) : drag.change(id, v))}
+      highlight={(id) => highlights.get(`tracks.${track.id}.${id}`) ?? null}
       onMix={(patch) =>
         fire({
           cmd: "set_track_mix",
