@@ -1,5 +1,5 @@
 import type { SongView, StudioState } from "./client/protocol";
-import { LostBanner, MessageBanner } from "./screens/Banners";
+import { FileErrorBanner, LostBanner, MessageBanner } from "./screens/Banners";
 import { OpenSongScreen } from "./screens/OpenSongScreen";
 import { StudioScreen } from "./screens/StudioScreen";
 import type { StudioStore } from "./store/studioStore";
@@ -33,6 +33,9 @@ export default function App({ store }: { store: StudioStore }) {
             Connecting to the studio…
           </p>
         )
+      ) : state.path !== null ? (
+        // A song is open but its file does not parse: say why, not which songs exist.
+        <FileErrorBanner errors={state.file_errors} unopened />
       ) : (
         <OpenSongScreen send={store.send} />
       )}
