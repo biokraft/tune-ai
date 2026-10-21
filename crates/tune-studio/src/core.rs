@@ -9,8 +9,9 @@
 //!
 //! The file also changes from outside: Claude through `tune set` or by
 //! editing it, an editor, git. [`StudioCore::on_disk_text`] takes each new
-//! text: the studio's own writes are ignored, Claude's are recognised by the
-//! hash `tune set` logged, and anything else is logged as `external`. Every
+//! text: the studio's own writes are ignored (unless the file holds the same
+//! bytes again), Claude's are recognised by the hash `tune set` logged, and
+//! anything else is logged as `external`. Every
 //! external change is one undo step. Pending edits are merged onto the new
 //! text by path; an edit to a path the external change also touched keeps
 //! the external value and is offered back for re-apply, so the producer's
@@ -240,8 +241,9 @@ impl StudioCore {
     }
 
     /// Takes a new text of the song file (from the watcher, or read by
-    /// [`flush`](Self::flush)). Gives `None` for the studio's own writes
-    /// and for the text already open.
+    /// [`flush`](Self::flush)). Gives `None` for the text already open and
+    /// for a late report of the studio's own write once the file has moved
+    /// past it.
     ///
     /// A text that does not parse sets [`file_errors`](Self::file_errors)
     /// and keeps the last good song and the pending edits. Otherwise the
@@ -252,7 +254,7 @@ impl StudioCore {
     /// offers every pending edit.
     pub fn on_disk_text(&mut self, text: String) -> Option<ExternalChange> {
         let hash = text_hash(&text);
-        if text == self.disk_text || self.is_own_write(&hash) {
+        if text == self.disk_text || self.is_stale_own_write(&text, &hash) {
             // An invalid save put back as it was: report the errors gone.
             if self.file_errors.is_empty() {
                 return None;
@@ -529,6 +531,15 @@ impl StudioCore {
     /// writes.
     pub fn is_own_write(&self, hash: &str) -> bool {
         self.own_writes.iter().any(|h| h == hash)
+    }
+
+    /// Whether `text` is a late report of one of the studio's own writes
+    /// that the file has since moved past. Matching an own write's hash is
+    /// not enough: Claude or an editor can write the same bytes again (undo
+    /// back past a `tune set`, then run it again), and then the file really
+    /// holds them, so they are a change.
+    fn is_stale_own_write(&self, text: &str, hash: &str) -> bool {
+        self.is_own_write(hash) && !fs::read_to_string(&self.path).is_ok_and(|now| now == text)
     }
 
     fn clear_pending(&mut self) {
