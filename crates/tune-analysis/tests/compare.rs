@@ -194,3 +194,32 @@ fn mono_reference_width_not_compared() {
     assert!(!c.verdicts.iter().any(|v| v.starts_with("side/mid")));
     assert!(c.to_json()["deltas"]["side_to_mid_db"].is_null());
 }
+
+#[test]
+fn near_mono_reference_width_not_compared() {
+    // A mono master decoded from a lossy stereo file keeps a faint side
+    // residue (about -90 dB below the mid). That is still mono to the ear,
+    // so width must not be compared against it.
+    let base = &six_sine(None).channels[0];
+    let residue = common::noise(SR, -110.0, 5.0, 7);
+    let rl = base.clone();
+    let rr: Vec<f32> = base.iter().zip(&residue).map(|(v, n)| v + n).collect();
+    let r = analyze(&common::stereo(SR, rl, rr), None).unwrap();
+    assert!(
+        r.spectral.stereo.side_to_mid_db > -120.0 && r.spectral.stereo.side_to_mid_db < -60.0,
+        "{}",
+        r.spectral.stereo.side_to_mid_db
+    );
+    let l = base.clone();
+    let ours_r: Vec<f32> = base.iter().map(|v| v * 0.5).collect();
+    let o = analyze(&common::stereo(SR, l, ours_r), None).unwrap();
+    let c = compare(&o, &r);
+    assert_eq!(c.deltas.side_to_mid_db, None);
+    assert!(
+        c.verdicts
+            .contains(&"width: one side is mono, not compared".to_string()),
+        "{:?}",
+        c.verdicts
+    );
+    assert!(!c.verdicts.iter().any(|v| v.starts_with("side/mid")));
+}
