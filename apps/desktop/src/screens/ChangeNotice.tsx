@@ -42,12 +42,12 @@ export function ChangeNotice({
   const pending = offered.length > 0 ? offered.length : (notice?.offered.length ?? 0);
   if (!notice && pending === 0) return null;
 
-  const button = (label: string, onClick: () => void, aria?: string) => (
+  const button = (label: string, onClick: () => void, aria?: string, icon = false) => (
     <button
       key={label}
       type="button"
       aria-label={aria}
-      className={cn(btn, aria && "w-7 px-0")}
+      className={cn(btn, icon && "w-7 px-0")}
       onClick={onClick}
     >
       {label}
@@ -57,7 +57,7 @@ export function ChangeNotice({
     button("Re-apply", () => onResolve(true)),
     button("Discard", () => onResolve(false)),
   ];
-  const dismiss = button("×", onDismiss, "Dismiss");
+  const dismiss = button("×", onDismiss, "Dismiss", true);
 
   let text: string;
   let offer: string | null = null;
@@ -73,7 +73,16 @@ export function ChangeNotice({
     text = `${who} changed ${plural(notice.changes.length, "thing")}: ${describeChanges(notice.changes, song)}`;
     if (pending > 0) offer = `It overrode ${plural(pending, "unsaved edit")}. Re-apply?`;
     actions = [
-      ...(canUndo ? [button("Undo", onUndo)] : []),
+      // Named apart from the transport's own Undo.
+      ...(canUndo
+        ? [
+            button(
+              "Undo",
+              onUndo,
+              notice.source === "claude" ? "Undo Claude's change" : "Undo the change on disk",
+            ),
+          ]
+        : []),
       ...(pending > 0 ? resolve : []),
       dismiss,
     ];
