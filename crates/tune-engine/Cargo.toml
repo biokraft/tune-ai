@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 hound = "3.5"
+rtrb = "=0.3.4"
 thiserror = "2"
 tune-dsp = { path = "../tune-dsp" }
 tune-song = { path = "../tune-song" }

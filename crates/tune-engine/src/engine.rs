@@ -8,9 +8,13 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use tune_dsp::ParamSpec;
+use tune_song::FxSpec;
+
 use crate::clock::hit_seed;
-use crate::compile::{CompiledSong, CompiledTrack, ParamTarget};
+use crate::compile::{CompiledFx, CompiledSong, CompiledTrack, ParamTarget};
 use crate::instrument::{Cell, Effect, Instrument, StepCtx};
+use crate::live::SongUpdate;
 use crate::mixer::Meter;
 use crate::tracks::{make_effect, make_instrument};
 
@@ -53,6 +57,41 @@ impl TrackRuntime {
             fx.reset();
         }
     }
+
+    /// A silent stand-in left behind when a swap moves a runtime out of the
+    /// old list. Neither building nor dropping it touches the heap: the
+    /// instrument is zero-sized and the fx chain is empty.
+    fn placeholder() -> Self {
+        Self {
+            instrument: Box::new(Vacant),
+            fx: Vec::new(),
+        }
+    }
+}
+
+/// The zero-sized instrument behind [`TrackRuntime::placeholder`].
+struct Vacant;
+
+impl Instrument for Vacant {
+    fn params(&self) -> &'static [ParamSpec] {
+        &[]
+    }
+    fn set_param_at(&mut self, _: usize, _: f64) {}
+    fn on_step(&mut self, _: &Cell, _: &StepCtx) {}
+    fn process(&mut self) -> f64 {
+        0.0
+    }
+    fn reset(&mut self) {}
+}
+
+/// Whether two fx chains are built alike: the same effects in the same
+/// slots, each with what its constructor takes (a distortion's mode). Params
+/// may differ; the static reset after a swap sets them.
+fn same_fx_chain(a: &[CompiledFx], b: &[CompiledFx]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| match (&x.spec, &y.spec) {
+            (FxSpec::Distortion { mode: m, .. }, FxSpec::Distortion { mode: n, .. }) => m == n,
+        })
 }
 
 /// Plays a [`CompiledSong`]: arrangement, automation, mixer and master clipper.
@@ -65,8 +104,8 @@ pub struct Engine {
     step: u64,
     /// Section of the last step fired.
     section: usize,
-    /// Set by `new`, `seek` (and later swaps): the next step re-applies
-    /// static params even if the section stays the same.
+    /// Set by `new`, `seek` and swaps: the next step re-applies static params
+    /// even if the section stays the same.
     needs_static: bool,
     /// Loop as half-open step range.
     looping: Option<(u64, u64)>,
@@ -74,6 +113,11 @@ pub struct Engine {
     any_solo: bool,
     gate_samples: i32,
     meter: Meter,
+    /// A swap waiting for the next step boundary.
+    pending: Option<Box<SongUpdate>>,
+    /// The last applied swap, holding the old song, until it is taken.
+    retired: Option<Box<SongUpdate>>,
+    swaps_applied: u64,
 }
 
 static REST: Cell = Cell::Rest;
@@ -110,7 +154,56 @@ impl Engine {
             looping: None,
             finished: false,
             meter: Meter::default(),
+            pending: None,
+            retired: None,
+            swaps_applied: 0,
         }
+    }
+
+    /// Queues `update` to replace the song at the next step boundary and
+    /// returns the swap it replaces, if one was still pending. The update
+    /// must be built at the engine's sample rate.
+    ///
+    /// The swap applies only once the previous one has been taken with
+    /// [`take_retired_swap`](Self::take_retired_swap), so the engine never
+    /// drops a song itself. Applying it, at step boundary `k`:
+    /// - every new track takes the old runtime with the same id and
+    ///   instrument kind (keeping the old fx chain if it is built alike, see
+    ///   `same_fx_chain`); other tracks get the update's fresh runtimes;
+    /// - the new clock takes over at step `k` (the step index survives a bpm
+    ///   change) and static params are re-applied;
+    /// - the loop is clamped to the new end, and dropped when it starts at
+    ///   or past it;
+    /// - if `k` lies at or past the new end, playback jumps to the loop start
+    ///   when a loop remains and finishes otherwise.
+    ///
+    /// A finished engine applies a swap at once and stays finished at the
+    /// new end; [`seek`](Self::seek) restarts it.
+    pub fn queue_swap(&mut self, update: Box<SongUpdate>) -> Option<Box<SongUpdate>> {
+        debug_assert_eq!(
+            update.song.clock.sample_rate, self.song.clock.sample_rate,
+            "a swap must keep the sample rate"
+        );
+        self.pending.replace(update)
+    }
+
+    pub fn has_pending_swap(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    pub fn has_retired_swap(&self) -> bool {
+        self.retired.is_some()
+    }
+
+    /// The last applied swap's update, now holding the old song and every
+    /// runtime the new song did not take. Drop it off the audio thread.
+    pub fn take_retired_swap(&mut self) -> Option<Box<SongUpdate>> {
+        self.retired.take()
+    }
+
+    /// Swaps applied since the engine was built.
+    pub fn swaps_applied(&self) -> u64 {
+        self.swaps_applied
     }
 
     /// Jumps to the start of 0-based `bar` (clamped to the song's end) and
@@ -141,6 +234,9 @@ impl Engine {
     /// Fills interleaved stereo `out` (an even length).
     ///
     /// Per sample, in this order:
+    /// 0. At a step boundary (or when finished), apply a pending swap (see
+    ///    [`queue_swap`](Self::queue_swap)); the rest of the sample then runs
+    ///    on the new song.
     /// 1. When finished, write silence.
     /// 2. At a step boundary: wrap at the loop end (nothing is reset); finish
     ///    at the song end; re-apply static params on a section change (or the
@@ -162,7 +258,10 @@ impl Engine {
     /// Like [`process`](Self::process), also writing one interleaved stereo
     /// stem per track (each as long as `mix`). Stems ignore mute and solo and
     /// skip the clipper.
+    ///
+    /// Stems need a fixed track list, so no swap may be pending.
     pub fn process_stems(&mut self, mix: &mut [f32], stems: &mut [&mut [f32]]) {
+        assert!(self.pending.is_none(), "no swaps while rendering stems");
         assert_eq!(stems.len(), self.tracks.len(), "one stem per track");
         for stem in stems.iter() {
             assert_eq!(stem.len(), mix.len(), "stems must match the mix length");
@@ -179,6 +278,12 @@ impl Engine {
 
     /// One frame; `stem(track, l, r)` receives every track's output.
     fn frame(&mut self, mut stem: impl FnMut(usize, f64, f64)) -> (f32, f32) {
+        if self.pending.is_some()
+            && self.retired.is_none()
+            && (self.finished || self.pos == self.song.clock.step_start(self.step))
+        {
+            self.apply_swap();
+        }
         if self.finished {
             return self.silence(&mut stem);
         }
@@ -238,6 +343,63 @@ impl Engine {
         let (cl, cr) = self.meter.clip_frame(ml, mr);
         self.pos += 1;
         (cl as f32, cr as f32)
+    }
+
+    /// Applies the pending swap at the current step boundary (see
+    /// [`queue_swap`](Self::queue_swap)). Moves boxes and vectors only: it
+    /// never allocates or frees.
+    fn apply_swap(&mut self) {
+        let Some(mut update) = self.pending.take() else {
+            return;
+        };
+        let u = &mut *update;
+        debug_assert!(u.spare.is_empty() && u.spare.capacity() >= u.song.tracks.len());
+        for (j, new) in u.song.tracks.iter().enumerate() {
+            let fresh = u.tracks[j].take().expect("one fresh runtime per track");
+            let old = self
+                .song
+                .tracks
+                .iter()
+                .position(|t| t.id == new.id && t.kind == new.kind);
+            let rt = match old {
+                None => fresh,
+                Some(i) => {
+                    let mut kept =
+                        std::mem::replace(&mut self.tracks[i], TrackRuntime::placeholder());
+                    let mut unused = fresh;
+                    if !same_fx_chain(&self.song.tracks[i].fx, &new.fx) {
+                        std::mem::swap(&mut kept.fx, &mut unused.fx);
+                    }
+                    u.tracks[j] = Some(unused);
+                    kept
+                }
+            };
+            u.spare.push(rt);
+        }
+        std::mem::swap(&mut self.tracks, &mut u.spare);
+        std::mem::swap(&mut self.song, &mut u.song);
+        self.retired = Some(update);
+        self.swaps_applied += 1;
+
+        let song = &*self.song;
+        self.any_solo = song.tracks.iter().any(|t| t.solo);
+        self.gate_samples = song.clock.gate_samples();
+        let total_steps = 16 * u64::from(song.total_bars);
+        self.looping = self
+            .looping
+            .and_then(|(start, end)| (start < total_steps).then(|| (start, end.min(total_steps))));
+        self.needs_static = true;
+        if self.finished || self.step >= total_steps {
+            match self.looping {
+                Some((start, _)) if !self.finished => self.step = start,
+                _ => {
+                    self.finished = true;
+                    self.step = total_steps;
+                }
+            }
+        }
+        self.pos = song.clock.step_start(self.step);
+        self.section = section_of(song, self.step);
     }
 
     fn silence(&self, stem: &mut impl FnMut(usize, f64, f64)) -> (f32, f32) {
