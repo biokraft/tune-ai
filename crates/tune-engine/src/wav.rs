@@ -102,13 +102,20 @@ impl WavWriter {
     /// Finalizes the header and renames the temp file over the target.
     pub fn finish(mut self) -> Result<(), WavError> {
         let inner = self.inner.take().expect("writer is open until finish");
-        inner.finalize().map_err(|source| WavError::Wav {
-            path: self.path.clone(),
-            source,
-        })?;
-        fs::rename(&self.tmp, &self.path).map_err(|source| WavError::Io {
-            path: self.path.clone(),
-            source,
+        // `inner` is taken, so Drop no longer cleans up: do it on each error.
+        if let Err(source) = inner.finalize() {
+            let _ = fs::remove_file(&self.tmp);
+            return Err(WavError::Wav {
+                path: self.path.clone(),
+                source,
+            });
+        }
+        fs::rename(&self.tmp, &self.path).map_err(|source| {
+            let _ = fs::remove_file(&self.tmp);
+            WavError::Io {
+                path: self.path.clone(),
+                source,
+            }
         })
     }
 }
