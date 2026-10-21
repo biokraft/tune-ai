@@ -1,12 +1,23 @@
 import { useState } from "react";
 import { cn } from "../lib/utils";
 import type { ParamSpecView } from "../lib/param";
-import { Knob } from "./Knob";
+import { Knob, type Highlight } from "./Knob";
 
 export type TrackStripProps = {
   track: { id: string; gain_db: number; pan: number; mute: boolean; solo: boolean };
   onMix(patch: { gain_db?: number; pan?: number; mute?: boolean; solo?: boolean }): void;
+  /**
+   * STRIP params; the strip shows knobs for send.delay, send.reverb and duck.depth. Omit to hide
+   * them. The values are shown as given, so the caller overlays a held knob's live value.
+   */
+  strip?: ParamSpecView[];
+  /** Live while dragging (commit false), written on release (commit true). */
+  onParam?(id: string, value: number, commit: boolean): void;
+  highlight?(id: string): Highlight;
 };
+
+/** The strip params that get a knob on the channel, in panel order. */
+const STRIP_KNOBS = ["send.delay", "send.reverb", "duck.depth"];
 
 const base = { help: "", value: 0, explicit: false, curve: "linear" as const };
 const GAIN: ParamSpecView = {
@@ -33,7 +44,7 @@ const toggle = cn(
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-silkscreen",
 );
 
-export function TrackStrip({ track, onMix }: TrackStripProps) {
+export function TrackStrip({ track, onMix, strip, onParam, highlight }: TrackStripProps) {
   // Live values while a knob is held; cleared on commit so the prop takes over again.
   const [gain, setGain] = useState<number | null>(null);
   const [pan, setPan] = useState<number | null>(null);
@@ -60,6 +71,29 @@ export function TrackStrip({ track, onMix }: TrackStripProps) {
           onMix({ pan: v });
         }}
       />
+      {strip && (
+        <div
+          role="group"
+          aria-label={`${track.id} sends`}
+          className="flex items-center border-l border-silkscreen/20 pl-1"
+        >
+          {STRIP_KNOBS.map((id) => {
+            const spec = strip.find((p) => p.id === id);
+            if (!spec) return null;
+            return (
+              <Knob
+                key={id}
+                spec={spec}
+                size="sm"
+                value={spec.value}
+                highlight={highlight?.(id) ?? null}
+                onChange={(v) => onParam?.(id, v, false)}
+                onCommit={(v) => onParam?.(id, v, true)}
+              />
+            );
+          })}
+        </div>
+      )}
       <button
         type="button"
         title="Mute"

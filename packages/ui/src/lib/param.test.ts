@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cutoff, decay, gain, resonance, waveform } from "../test-fixtures";
+import { cutoff, decay, delayTime, gain, resonance, waveform } from "../test-fixtures";
 import { formatValue, toNormalized, toPlain } from "./param";
 
 describe("toPlain / toNormalized", () => {
@@ -43,5 +43,10 @@ describe("formatValue", () => {
     expect(formatValue(decay, 400)).toBe("400 ms");
     expect(formatValue(gain, -3)).toBe("-3.0 dB");
     expect(formatValue(waveform, 0.5)).toBe("0.50");
+  });
+
+  it("formats 16ths", () => {
+    expect(formatValue(delayTime, 3)).toBe("3/16");
+    expect(formatValue(delayTime, 2.5)).toBe("2.50/16");
   });
 });
