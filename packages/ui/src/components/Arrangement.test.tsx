@@ -175,6 +175,31 @@ describe("Arrangement", () => {
     expect(screen.getByRole("rowgroup", { name: "Tracks" })).toHaveClass("sticky", "left-0");
   });
 
+  it("lanes hold flat to the section edges and single points span the section", () => {
+    const lanes = [
+      {
+        track: "acid",
+        param: "cutoff",
+        points: [
+          [1, 0.2],
+          [2, 0.8],
+        ] as [number, number][],
+      },
+      { track: "acid", param: "res", points: [[2, 0.5]] as [number, number][] },
+    ];
+    const { container } = setup([sec("a", 16, 4, { lanes })]);
+    const polys = container.querySelectorAll("polyline");
+    expect(polys).toHaveLength(2);
+    for (const poly of polys) {
+      const xs = poly
+        .getAttribute("points")!
+        .split(" ")
+        .map((pt) => parseFloat(pt.split(",")[0]!));
+      expect(xs[0]).toBe(16 * 12);
+      expect(xs[xs.length - 1]).toBe(20 * 12);
+    }
+  });
+
   it("playhead x", () => {
     setup([sec("a", 0, 16)], { playhead: 4.5 });
     expect(screen.getByTestId("playhead")).toHaveAttribute("x1", "54");

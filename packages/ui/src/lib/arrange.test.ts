@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dropIndex, formatPosition, snapBars, type SectionView } from "./arrange";
+import { dropIndex, holdPoints, formatPosition, snapBars, type SectionView } from "./arrange";
 
 const sec = (start_bar: number, bars: number): SectionView => ({
   name: "s",
@@ -25,5 +25,39 @@ describe("arrange", () => {
     expect(dropIndex(s, 10)).toBe(0);
     expect(dropIndex(s, 300)).toBe(2);
     expect(dropIndex(s, 5000)).toBe(3);
+  });
+  it("holds lane points flat to the section edges", () => {
+    expect(
+      holdPoints(
+        [
+          [1, 0.2],
+          [2, 0.8],
+        ],
+        4,
+      ),
+    ).toEqual([
+      [0, 0.2],
+      [1, 0.2],
+      [2, 0.8],
+      [4, 0.8],
+    ]);
+    expect(holdPoints([[2, 0.5]], 4)).toEqual([
+      [0, 0.5],
+      [2, 0.5],
+      [4, 0.5],
+    ]);
+    expect(
+      holdPoints(
+        [
+          [-1, 0],
+          [9, 1],
+        ],
+        4,
+      ),
+    ).toEqual([
+      [0, 0],
+      [4, 1],
+    ]);
+    expect(holdPoints([], 4)).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 import * as Popover from "@radix-ui/react-popover";
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { cn } from "../lib/utils";
-import { dropIndex, PX_PER_BAR, snapBars, type SectionView } from "../lib/arrange";
+import { dropIndex, holdPoints, PX_PER_BAR, snapBars, type SectionView } from "../lib/arrange";
 
 export type { SectionView } from "../lib/arrange";
 
@@ -396,7 +396,7 @@ export function Arrangement(p: ArrangementProps) {
               <g key={t.id} transform={`translate(0 ${RULER_H + BLOCK_H + r * ROW_H})`}>
                 {p.sections.map((s, i) =>
                   s.lanes
-                    .filter((l) => l.track === t.id && l.points.length > 1)
+                    .filter((l) => l.track === t.id && l.points.length > 0)
                     .map((l) => (
                       <polyline
                         key={`${i}-${l.param}`}
@@ -404,7 +404,7 @@ export function Arrangement(p: ArrangementProps) {
                         fill="none"
                         stroke="hsl(var(--slide))"
                         strokeWidth={1}
-                        points={l.points
+                        points={holdPoints(l.points, s.bars)
                           .map(([bar, v]) => {
                             const y = ROW_H - 4 - Math.min(1, Math.max(0, v)) * (ROW_H - 8);
                             return `${(s.start_bar + bar) * PX_PER_BAR},${y}`;
