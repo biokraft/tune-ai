@@ -109,13 +109,15 @@ bars. Failures exit 2 with a message.
 | `sections[]` | `integrated_lufs`, `short_term_max_lufs`, `delta_lu`, `bands`, `centroid_median_hz`, `notes` |
 | `deltas`, `verdicts` (compare) | ours minus reference, plus one plain-language line each |
 
-A quantity that does not exist (silence, too short, mono width) is `null`.
-In `compare`, band and width deltas are `null` with a "not compared" verdict
-when one side lacks content or is mono.
+A quantity that does not exist (silence, too short) is `null`; a mono
+signal's `side_to_mid_db` floors at -200. In `compare`, a band delta is `null`
+with a "not compared" verdict when one side lacks content there, and the width
+delta is `null` when exactly one side is mono (0 when both are).
 
 References live outside git. Put `[refs]` `<name> = "~/path/file.mp3"` in
 `tune.local.toml` at the repo root (gitignored) or drop files into `refs/`
-(name = file stem); `tune refs --json` checks that each resolves. Never read
+(name = file stem); `tune refs --json` checks that each resolves (it echoes
+the configured paths: keep them out of anything committed). Never read
 or print `tune.local.toml` itself. Never commit references, PNGs or the local
 config.
 
