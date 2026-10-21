@@ -799,3 +799,56 @@ fn open_song_stays_under_root() {
         assert_eq!(studio.call(open).unwrap(), Value::Null, "{path}");
     }
 }
+
+fn mix_knob(param: &str, value: f64, commit: bool) -> Command {
+    Command::SetParam {
+        track: "mix".into(),
+        param: param.into(),
+        value,
+        commit,
+    }
+}
+
+/// A mix knob is a live override like a track knob: heard while held,
+/// written on release (creating `[mix]`), and the override ends there.
+#[test]
+fn drag_mix_knob_overrides_live() {
+    let f = fixture(MINI);
+    f.call(play(Some(0)));
+    let reference = render_bars(MINI, 0, 1);
+    assert!(f.pull(4800) == reference[..9600], "capture matches render");
+
+    assert_eq!(f.call(mix_knob("master.gain", -12.0, false)), Value::Null);
+    assert!(f.pull(4800) != reference[9600..19_200], "the drag is heard");
+    sleep(Duration::from_millis(300));
+    assert_eq!(f.disk(), MINI, "a drag writes nothing");
+    assert_eq!(f.human_log_lines(), 0);
+
+    // Released at another value than the drag's, so the capture can tell
+    // a lingering override from the file.
+    assert_eq!(f.call(mix_knob("master.gain", -6.0, true)), Value::Null);
+    let text = f.disk_until(WAIT, "held master.gain", |t| {
+        parse_song(t).is_ok_and(|s| s.mix.params.get("master.gain") == Some(&-6.0))
+    });
+    assert!(
+        text.contains("[mix]\nparams = { \"master.gain\" = -6 }\n"),
+        "{text}"
+    );
+    match f.wait("applied", |e| matches!(e, Event::Applied { .. })) {
+        Event::Applied { source, changes } => {
+            assert_eq!(source, Source::Human);
+            assert_eq!(changes[0].path, SongPath::param("mix", "master.gain"));
+            assert_eq!((&changes[0].old, &changes[0].new), (&json!(0), &json!(-6)));
+        }
+        _ => unreachable!(),
+    }
+
+    // Let the release's swap land, then compare a fresh bar with the file.
+    f.pull(12_000);
+    sleep(Duration::from_millis(150));
+    f.call(Command::SeekBar { bar: 0 });
+    assert!(
+        f.pull(9600) == render_bars(&text, 0, 1)[..19_200],
+        "the file plays, not the dragged value"
+    );
+}

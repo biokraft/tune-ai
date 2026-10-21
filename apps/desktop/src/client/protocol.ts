@@ -102,7 +102,25 @@ export type TrackView = {
   mute: boolean;
   solo: boolean;
   params: ParamView[];
+  /** The strip params (sends and ducking), in `STRIP_PARAMS` order. */
+  strip: ParamView[];
   fx: FxView[];
+};
+
+/** The `[mix]` table: the master stage, the duck source and the shared buses. */
+export type MixView = {
+  /** `"clip"` or `"limit"`. */
+  master: string;
+  /** Every master mode, in the order the UI offers them. */
+  masters: string[];
+  /** The track every `duck.depth` follows (the file's, else the first kick). */
+  duck_source: string | null;
+  delay: ParamView[];
+  reverb: ParamView[];
+  master_params: ParamView[];
+  /** Whether some track sends to the bus. */
+  delay_active: boolean;
+  reverb_active: boolean;
 };
 
 export type PatternView =
@@ -116,6 +134,7 @@ export type SongView = {
   tracks: TrackView[];
   patterns: PatternView[];
   sections: SectionView[];
+  mix: MixView;
 };
 
 export type StudioState = {
