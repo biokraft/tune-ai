@@ -255,6 +255,32 @@ fn get_state_returns_current_state_and_changes_nothing() {
     );
 }
 
+/// A song file that does not parse at launch still starts the studio: the
+/// state names the file and its errors (the app shows them), and fixing the
+/// file opens it.
+#[test]
+fn broken_song_at_launch_opens_once_fixed() {
+    let broken = MINI.replacen("bpm = 120", "bpm = ", 1);
+    assert_ne!(broken, MINI);
+    let f = fixture(&broken);
+    let s = f.state("first state", |_| true);
+    assert_eq!(s.path.as_deref(), f.path.to_str());
+    assert!(s.song.is_none());
+    assert!(!s.file_errors.is_empty());
+    assert!(s.file_errors[0].line.is_some(), "{:?}", s.file_errors);
+    assert!(matches!(
+        f.studio.call(play(None)),
+        Err(StudioError::NoSong)
+    ));
+
+    fs::write(&f.path, MINI).unwrap();
+    let s = f.state("opened state", |s| s.song.is_some());
+    assert_eq!(s.song.expect("a song").name, "mini");
+    assert!(s.file_errors.is_empty());
+    assert_eq!(s.path.as_deref(), f.path.to_str());
+    assert_eq!(f.call(play(Some(0))), Value::Null);
+}
+
 #[test]
 fn play_emits_playhead() {
     let f = fixture(MINI);

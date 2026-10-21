@@ -33,7 +33,7 @@ use crate::command::Command;
 use crate::core::{ExternalChange, StudioCore};
 use crate::diff::Change;
 use crate::doc::{EditError, effective_value};
-use crate::error::StudioError;
+use crate::error::{ErrorView, StudioError};
 use crate::log::Source;
 use crate::path::SongPath;
 use crate::view::StudioState;
@@ -91,8 +91,10 @@ pub struct StudioConfig {
 pub struct Studio;
 
 impl Studio {
-    /// Starts the actor thread, with `song` open if given. Fails if the song
-    /// cannot be opened or watched.
+    /// Starts the actor thread, with `song` open if given. A song file that
+    /// does not parse still starts the studio: the state names the file and
+    /// its errors, and the file opens once it is fixed. Fails if the song
+    /// cannot be read or watched.
     pub fn spawn(config: StudioConfig, song: Option<PathBuf>) -> Result<StudioHandle, StudioError> {
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
@@ -102,7 +104,7 @@ impl Studio {
             .spawn(move || {
                 let mut actor = Actor::new(config, actor_tx);
                 if let Some(path) = song
-                    && let Err(e) = actor.open(&path)
+                    && let Err(e) = actor.open_or_wait(&path)
                 {
                     let _ = ready_tx.send(Err(e));
                     return;
@@ -213,6 +215,15 @@ struct OpenSong {
     _watcher: SongWatcher,
 }
 
+/// A song asked for at start whose file does not parse yet, watched so it
+/// opens once fixed.
+struct Unopened {
+    path: PathBuf,
+    errors: Vec<ErrorView>,
+    epoch: u64,
+    _watcher: SongWatcher,
+}
+
 /// Live playback.
 struct Player {
     /// Dropping it stops the device (declared first, so it goes first).
@@ -290,6 +301,8 @@ struct Actor {
     songs_root: PathBuf,
     subscribers: Vec<Sender<Event>>,
     song: Option<OpenSong>,
+    /// Only while no song is open.
+    unopened: Option<Unopened>,
     player: Option<Player>,
     /// Where playback starts; 0-based, below the song's bar count.
     cursor_bar: u32,
@@ -314,6 +327,7 @@ impl Actor {
             songs_root: config.songs_root,
             subscribers: Vec::new(),
             song: None,
+            unopened: None,
             player: None,
             cursor_bar: 0,
             loop_bars: None,
@@ -476,12 +490,47 @@ impl Actor {
             epoch,
             _watcher: watcher,
         });
+        self.unopened = None;
         self.cursor_bar = 0;
         self.loop_bars = None;
         self.drag = None;
         self.released = None;
         self.flush_failed_at = None;
         Ok(())
+    }
+
+    /// Opens `path`; if it does not parse, watches it and waits for a fix.
+    fn open_or_wait(&mut self, path: &Path) -> Result<(), StudioError> {
+        match self.open(path) {
+            Err(StudioError::Load(errors)) => {
+                let epoch = self.epoch + 1;
+                let watcher = watch(path, self.tx.clone(), epoch)?;
+                self.epoch = epoch;
+                self.unopened = Some(Unopened {
+                    path: path.to_owned(),
+                    errors,
+                    epoch,
+                    _watcher: watcher,
+                });
+                Ok(())
+            }
+            other => other,
+        }
+    }
+
+    /// The unopened song's file changed: open it if it parses now.
+    fn retry_unopened(&mut self, path: &Path) {
+        match self.open(path) {
+            Ok(()) => self.emit_state(),
+            Err(StudioError::Load(errors)) => {
+                if let Some(u) = &mut self.unopened {
+                    u.errors = errors;
+                }
+            }
+            Err(e) => self.emit(Event::Error {
+                message: e.to_string(),
+            }),
+        }
     }
 
     fn play(&mut self, from_bar: Option<u32>) -> Result<Value, StudioError> {
@@ -631,6 +680,13 @@ impl Actor {
     // ----- the file -----
 
     fn on_disk(&mut self, epoch: u64, reload: RawReload) {
+        if let Some(u) = &self.unopened
+            && u.epoch == epoch
+        {
+            let path = u.path.clone();
+            self.retry_unopened(&path);
+            return;
+        }
         let Some(song) = &mut self.song else {
             return;
         };
@@ -859,8 +915,12 @@ impl Actor {
 
     fn state(&self) -> StudioState {
         let core = self.song.as_ref().map(|s| &s.core);
+        let unopened = self.unopened.as_ref();
         StudioState {
-            path: core.map(|c| c.path().to_string_lossy().into_owned()),
+            path: core
+                .map(StudioCore::path)
+                .or(unopened.map(|u| u.path.as_path()))
+                .map(|p| p.to_string_lossy().into_owned()),
             song: core.map(StudioCore::view),
             playing: self.player.is_some(),
             cursor_bar: self.cursor_bar,
@@ -868,7 +928,10 @@ impl Actor {
             can_undo: core.is_some_and(StudioCore::can_undo),
             can_redo: core.is_some_and(StudioCore::can_redo),
             offered: core.map(|c| c.offered().to_vec()).unwrap_or_default(),
-            file_errors: core.map(|c| c.file_errors().to_vec()).unwrap_or_default(),
+            file_errors: core
+                .map(|c| c.file_errors().to_vec())
+                .or(unopened.map(|u| u.errors.clone()))
+                .unwrap_or_default(),
         }
     }
 
