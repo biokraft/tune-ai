@@ -138,6 +138,49 @@ fn claude_edit_attributed() {
     assert!(core.can_undo());
 }
 
+/// Claude writes the same bytes as a text the studio wrote earlier (here, by
+/// undoing back through Claude's first change). The file really holds them,
+/// so it is a change, not an echo of the studio's own write.
+#[test]
+fn external_text_matching_an_older_own_write_is_a_change() {
+    let s = song();
+    let mut core = open(&s);
+    set_paths(&s.path, &[(SongPath::Bpm, json!(121))], Source::Claude).unwrap();
+    let claude_text = disk(&s);
+    core.on_disk_text(claude_text.clone())
+        .expect("Claude's change");
+    core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
+    core.flush().unwrap();
+    core.undo().unwrap(); // writes Claude's text back: an own write
+    core.undo().unwrap(); // and the fixture
+    assert!(core.is_own_write(&tune_studio::text_hash(&claude_text)));
+    assert_eq!(core.song().bpm, 120.0);
+
+    set_paths(&s.path, &[(SongPath::Bpm, json!(121))], Source::Claude).unwrap();
+    assert_eq!(disk(&s), claude_text, "the same bytes as the own write");
+    let ext = core
+        .on_disk_text(disk(&s))
+        .expect("the file holds Claude's text again");
+    assert_eq!(ext.source, Source::Claude);
+    assert_eq!(ext.changes[0].path, SongPath::Bpm);
+    assert_eq!(core.song().bpm, 121.0);
+}
+
+/// A late watcher report of an older own write, when the file has moved on,
+/// is still ignored.
+#[test]
+fn stale_report_of_an_own_write_ignored() {
+    let s = song();
+    let mut core = open(&s);
+    core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
+    core.flush().unwrap();
+    let first = disk(&s);
+    core.apply_edit(&cutoff(900.0), Instant::now()).unwrap();
+    core.flush().unwrap();
+    assert!(core.on_disk_text(first).is_none());
+    assert!(disk(&s).contains("\"acid303.cutoff\" = 900"));
+}
+
 /// Human entries carry a file hash too; only `claude` entries attribute.
 #[test]
 fn human_hash_not_attributed_to_claude() {
