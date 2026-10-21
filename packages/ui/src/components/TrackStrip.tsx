@@ -49,69 +49,78 @@ export function TrackStrip({ track, onMix, strip, onParam, highlight }: TrackStr
   const [gain, setGain] = useState<number | null>(null);
   const [pan, setPan] = useState<number | null>(null);
   return (
-    <div role="group" aria-label={`Track ${track.id}`} className="flex items-center gap-2">
-      <span className="w-16 font-label text-base text-silkscreen">{track.id}</span>
-      <Knob
-        spec={GAIN}
-        size="sm"
-        value={gain ?? track.gain_db}
-        onChange={setGain}
-        onCommit={(v) => {
-          setGain(null);
-          onMix({ gain_db: v });
-        }}
-      />
-      <Knob
-        spec={PAN}
-        size="sm"
-        value={pan ?? track.pan}
-        onChange={setPan}
-        onCommit={(v) => {
-          setPan(null);
-          onMix({ pan: v });
-        }}
-      />
-      {strip && (
-        <div
-          role="group"
-          aria-label={`${track.id} sends`}
-          className="flex items-center border-l border-silkscreen/20 pl-1"
+    <div
+      role="group"
+      aria-label={`Track ${track.id}`}
+      className="flex flex-col border-b border-black/30 pb-1"
+    >
+      <div className="flex items-center gap-1 px-2">
+        <span className="font-label text-base text-silkscreen">{track.id}</span>
+        <span className="flex-1" />
+        <button
+          type="button"
+          title="Mute"
+          aria-pressed={track.mute}
+          className={cn(toggle, track.mute && "border-led bg-led text-chassis")}
+          onClick={() => onMix({ mute: !track.mute })}
         >
-          {STRIP_KNOBS.map((id) => {
-            const spec = strip.find((p) => p.id === id);
-            if (!spec) return null;
-            return (
-              <Knob
-                key={id}
-                spec={spec}
-                size="sm"
-                value={spec.value}
-                highlight={highlight?.(id) ?? null}
-                onChange={(v) => onParam?.(id, v, false)}
-                onCommit={(v) => onParam?.(id, v, true)}
-              />
-            );
-          })}
-        </div>
-      )}
-      <button
-        type="button"
-        title="Mute"
-        aria-pressed={track.mute}
-        className={cn(toggle, track.mute && "border-led bg-led text-chassis")}
-        onClick={() => onMix({ mute: !track.mute })}
-      >
-        M
-      </button>
-      <button
-        type="button"
-        title="Solo"
-        aria-pressed={track.solo}
-        className={cn(toggle, track.solo && "border-slide bg-slide text-chassis")}
-        onClick={() => onMix({ solo: !track.solo })}
-      >
-        S
-      </button>
+          M
+        </button>
+        <button
+          type="button"
+          title="Solo"
+          aria-pressed={track.solo}
+          className={cn(toggle, track.solo && "border-slide bg-slide text-chassis")}
+          onClick={() => onMix({ solo: !track.solo })}
+        >
+          S
+        </button>
+      </div>
+      <div className="flex items-center">
+        <Knob
+          spec={GAIN}
+          size="sm"
+          value={gain ?? track.gain_db}
+          onChange={setGain}
+          onCommit={(v) => {
+            setGain(null);
+            onMix({ gain_db: v });
+          }}
+        />
+        <Knob
+          spec={PAN}
+          size="sm"
+          value={pan ?? track.pan}
+          onChange={setPan}
+          onCommit={(v) => {
+            setPan(null);
+            onMix({ pan: v });
+          }}
+        />
+        {strip && (
+          <div
+            role="group"
+            aria-label={`${track.id} sends`}
+            className="flex items-center border-l border-silkscreen/20 pl-1"
+          >
+            {STRIP_KNOBS.map((id) => {
+              const spec = strip.find((p) => p.id === id);
+              if (!spec) return null;
+              return (
+                <Knob
+                  key={id}
+                  spec={spec}
+                  size="sm"
+                  value={spec.value}
+                  highlight={highlight?.(id) ?? null}
+                  onChange={(v) => onParam?.(id, v, false)}
+                  onCommit={(v) => onParam?.(id, v, true)}
+                />
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
