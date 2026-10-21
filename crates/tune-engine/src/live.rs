@@ -308,6 +308,13 @@ pub trait AudioOut: Send {
     /// Moves `processor` into the device's callback and starts output.
     /// Dropping the returned handle stops it.
     fn start(&mut self, processor: LiveProcessor) -> Result<Box<dyn Send>, String>;
+
+    /// Whether the device went away after [`start`](Self::start) (unplugged,
+    /// say). Poll it from a control loop; devices that cannot be lost keep
+    /// the default `false`.
+    fn device_lost(&self) -> bool {
+        false
+    }
 }
 
 /// The realtime half, owned by the audio callback. `process` never
