@@ -7,6 +7,8 @@ import type { AcidStep, DrumHit, ParamSpecView, SectionView } from "@tune/ui";
 
 export type Command =
   | { cmd: "list_songs" }
+  /** Resolves with the current `StudioState`; changes nothing. */
+  | { cmd: "get_state" }
   | { cmd: "open_song"; args: { path: string } }
   /** `from_bar` is 0-based; null starts at the cursor. */
   | { cmd: "play"; args: { from_bar: number | null } }
@@ -51,6 +53,7 @@ export type Command =
 
 export const COMMAND_NAMES = [
   "list_songs",
+  "get_state",
   "open_song",
   "play",
   "stop",

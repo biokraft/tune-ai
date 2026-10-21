@@ -718,6 +718,7 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
         }
         Command::SetParam { commit: false, .. }
         | Command::ListSongs
+        | Command::GetState
         | Command::OpenSong { .. }
         | Command::Play { .. }
         | Command::Stop

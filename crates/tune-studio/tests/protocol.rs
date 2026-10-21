@@ -19,6 +19,7 @@ const COMMENTED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/com
 fn wire_name(c: &Command) -> &'static str {
     match c {
         Command::ListSongs => "list_songs",
+        Command::GetState => "get_state",
         Command::OpenSong { .. } => "open_song",
         Command::Play { .. } => "play",
         Command::Stop => "stop",
@@ -43,6 +44,7 @@ fn wire_name(c: &Command) -> &'static str {
 fn sample_commands() -> Vec<Command> {
     vec![
         Command::ListSongs,
+        Command::GetState,
         Command::OpenSong {
             path: "songs/mini/song.toml".into(),
         },

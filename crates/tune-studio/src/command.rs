@@ -13,6 +13,10 @@ use tune_dsp::DrumHit;
 pub enum Command {
     /// The songs under the studio's songs root.
     ListSongs,
+    /// The current [`StudioState`](crate::StudioState), as the call's
+    /// result. Changes nothing; a client calls it right after subscribing,
+    /// in case it missed the first `state` event.
+    GetState,
     OpenSong {
         path: String,
     },
