@@ -39,6 +39,9 @@ enum Command {
     /// Measure loudness, balance and brightness, and draw a spectrogram.
     Analyze(AnalyzeArgs),
     /// Compare a render or song against a reference track.
+    // clap lists the required reference group before `ours`; spell the real
+    // order out so the two files are not swapped.
+    #[command(override_usage = "tune compare [OPTIONS] <OURS> <REFERENCE|--ref <NAME>>")]
     Compare(CompareArgs),
     /// List the reference tracks configured outside git.
     Refs(JsonArgs),
