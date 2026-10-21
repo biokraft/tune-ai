@@ -27,3 +27,18 @@ export function dropIndex(sections: SectionView[], x: number): number {
 export function formatPosition(bar: number, beat: number): string {
   return `${String(bar + 1).padStart(3, "0")}:${beat + 1}`;
 }
+
+/**
+ * Lane points as drawn: x clamped to the section, held flat from the section
+ * start to the first point and from the last point to the section end, like
+ * the engine. A single point becomes a flat line across the section.
+ */
+export function holdPoints(points: [number, number][], bars: number): [number, number][] {
+  if (points.length === 0) return [];
+  const pts = points.map(([x, v]): [number, number] => [Math.min(bars, Math.max(0, x)), v]);
+  const first = pts[0]!;
+  const last = pts[pts.length - 1]!;
+  if (first[0] > 0) pts.unshift([0, first[1]]);
+  if (last[0] < bars) pts.push([bars, last[1]]);
+  return pts;
+}
