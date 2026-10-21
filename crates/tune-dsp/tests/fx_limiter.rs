@@ -3,13 +3,13 @@
 mod common;
 
 use common::noise;
-use std::f64::consts::{FRAC_1_SQRT_2, PI};
+use std::f64::consts::PI;
 use tune_analysis::{Audio, measure_loudness};
 use tune_dsp::fx::{
     DETECTOR_DELAY, LIMITER_LOOKAHEAD_MS, Limiter, MASTER_CEILING, MASTER_GAIN, MASTER_PARAMS,
     MASTER_RELEASE,
 };
-use tune_dsp::{Biquad, BiquadKind, Curve, db2amp};
+use tune_dsp::{Curve, db2amp};
 
 const SR: f64 = 48000.0;
 
@@ -44,13 +44,6 @@ fn sine(freq: f64, amp: f64, phase: f64, n: usize) -> Vec<f64> {
         .collect()
 }
 
-/// 18 kHz Butterworth lowpass.
-fn lowpass(x: &[f64]) -> Vec<f64> {
-    let mut b = Biquad::new();
-    b.set(BiquadKind::Lowpass, 18000.0, FRAC_1_SQRT_2, SR);
-    x.iter().map(|&v| b.process(v)).collect()
-}
-
 fn seconds(s: f64) -> usize {
     (s * SR).round() as usize
 }
@@ -73,15 +66,16 @@ fn true_peak_dbtp(out: &Out) -> f64 {
 #[test]
 fn latency_is_lookahead_plus_detector() {
     assert_eq!(LIMITER_LOOKAHEAD_MS, 1.5);
-    assert_eq!(DETECTOR_DELAY, 6);
-    assert_eq!(Limiter::new(48000.0).latency(), 78);
-    assert_eq!(Limiter::new(44100.0).latency(), 72);
+    assert_eq!(DETECTOR_DELAY, 12);
+    assert_eq!(Limiter::new(48000.0).latency(), 84);
+    assert_eq!(Limiter::new(44100.0).latency(), 78);
 }
 
 #[test]
 fn transparent_below_ceiling() {
     let mut lim = Limiter::new(SR);
     let lat = lim.latency();
+    assert_eq!(lat, 84);
     let x = sine(1000.0, db2amp(-12.0), 0.0, seconds(1.0));
     let out = run(&mut lim, &x, &x);
     assert!(out.g.iter().all(|&g| g == 1.0));
@@ -124,15 +118,14 @@ fn true_peak_stays_under_ceiling() {
     eprintln!("12 kHz sine: {tp:.3} dBTP");
     assert!(tp <= TRUE_PEAK_MAX_DBTP, "12 kHz sine: {tp} dBTP");
 
-    // (b) Hot noise, band-limited at 18 kHz like any real master. Raw white
-    // noise packs its energy up to Nyquist, where the 12-tap detector cannot
-    // see the inter-sample peaks: it measures about -0.9 dBTP.
-    let l = lowpass(&noise(3, n).iter().map(|v| v * 4.0).collect::<Vec<_>>());
-    let r = lowpass(&noise(4, n).iter().map(|v| v * 4.0).collect::<Vec<_>>());
+    // (b) Hot white noise: full energy up to Nyquist, where inter-sample
+    // peaks run about 4 dB over the sample peak.
+    let l: Vec<f64> = noise(3, n).iter().map(|v| v * 4.0).collect();
+    let r: Vec<f64> = noise(4, n).iter().map(|v| v * 4.0).collect();
     let out = run(&mut Limiter::new(SR), &l, &r);
     let tp = true_peak_dbtp(&out);
-    eprintln!("noise x4, 18 kHz: {tp:.3} dBTP");
-    assert!(tp <= TRUE_PEAK_MAX_DBTP, "noise x4, 18 kHz: {tp} dBTP");
+    eprintln!("noise x4: {tp:.3} dBTP");
+    assert!(tp <= TRUE_PEAK_MAX_DBTP, "noise x4: {tp} dBTP");
 
     // (c) 50 Hz bursts (4 per second, 80 ms each, amplitude 3) over a 3 kHz
     // naive saw at amplitude 1: steep edges on top of a pumping low end.

@@ -4,7 +4,7 @@
 //! exponential release).
 //!
 //! The detector estimates the inter-sample peak with a 4x interpolator: three
-//! points between each pair of samples, from a 12-tap Blackman-windowed sinc.
+//! points between each pair of samples, from a 24-tap Blackman-windowed sinc.
 //! The audio runs [`Limiter::latency`] frames behind the detector, so the
 //! gain has reached its target by the time a peak leaves the delay line.
 //! Below the ceiling the gain is exactly `1.0` and the output is the input,
@@ -58,7 +58,7 @@ pub const MASTER_PARAMS: &[ParamSpec] = &[
 pub const LIMITER_LOOKAHEAD_MS: f64 = 1.5;
 
 /// Frames the peak detector runs behind its newest input (half its taps).
-pub const DETECTOR_DELAY: usize = 6;
+pub const DETECTOR_DELAY: usize = 12;
 
 /// Taps of each interpolator phase.
 const TAPS: usize = 2 * DETECTOR_DELAY;
