@@ -70,7 +70,7 @@ export function FileErrorBanner({
     <Strip role="alert">
       <div className="flex min-w-0 flex-col gap-1">
         <p className="font-semibold">{headline}</p>
-        <ul className="flex flex-col gap-0.5 font-mono text-xs tabular-nums text-ink2">
+        <ul className="flex max-h-[30vh] flex-col gap-0.5 overflow-auto font-mono text-xs tabular-nums text-ink2">
           {errors.map((e, i) => (
             <li key={i}>{position(e)}</li>
           ))}
