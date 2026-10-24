@@ -22,6 +22,7 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
     onDuplicate: vi.fn(),
     onDelete: vi.fn(),
     onOpenTrack: vi.fn(),
+    onShowTrack: vi.fn(),
     onMix: vi.fn(),
   };
   const utils = render(
@@ -348,7 +349,7 @@ describe("Arrangement blocks", () => {
   const blk = (name: string) => screen.getByRole("button", { name });
 
   it("a block opens its track on its section", () => {
-    const { onSelect, onOpenTrack } = setup(
+    const { onSelect, onOpenTrack, onShowTrack } = setup(
       [sec("a", 0, 16, { play: { kick: "k4" } }), sec("b", 16, 16, { play: { kick: "k4" } })],
       {
         tracks: [{ id: "kick", instrument: "kick", mute: false, solo: false }],
@@ -359,7 +360,8 @@ describe("Arrangement blocks", () => {
     expect(b.tagName).toBe("BUTTON");
     fireEvent.click(b);
     expect(onSelect).toHaveBeenCalledWith(1);
-    expect(onOpenTrack).toHaveBeenCalledWith("kick");
+    expect(onShowTrack).toHaveBeenCalledWith("kick");
+    expect(onOpenTrack).not.toHaveBeenCalled();
   });
 
   it("draws a block in its track's colour, inset 3 px, fuller when its section is selected", () => {
@@ -419,13 +421,14 @@ describe("Arrangement blocks", () => {
   });
 
   it("an empty cell is a hidden hover outline that opens its track on its section", () => {
-    const { onSelect, onOpenTrack } = setup([sec("a", 0, 16), sec("b", 16, 16)]);
+    const { onSelect, onOpenTrack, onShowTrack } = setup([sec("a", 0, 16), sec("b", 16, 16)]);
     const cell = screen.getByTestId("empty-1-drums");
     expect(cell).toHaveAttribute("aria-hidden", "true");
     expect(cell).toHaveClass("border-dashed", "hover:border-line");
     fireEvent.click(cell);
     expect(onSelect).toHaveBeenCalledWith(1);
-    expect(onOpenTrack).toHaveBeenCalledWith("drums");
+    expect(onShowTrack).toHaveBeenCalledWith("drums");
+    expect(onOpenTrack).not.toHaveBeenCalled();
   });
 
   it("rings Claude's play and pattern changes in cyan", () => {

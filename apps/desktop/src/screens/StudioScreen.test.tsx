@@ -154,6 +154,29 @@ describe("StudioScreen timeline blocks", () => {
     expect(screen.getByTestId("section-1")).toHaveAttribute("data-selected", "true");
   });
 
+  it("a block of the docked track in another section keeps the dock open", () => {
+    render303();
+    fireEvent.click(screen.getByRole("button", { name: "k4 in a" }));
+    expect(within(dock()).getByText("a · bars 1–2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "k4 in b" }));
+    expect(within(dock()).getByTestId("dock-track")).toHaveTextContent("kick");
+    expect(within(dock()).getByText("b · bars 3–4")).toBeInTheDocument();
+    // Its own block again, and an empty cell of the docked track, keep it open too.
+    fireEvent.click(screen.getByRole("button", { name: "k4 in b" }));
+    expect(within(dock()).getByText("b · bars 3–4")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "a1 in b" }));
+    fireEvent.click(screen.getByTestId("empty-0-acid"));
+    expect(within(dock()).getByTestId("dock-track")).toHaveTextContent("acid");
+    expect(within(dock()).getByText("a · bars 1–2")).toBeInTheDocument();
+  });
+
+  it("the docked track's header still closes the dock", () => {
+    render303();
+    fireEvent.click(screen.getByRole("button", { name: "a1 in b" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open acid" }));
+    expect(screen.queryByRole("region", { name: "Dock" })).toBeNull();
+  });
+
   it("keeps a valid dock header when the selected last section leaves the song", () => {
     const client = render303();
     fireEvent.click(screen.getByTestId("section-1"));
