@@ -41,24 +41,6 @@ export function currentSection(view: StudioView): number | null {
   return sectionAtBar(song.sections, bar) ?? 0;
 }
 
-/**
- * The section the 303 sequencer shows. Like {@link currentSection}, except that when stopped with
- * nothing selected and the 303 rests at the cursor (an intro, say), it opens on the first section
- * where the shown 303 track (the first acid303 one) plays a pattern. While playing it follows the
- * playhead, rests included.
- */
-export function acidSection(view: StudioView): number | null {
-  const i = currentSection(view);
-  const song = view.state?.song;
-  if (!song || i === null || view.selectedSection !== null || playheadStep(view) !== null) {
-    return i;
-  }
-  const acid = song.tracks.find((t) => t.instrument === "acid303");
-  if (!acid || patternIn(song, i, acid.id)) return i;
-  const first = song.sections.findIndex((_, j) => patternIn(song, j, acid.id) !== null);
-  return first < 0 ? i : first;
-}
-
 /** The pattern `track` plays in section `i`, if any. */
 export function patternIn(song: SongView, i: number | null, track: string): PatternView | null {
   if (i === null) return null;
