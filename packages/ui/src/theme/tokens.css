@@ -42,37 +42,6 @@
 
   /* Reduced-effects solid fill. */
   --solid: 22 15 36; /* #160F24 */
-
-  /* Old instrument names, kept until the screens are restyled. */
-  --chassis: var(--bg);
-  --faceplate: var(--solid);
-  --faceplate-hi: var(--solid);
-  --silkscreen: var(--ink);
-  --led: var(--ink);
-  --slide: var(--ink2);
-  --claude: var(--agent);
-
-  /* shadcn naming, mapped onto the palette. */
-  --background: var(--bg);
-  --foreground: var(--ink);
-  --card: var(--solid);
-  --card-foreground: var(--ink);
-  --popover: var(--solid);
-  --popover-foreground: var(--ink);
-  --primary: var(--play);
-  --primary-foreground: var(--bg);
-  --secondary: var(--solid);
-  --secondary-foreground: var(--ink);
-  --muted: var(--solid);
-  --muted-foreground: var(--ink2);
-  --accent: var(--play);
-  --accent-foreground: var(--bg);
-  --destructive: var(--kick);
-  --destructive-foreground: var(--bg);
-  --border: 255 255 255;
-  --input: 255 255 255;
-  --ring: var(--ink);
-  --radius: 0.375rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
