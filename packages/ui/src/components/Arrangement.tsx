@@ -314,7 +314,11 @@ export function Arrangement(p: ArrangementProps) {
           {plural(p.sections.length, "section")} · {plural(p.tracks.length, "track")}
         </span>
       </div>
-      <div ref={scroller} className="relative min-h-0 flex-1 overflow-auto" onScroll={onScroll}>
+      <div
+        ref={scroller}
+        className="relative min-h-0 flex-1 select-none overflow-auto"
+        onScroll={onScroll}
+      >
         <div className="relative flex" style={{ width: HEADER_W + laneW + PAD_R, height }}>
           <TrackHeaders
             fillColumn={under.x}
