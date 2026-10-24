@@ -30,6 +30,7 @@ import type { HighlightKind, StudioStore, StudioView } from "../store/studioStor
 import { usePlayheadPosition, usePlayheadStep, useStudioSelector } from "../store/useStudio";
 import { FileErrorBanner, LostBanner, MessageBanner } from "./Banners";
 import { ChangeNotice, hasChangeNotice } from "./ChangeNotice";
+import { drumRows, LiveDrumGrid } from "./dock/StepsTab";
 import { MixPanel } from "./MixPanel";
 import { Panel303 } from "./Panel303";
 import { useParamDrag } from "./useParamDrag";
@@ -350,22 +351,7 @@ const DrumSection = memo(function DrumSection({
   highlights,
   fire,
 }: DrumSectionProps) {
-  const rows: DrumRow[] = useMemo(
-    () =>
-      song.tracks.flatMap((t) => {
-        const p = patternIn(song, section, t.id);
-        if (p?.kind !== "drum") return [];
-        return [
-          {
-            pattern: p.id,
-            label: t.id,
-            hits: p.hits,
-            highlighted: highlightedSteps(highlights, p.id),
-          },
-        ];
-      }),
-    [song, section, highlights],
-  );
+  const rows = useMemo(() => drumRows(song, section, highlights), [song, section, highlights]);
   const name = section === null ? undefined : song.sections[section]?.name;
   return (
     <section aria-label="Drums" className="flex flex-col gap-3 border-t border-black/40 px-6 py-5">
@@ -384,27 +370,3 @@ const DrumSection = memo(function DrumSection({
     </section>
   );
 });
-
-function LiveDrumGrid({
-  song,
-  section,
-  rows,
-  fire,
-}: {
-  song: SongView;
-  section: number | null;
-  rows: DrumRow[];
-  fire(cmd: Command): void;
-}) {
-  const step = usePlayheadStep();
-  const length = rows[0]?.hits.length ?? 0;
-  // One chase for all rows; rows of different lengths would disagree, so show none then.
-  const same = rows.every((r) => r.hits.length === length);
-  return (
-    <DrumGrid
-      rows={rows}
-      playingStep={same ? stepInPattern(song, section, step, length) : null}
-      onSet={(pattern, index, hit) => fire({ cmd: "set_drum_step", args: { pattern, index, hit } })}
-    />
-  );
-}

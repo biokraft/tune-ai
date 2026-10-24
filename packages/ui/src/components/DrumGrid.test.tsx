@@ -46,3 +46,44 @@ describe("DrumGrid", () => {
     );
   });
 });
+
+describe("DrumGrid emphasis", () => {
+  it("marks only the emphasised row and dims the others", () => {
+    render(
+      <DrumGrid
+        rows={[
+          {
+            pattern: "k4",
+            label: "kick",
+            hits: ["hit"],
+            emphasis: true,
+            color: "rgb(var(--kick))",
+          },
+          { pattern: "h", label: "hat", hits: ["hit"], color: "rgb(var(--hat))" },
+        ]}
+        playingStep={null}
+        onSet={() => {}}
+      />,
+    );
+    expect(screen.getByRole("group", { name: "kick" })).toHaveAttribute("data-emphasis", "true");
+    const hat = screen.getByRole("group", { name: "hat" });
+    expect(hat).not.toHaveAttribute("data-emphasis");
+    expect(hat.className).toContain("opacity-[.55]");
+  });
+  it("fills hits at 55% and accents fully in the row colour", () => {
+    render(
+      <DrumGrid
+        rows={[{ pattern: "k4", label: "kick", hits: ["hit", "accent"], color: "rgb(255 0 0)" }]}
+        playingStep={null}
+        onSet={() => {}}
+      />,
+    );
+    const hit = screen.getByRole("button", { name: "kick step 1: hit" });
+    const acc = screen.getByRole("button", { name: "kick step 2: accent" });
+    const fill = (b: HTMLElement) => b.querySelector<HTMLElement>("[data-fill]")!;
+    expect(fill(hit).style.opacity).toBe("0.55");
+    expect(fill(hit).style.backgroundColor).toBe("rgb(255, 0, 0)");
+    expect(fill(acc).style.opacity).toBe("1");
+    expect(fill(acc).style.backgroundColor).toBe("rgb(255, 0, 0)");
+  });
+});
