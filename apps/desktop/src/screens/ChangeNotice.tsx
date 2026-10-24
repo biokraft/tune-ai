@@ -104,7 +104,7 @@ export function ChangeNotice({
       aria-label={claude ? "Claude's change" : "Song file change"}
       data-source={claude ? "claude" : "file"}
       className={cn(
-        "glass-solid fixed right-4 top-[72px] z-40 flex w-[360px] flex-col gap-2 rounded-r p-3 text-ink",
+        "glass-solid absolute right-2 top-full z-40 mt-2 flex w-[360px] flex-col gap-2 rounded-r p-3 text-ink",
         claude ? "border-agent" : "border-line2",
       )}
       style={

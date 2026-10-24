@@ -33,7 +33,7 @@ const sameRange = (a: [number, number] | null, b: [number, number] | null) =>
 /**
  * The studio, filling the window without ever scrolling it: the transport on top, the timeline
  * under it, the module dock (one track or the mixer) when open, and Claude's change toast floating
- * top-right.
+ * top-right, under the transport.
  */
 export function StudioScreen({ view, store }: StudioScreenProps) {
   const { state, highlights, notice, noticeUndoable } = view;
@@ -139,26 +139,44 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
         {state.file_errors.length > 0 && <FileErrorBanner errors={state.file_errors} />}
         {view.message && <MessageBanner message={view.message} onDismiss={store.dismissMessage} />}
 
-        <LiveTransport
-          cursorBar={state.cursor_bar}
-          playing={state.playing}
-          bpm={Number(formatNumber(song.bpm))}
-          loopOn={loop !== null}
-          canLoop={loop !== null || selectedBars !== null}
-          canUndo={state.can_undo}
-          canRedo={state.can_redo}
-          songName={song.name}
-          totalBars={song.total_bars}
-          loopBars={loop}
-          loopName={loopSectionName(song.sections, loop)}
-          mixerOpen={dock?.kind === "mixer"}
-          onToggleMixer={toggleMixer}
-          onPlay={() => fire({ cmd: "play", args: { from_bar: null } })}
-          onStop={() => fire({ cmd: "stop" })}
-          onToggleLoop={toggleLoop}
-          onUndo={undo}
-          onRedo={redo}
-        />
+        {/* The toast hangs from the transport's box, so a banner above pushes both down. The box
+            makes no stacking context, so the transport's blur still sees the blobs. */}
+        <div className="relative flex-none">
+          <LiveTransport
+            cursorBar={state.cursor_bar}
+            playing={state.playing}
+            bpm={Number(formatNumber(song.bpm))}
+            loopOn={loop !== null}
+            canLoop={loop !== null || selectedBars !== null}
+            canUndo={state.can_undo}
+            canRedo={state.can_redo}
+            songName={song.name}
+            totalBars={song.total_bars}
+            loopBars={loop}
+            loopName={loopSectionName(song.sections, loop)}
+            mixerOpen={dock?.kind === "mixer"}
+            onToggleMixer={toggleMixer}
+            onPlay={() => fire({ cmd: "play", args: { from_bar: null } })}
+            onStop={() => fire({ cmd: "stop" })}
+            onToggleLoop={toggleLoop}
+            onUndo={undo}
+            onRedo={redo}
+          />
+          {showNotice && (
+            <ChangeNotice
+              notice={notice}
+              offered={state.offered}
+              canUndo={noticeUndoable}
+              song={song}
+              onUndo={undo}
+              onResolve={(reapply) => {
+                store.dismissNotice();
+                fire({ cmd: "resolve_offered", args: { reapply } });
+              }}
+              onDismiss={store.dismissNotice}
+            />
+          )}
+        </div>
 
         <section
           aria-label="Song arrangement"
@@ -189,21 +207,6 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
             send={store.send}
             fire={fire}
             onAction={dispatch}
-          />
-        )}
-
-        {showNotice && (
-          <ChangeNotice
-            notice={notice}
-            offered={state.offered}
-            canUndo={noticeUndoable}
-            song={song}
-            onUndo={undo}
-            onResolve={(reapply) => {
-              store.dismissNotice();
-              fire({ cmd: "resolve_offered", args: { reapply } });
-            }}
-            onDismiss={store.dismissNotice}
           />
         )}
       </div>

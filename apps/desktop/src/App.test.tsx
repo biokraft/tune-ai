@@ -39,9 +39,13 @@ describe("App", () => {
 
   it("keeps the transport and the change notice in view: the window never scrolls", () => {
     setup();
-    const shell = screen.getByRole("toolbar", { name: "Transport" }).parentElement;
+    const shell = screen.getByRole("region", { name: "Song arrangement" }).parentElement;
     expect(shell).toHaveClass("h-screen", "overflow-hidden");
-    expect(screen.getByRole("status", { name: "Song file change" })).toHaveClass("fixed");
+    const toast = screen.getByRole("status", { name: "Song file change" });
+    expect(toast).toHaveClass("absolute", "top-full");
+    expect(toast.parentElement).toContainElement(
+      screen.getByRole("toolbar", { name: "Transport" }),
+    );
   });
 
   it("Space calls play, and stop while playing", () => {

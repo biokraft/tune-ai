@@ -110,7 +110,7 @@ describe("StudioScreen mixer strips", () => {
 describe("StudioScreen shell", () => {
   it("fills the window without scrolling it", () => {
     render303();
-    const shell = screen.getByRole("toolbar", { name: "Transport" }).parentElement!;
+    const shell = screen.getByRole("region", { name: "Song arrangement" }).parentElement!;
     expect(shell).toHaveClass("h-screen", "overflow-hidden", "min-w-[1280px]");
     expect(shell.querySelectorAll('.blob[aria-hidden="true"]')).toHaveLength(3);
   });
@@ -118,21 +118,42 @@ describe("StudioScreen shell", () => {
   it("stacks the transport, the timeline, the dock and the toast", () => {
     render303();
     fireEvent.click(screen.getByRole("button", { name: "Open acid" }));
-    const shell = screen.getByRole("toolbar", { name: "Transport" }).parentElement!;
+    const shell = screen.getByRole("region", { name: "Song arrangement" }).parentElement!;
+    const transport = screen.getByRole("toolbar", { name: "Transport" });
     const order = [
-      screen.getByRole("toolbar", { name: "Transport" }),
+      transport.parentElement!,
       screen.getByRole("region", { name: "Song arrangement" }),
       screen.getByRole("region", { name: "Dock" }),
-      screen.getByRole("status", { name: "Song file change" }),
     ];
     expect(order.map((el) => el.parentElement)).toEqual(order.map(() => shell));
     const children = [...shell.children];
     const at = order.map((el) => children.indexOf(el));
     expect(at).toEqual([...at].sort((a, b) => a - b));
+    // The toast floats from the transport's own box, over the timeline.
+    const toast = screen.getByRole("status", { name: "Song file change" });
+    expect(toast.parentElement).toBe(transport.parentElement);
+    expect([...toast.parentElement!.children].indexOf(toast)).toBeGreaterThan(
+      [...toast.parentElement!.children].indexOf(transport),
+    );
     expect(screen.getByRole("region", { name: "Song arrangement" })).toHaveClass(
       "min-h-0",
       "flex-1",
     );
+  });
+
+  it("anchors the toast under the transport, below any banner", () => {
+    render303(
+      stateEvent((s) => {
+        s.file_errors = [{ line: 3, column: 1, message: "expected a table" }];
+      }),
+    );
+    const transport = screen.getByRole("toolbar", { name: "Transport" });
+    const toast = screen.getByRole("status", { name: "Song file change" });
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(toast.parentElement).toBe(transport.parentElement);
+    expect(toast).toHaveClass("absolute", "top-full");
+    expect(toast).not.toHaveClass("fixed");
+    expect(toast.className).not.toMatch(/top-\[72px\]/);
   });
 
   it("uses blur only on the transport, the timeline and the dock", () => {
