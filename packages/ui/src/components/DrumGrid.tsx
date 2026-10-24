@@ -21,9 +21,33 @@ export type DrumGridProps = {
 
 const DEFAULT_COLOR = "rgb(var(--ink))";
 
+/** The row head: colour bar and voice name, as the DrumGrid board's `.rh`. */
+const HEAD = "flex w-[104px] shrink-0 items-center gap-2";
+/** A step cell's slot: cells share the width, with a wider gap before each beat. */
+const slot = (i: number) => cn("min-w-[18px] flex-1", i > 0 && i % 4 === 0 && "ml-2");
+
 export function DrumGrid({ rows, playingStep, onSet }: DrumGridProps) {
+  const steps = rows.reduce((m, r) => Math.max(m, r.hits.length), 0);
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex w-full flex-col gap-1.5">
+      <div aria-hidden="true" className="flex items-center gap-3">
+        <span className={HEAD} />
+        <div className="flex flex-1 gap-1">
+          {Array.from({ length: steps }, (_, i) => (
+            <span
+              key={i}
+              data-step-number
+              className={cn(
+                slot(i),
+                "text-center font-mono text-[10px] leading-4 tabular-nums",
+                playingStep === i ? "font-semibold text-play" : "text-ink3",
+              )}
+            >
+              {i + 1}
+            </span>
+          ))}
+        </div>
+      </div>
       {rows.map((row) => {
         const color = row.color ?? DEFAULT_COLOR;
         return (
@@ -37,13 +61,18 @@ export function DrumGrid({ rows, playingStep, onSet }: DrumGridProps) {
               !row.emphasis && "opacity-[.55] hover:opacity-100 focus-within:opacity-100",
             )}
           >
-            <span
-              className="w-16 shrink-0 truncate text-[10.5px] font-bold uppercase leading-none tracking-[.1em] text-ink2"
-              style={row.emphasis ? { color } : undefined}
-            >
-              {row.label}
+            <span className={HEAD} title={`${row.label} · ${row.pattern}`}>
+              <span
+                aria-hidden="true"
+                data-color-bar
+                className="h-6 w-1 shrink-0 rounded-sm"
+                style={{ backgroundColor: color }}
+              />
+              <span className="min-w-0 truncate text-[12px] font-bold leading-none text-ink">
+                {row.label}
+              </span>
             </span>
-            <div className="flex gap-1">
+            <div className="flex flex-1 gap-1">
               {row.hits.map((hit, i) => {
                 const highlighted = row.highlighted?.has(i) ?? false;
                 const playing = playingStep === i;
@@ -57,9 +86,9 @@ export function DrumGrid({ rows, playingStep, onSet }: DrumGridProps) {
                     data-highlight={highlighted ? "claude" : undefined}
                     onClick={() => onSet(row.pattern, i, nextHit(hit))}
                     className={cn(
-                      "relative h-7 w-7 rounded-rs border transition-none",
+                      slot(i),
+                      "relative h-8 rounded-rs border transition-none",
                       hit === "rest" ? "border-line bg-ink/[.04]" : "border-transparent",
-                      i % 4 === 0 && "ml-1.5",
                       playing && "outline outline-2 -outline-offset-1 outline-play",
                       highlighted && "ring-2 ring-agent",
                       "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
