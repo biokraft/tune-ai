@@ -80,4 +80,20 @@ describe("TrackStrip", () => {
     expect(screen.getByRole("slider", { name: "Delay" })).toBeInTheDocument();
     expect(screen.getByText("Duck source")).toBeInTheDocument();
   });
+  it("compact marks the narrow strip and keeps every control", () => {
+    render(<TrackStrip track={track} onMix={vi.fn()} strip={stripParams} compact />);
+    expect(screen.getByRole("group", { name: "Track acid" })).toHaveAttribute(
+      "data-compact",
+      "true",
+    );
+    for (const name of ["Gain", "Pan", "Delay", "Reverb", "Duck"]) {
+      expect(screen.getByRole("slider", { name })).toBeInTheDocument();
+    }
+  });
+  it("fader keyboard step commits the gain", () => {
+    const onMix = vi.fn();
+    render(<TrackStrip track={track} onMix={onMix} />);
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Gain" }), { key: "ArrowUp" });
+    expect(onMix).toHaveBeenCalledWith({ gain_db: 0.5 });
+  });
 });
