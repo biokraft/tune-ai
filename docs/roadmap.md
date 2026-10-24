@@ -24,8 +24,10 @@ Plans 1–5 are merged on `main`:
   ringed in cyan and an Undo.
 - `songs/first-acid` mixed to −8.8 LUFS, −1.5 dBTP.
 
-The current UI is a working prototype. Its look, an instrument faceplate, is
-a placeholder.
+Plan 6 reskinned the studio onto the Claude Design "Dusk Glass" look: a
+glass transport, the timeline, a dock under the timeline with Sound, Steps
+and Mixer tabs, and a toast card for Claude's edits. It added no features,
+so the studio is still a working prototype until Phase 4 replaces it.
 
 ## Direction
 
