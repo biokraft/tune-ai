@@ -2,11 +2,12 @@ import {
   AcidStepSequencer,
   cn,
   Knob,
+  Segmented,
   type AcidStep,
   type AcidStepSequencerProps,
   type ParamSpecView,
 } from "@tune/ui";
-import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { Command, ParamView, SongView, TrackView } from "../client/protocol";
 import { highlightedSteps, patternIn, sentenceCase, stepInPattern } from "../lib/song";
 import type { HighlightKind } from "../store/studioStore";
@@ -103,6 +104,11 @@ function TrackPanel({
     [track.params, dist?.params],
   );
 
+  const modeOptions = useMemo(
+    () => (dist?.modes ?? []).map((m) => ({ value: m, label: sentenceCase(m) })),
+    [dist?.modes],
+  );
+
   useEffect(() => () => clearTimeout(noteTimer.current), []);
 
   const showNote = (text: string) => {
@@ -195,11 +201,12 @@ function TrackPanel({
               Distortion
             </legend>
             {DIST.map((id) => knob(byShortId(dist.params, id), "sm"))}
-            <ModeSwitch
-              modes={dist.modes}
-              mode={dist.mode}
+            <Segmented
+              label="Distortion mode"
+              options={modeOptions}
+              value={dist.mode}
               highlight={highlights.get(`tracks.${track.id}.dist.mode`) ?? null}
-              onPick={(mode) =>
+              onChange={(mode) =>
                 void send({ cmd: "set_fx_mode", args: { track: track.id, mode } }).catch(() => {})
               }
             />
@@ -244,71 +251,6 @@ function TrackPanel({
         )}
       </div>
     </section>
-  );
-}
-
-type ModeSwitchProps = {
-  modes: string[];
-  mode: string;
-  highlight: HighlightKind | null;
-  onPick(mode: string): void;
-};
-
-/** A three-position hardware switch: one radio per distortion mode, arrows move between them. */
-function ModeSwitch({ modes, mode, highlight, onPick }: ModeSwitchProps) {
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const i = modes.indexOf(mode);
-    const step =
-      e.key === "ArrowDown" || e.key === "ArrowRight"
-        ? 1
-        : e.key === "ArrowUp" || e.key === "ArrowLeft"
-          ? -1
-          : 0;
-    if (step === 0) return;
-    e.preventDefault();
-    const next = modes[(i + step + modes.length) % modes.length]!;
-    onPick(next);
-    e.currentTarget.querySelector<HTMLButtonElement>(`[data-mode="${next}"]`)?.focus();
-  };
-  return (
-    <div
-      role="radiogroup"
-      aria-label="Distortion mode"
-      data-highlight={highlight ?? undefined}
-      onKeyDown={onKeyDown}
-      className={cn(
-        "flex flex-col gap-1 self-center rounded-sm p-1",
-        highlight === "claude" && "ring-2 ring-claude",
-        highlight === "external" && "outline-dashed outline-2 outline-claude",
-      )}
-    >
-      {modes.map((m) => {
-        const on = m === mode;
-        return (
-          <button
-            key={m}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            tabIndex={on ? 0 : -1}
-            data-mode={m}
-            onClick={() => !on && onPick(m)}
-            className={cn("flex items-center gap-2 rounded-sm px-1 text-left", focusRing)}
-          >
-            <span
-              aria-hidden="true"
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                on ? "bg-led shadow-[0_0_6px_rgb(var(--led))]" : "bg-black/50",
-              )}
-            />
-            <span className="font-label text-sm leading-none text-silkscreen">
-              {sentenceCase(m)}
-            </span>
-          </button>
-        );
-      })}
-    </div>
   );
 }
 
