@@ -16,6 +16,7 @@ import { useStudioKeys } from "../lib/useStudioKeys";
 import type { StudioStore, StudioView } from "../store/studioStore";
 import { usePlayheadPosition, usePlayheadStep, useStudioSelector } from "../store/useStudio";
 import { FileErrorBanner, LostBanner, MessageBanner } from "./Banners";
+import { Blobs } from "./Blobs";
 import { ChangeNotice, hasChangeNotice } from "./ChangeNotice";
 import { dockReducer, dockSection } from "./dock/dockState";
 import { Dock } from "./dock/Dock";
@@ -226,35 +227,6 @@ function laneLabelsOf(tracks: TrackView[], mix: MixView): Record<string, string>
   for (const p of mix.reverb) out[`mix.${p.id}`] = `Reverb ${p.label.toLowerCase()}`;
   for (const p of mix.master_params) out[`mix.${p.id}`] = sentenceCase(p.label);
   return out;
-}
-
-/** Three soft colour fields behind the glass. */
-function Blobs() {
-  return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-      <div
-        aria-hidden="true"
-        className="blob"
-        style={{
-          left: "-10%",
-          top: "45%",
-          width: 620,
-          height: 520,
-          background: "rgb(var(--kick))",
-        }}
-      />
-      <div
-        aria-hidden="true"
-        className="blob"
-        style={{ left: "36%", top: -220, width: 720, height: 460, background: "rgb(var(--ride))" }}
-      />
-      <div
-        aria-hidden="true"
-        className="blob"
-        style={{ left: "75%", top: "62%", width: 560, height: 460, background: "rgb(var(--acid))" }}
-      />
-    </div>
-  );
 }
 
 /** The section under the playhead (or the cursor): where a knob release would land. */
