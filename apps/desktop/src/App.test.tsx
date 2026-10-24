@@ -150,6 +150,8 @@ describe("App", () => {
     );
     expect(within(banner).getByText("12:5 expected a value")).toBeInTheDocument();
     expect(within(banner).getByText("30:1 unknown pattern `a9`")).toBeInTheDocument();
+    // A long list scrolls inside the banner rather than pushing the dock off-screen.
+    expect(within(banner).getByRole("list")).toHaveClass("max-h-[30vh]", "overflow-auto");
   });
 
   it("shows file errors instead of the song list when the open song does not parse", () => {
