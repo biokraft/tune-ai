@@ -6,13 +6,22 @@ export { AcidStepSequencer, type AcidStepSequencerProps } from "./components/Aci
 export { DrumGrid, type DrumGridProps, type DrumRow } from "./components/DrumGrid";
 export {
   dropIndex,
+  fitPxPerBar,
   formatPosition,
   formatTime,
+  HEADER_W,
+  MAX_PX_PER_BAR,
+  MIN_PX_PER_BAR,
   PX_PER_BAR,
+  rulerStep,
   snapBars,
   type SectionView,
 } from "./lib/arrange";
-export { Arrangement, type ArrangementProps } from "./components/Arrangement";
+export {
+  Arrangement,
+  type ArrangementProps,
+  type ArrangementTrack,
+} from "./components/Arrangement";
 export { TrackStrip, type TrackStripProps } from "./components/TrackStrip";
 export { TransportBar, type TransportBarProps } from "./components/TransportBar";
 export { FxPanel, type FxPanelProps } from "./components/FxPanel";

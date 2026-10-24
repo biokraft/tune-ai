@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   dropIndex,
+  fitPxPerBar,
+  HEADER_W,
   holdPoints,
+  MAX_PX_PER_BAR,
+  MIN_PX_PER_BAR,
+  rulerStep,
   formatPosition,
   formatTime,
   snapBars,
@@ -37,6 +42,33 @@ describe("arrange", () => {
     expect(dropIndex(s, 10)).toBe(0);
     expect(dropIndex(s, 300)).toBe(2);
     expect(dropIndex(s, 5000)).toBe(3);
+  });
+  it("drops by section midpoints at the drawn bar width", () => {
+    const s = [sec(0, 16), sec(16, 16), sec(32, 32)];
+    // Midpoints at 20 px per bar: 160, 480, 960; at the default 12: 96, 288, 576.
+    expect(dropIndex(s, 300, 20)).toBe(1);
+    expect(dropIndex(s, 300)).toBe(2);
+    expect(dropIndex(s, 500, 20)).toBe(2);
+  });
+  it("fits the song to the width beside the track headers, within limits", () => {
+    expect(HEADER_W).toBe(168);
+    expect(MIN_PX_PER_BAR).toBe(6);
+    expect(MAX_PX_PER_BAR).toBe(40);
+    expect(fitPxPerBar(1168, 100)).toBe(10);
+    expect(fitPxPerBar(1168, 4)).toBe(40);
+    expect(fitPxPerBar(1168, 1000)).toBe(6);
+    expect(fitPxPerBar(1168, 0)).toBe(40);
+  });
+  it("falls back to 12 px per bar without a measured width", () => {
+    expect(fitPxPerBar(0, 144)).toBe(12);
+    expect(fitPxPerBar(-5, 144)).toBe(12);
+  });
+  it("labels the ruler every 4 bars from 16 px per bar, else every 8 or 16, 40 px apart", () => {
+    expect(rulerStep(40)).toBe(4);
+    expect(rulerStep(16)).toBe(4);
+    expect(rulerStep(12)).toBe(8);
+    expect(rulerStep(6)).toBe(8);
+    expect(rulerStep(4)).toBe(16);
   });
   it("holds lane points flat to the section edges", () => {
     expect(

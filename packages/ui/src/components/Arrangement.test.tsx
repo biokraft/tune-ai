@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { SectionView } from "../lib/arrange";
@@ -22,6 +22,8 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
     onDuplicate: vi.fn(),
     onDelete: vi.fn(),
     onSetPlay: vi.fn(),
+    onOpenTrack: vi.fn(),
+    onMix: vi.fn(),
   };
   const utils = render(
     <div>
@@ -29,8 +31,8 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
       <Arrangement
         sections={sections}
         tracks={[
-          { id: "acid", instrument: "acid303" },
-          { id: "drums", instrument: "drums" },
+          { id: "acid", instrument: "acid303", mute: false, solo: false },
+          { id: "drums", instrument: "drums", mute: false, solo: false },
         ]}
         patterns={[
           { id: "a1", track: "acid" },
@@ -40,6 +42,7 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
         playhead={0}
         selected={null}
         loop={null}
+        openTrack={null}
         {...fns}
         {...extra}
       />
@@ -179,7 +182,7 @@ describe("Arrangement", () => {
     const heads = screen.getAllByRole("rowheader");
     expect(heads).toHaveLength(2);
     expect(heads[0]).toHaveTextContent("acid");
-    expect(heads[0]).toHaveTextContent("acid303");
+    expect(heads[0]).toHaveTextContent("Acid 303");
     expect(heads[1]).toHaveTextContent("drums");
     expect(screen.getByRole("rowgroup", { name: "Tracks" })).toHaveClass("sticky", "left-0");
   });
@@ -243,5 +246,81 @@ describe("Arrangement", () => {
     screen.getByRole("button", { name: "outside" }).focus();
     await user.keyboard("{Delete}");
     expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it("names the frame with its section and track counts", () => {
+    setup([sec("a", 0, 16), sec("b", 16, 16)]);
+    expect(screen.getByText("Arrangement")).toBeInTheDocument();
+    expect(screen.getByText("2 sections · 2 tracks")).toBeInTheDocument();
+  });
+
+  it("a track header opens its track", () => {
+    const { onOpenTrack } = setup([sec("a", 0, 16)]);
+    fireEvent.click(screen.getByRole("button", { name: "Open acid" }));
+    expect(onOpenTrack).toHaveBeenCalledWith("acid");
+  });
+
+  it("the open track's header is pressed", () => {
+    setup([sec("a", 0, 16)], { openTrack: "drums" });
+    expect(screen.getByRole("button", { name: "Open drums" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Open acid" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("mute and solo in a header mix that track", () => {
+    const { onMix, onOpenTrack } = setup([sec("a", 0, 16)]);
+    const head = screen.getAllByRole("rowheader")[0]!;
+    fireEvent.click(within(head).getByRole("button", { name: "M" }));
+    expect(onMix).toHaveBeenLastCalledWith("acid", { mute: true });
+    fireEvent.click(within(head).getByRole("button", { name: "S" }));
+    expect(onMix).toHaveBeenLastCalledWith("acid", { solo: true });
+    expect(onOpenTrack).not.toHaveBeenCalled();
+  });
+
+  it("the header shows the track's mute and solo state", () => {
+    setup([sec("a", 0, 16)], {
+      tracks: [{ id: "acid", instrument: "acid303", mute: true, solo: false }],
+    });
+    const head = screen.getByRole("rowheader");
+    expect(within(head).getByRole("button", { name: "M" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(head).getByRole("button", { name: "S" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("the loop is a band over the rows with a bracket in the ruler", () => {
+    setup([sec("a", 0, 16), sec("b", 16, 16)], { loop: [16, 32] });
+    const bracket = screen.getByTestId("loop-range");
+    expect(bracket).toHaveAttribute("x", String(16 * 12));
+    expect(bracket).toHaveAttribute("width", String(16 * 12));
+    const band = screen.getByTestId("loop-band");
+    expect(band).toHaveAttribute("x", String(16 * 12));
+    expect(band).toHaveAttribute("width", String(16 * 12));
+  });
+
+  it("the playhead glows and spans the ruler and the rows", () => {
+    setup([sec("a", 0, 16)], { playhead: 2 });
+    const ph = screen.getByTestId("playhead");
+    expect(ph).toHaveAttribute("stroke", "rgb(var(--play))");
+    expect(ph).toHaveAttribute("y1", "0");
+    // Ruler 24 + sections 32 + two 46 px rows.
+    expect(ph).toHaveAttribute("y2", String(24 + 32 + 2 * 46));
+    expect(ph.closest("svg")!.getAttribute("style")).toContain(
+      "drop-shadow(0 0 6px rgb(var(--play) / .8))",
+    );
+  });
+
+  it("labels the ruler every 8 bars at 12 px per bar", () => {
+    setup([sec("a", 0, 32)]);
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getByText("9")).toBeInTheDocument();
+    expect(screen.getByText("17")).toBeInTheDocument();
+    expect(screen.queryByText("5")).toBeNull();
   });
 });
