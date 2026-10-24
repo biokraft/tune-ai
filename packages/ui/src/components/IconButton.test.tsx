@@ -23,6 +23,10 @@ describe("IconButton", () => {
       </IconButton>,
     );
     expect(screen.getByRole("button", { name: "Loop" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Loop" })).toHaveClass(
+      "bg-ink/[.12]",
+      "border-line2",
+    );
     rerender(
       <IconButton label="Loop" pressed={false} onClick={() => {}}>
         <svg />
