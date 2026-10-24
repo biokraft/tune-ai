@@ -23,6 +23,7 @@ import {
   sectionBars,
   stepInPattern,
   STEPS_PER_BAR,
+  whyNoDuck,
 } from "../lib/song";
 import { useStudioKeys } from "../lib/useStudioKeys";
 import type { HighlightKind, StudioStore, StudioView } from "../store/studioStore";
@@ -288,15 +289,6 @@ function Mixer({ song, highlights, automatedIn, fire, send }: MixerProps) {
       />
     </aside>
   );
-}
-
-/**
- * Why `track` gets no duck knob: the duck source would duck itself, and without a source nothing
- * ducks. Validation refuses both, so a drag would be heard but its release never written.
- */
-function whyNoDuck(source: string | null, track: string): string | null {
-  if (source === null) return "No kick";
-  return source === track ? "Duck source" : null;
 }
 
 /** One mixer channel; re-renders only when its track changes. */
