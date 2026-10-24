@@ -88,7 +88,8 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
 
   const highlightedPaths = useMemo(() => new Set(highlights.keys()), [highlights]);
   const tracks = useMemo(
-    () => song.tracks.map((t) => ({ id: t.id, instrument: t.instrument })),
+    () =>
+      song.tracks.map((t) => ({ id: t.id, instrument: t.instrument, mute: t.mute, solo: t.solo })),
     [song.tracks],
   );
   const patterns = useMemo(
@@ -112,6 +113,19 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
       },
       onSetPlay: (sec: number, track: string, pattern: string | null) =>
         fire({ cmd: "set_section_play", args: { section: sec, track, pattern } }),
+      onMix: (track: string, patch: { mute?: boolean; solo?: boolean }) =>
+        fire({
+          cmd: "set_track_mix",
+          args: {
+            track,
+            gain_db: null,
+            pan: null,
+            mute: patch.mute ?? null,
+            solo: patch.solo ?? null,
+          },
+        }),
+      // Task 9 opens the track in the dock.
+      onOpenTrack: noop,
     }),
     [store, fire],
   );
@@ -168,7 +182,10 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
         )}
       </header>
 
-      <section aria-label="Song arrangement" className="border-b border-black/40 py-2">
+      <section
+        aria-label="Song arrangement"
+        className="glass mx-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-r"
+      >
         <LiveArrangement
           sections={song.sections}
           tracks={tracks}
@@ -176,6 +193,7 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
           cursorBar={state.cursor_bar}
           selected={view.selectedSection}
           loop={loop}
+          openTrack={null}
           highlighted={highlightedPaths}
           {...arrangementHandlers}
         />
