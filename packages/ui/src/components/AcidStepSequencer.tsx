@@ -172,13 +172,13 @@ export function AcidStepSequencer({
   };
 
   const pip = cn(
-    "h-5 w-full rounded-rs border text-[9.5px] font-bold uppercase leading-none tracking-[.1em]",
+    "h-6 w-full rounded-[6px] border text-[10px] font-bold uppercase leading-none tracking-[.06em]",
     "disabled:opacity-30",
     focusRing,
   );
 
   return (
-    <div ref={root} role="group" aria-label="303 step sequencer" className="flex">
+    <div ref={root} role="group" aria-label="303 step sequencer" className="flex w-full">
       {steps.map((step, i) => {
         const playing = playingStep === i;
         const lit = highlighted?.has(i) ?? false;
@@ -191,7 +191,9 @@ export function AcidStepSequencer({
             data-playing={playing}
             data-highlight={lit ? "claude" : undefined}
             className={cn(
-              "relative flex w-12 shrink-0 flex-col items-stretch gap-1 border-l px-1 pb-1 pt-2",
+              // Columns share the dock's width, as the Seq303 board's `.sc`; past 16 steps on a
+              // narrow dock they hold 44 px and the tab scrolls sideways.
+              "relative flex min-w-[44px] flex-1 flex-col items-stretch gap-1 border-l px-1 pb-1 pt-2",
               i % 4 === 0 ? "border-line2" : "border-line",
               lit && "outline outline-2 -outline-offset-2 outline-agent",
             )}
@@ -203,6 +205,16 @@ export function AcidStepSequencer({
                 className="absolute inset-x-0 top-0 h-[3px] bg-play shadow-[0_0_8px_rgb(var(--play)/.6)]"
               />
             )}
+            <span
+              aria-hidden="true"
+              data-step-number
+              className={cn(
+                "text-center font-mono text-[10px] leading-4 tabular-nums",
+                playing ? "font-semibold text-play" : "text-ink3",
+              )}
+            >
+              {n}
+            </span>
             <Popover.Root open={open === i} onOpenChange={(o) => setOpen(o ? i : null)}>
               <Popover.Trigger asChild>
                 <button
@@ -211,7 +223,7 @@ export function AcidStepSequencer({
                   aria-label={`Step ${n} note`}
                   onKeyDown={(e) => onNoteKey(i, step, e)}
                   className={cn(
-                    "h-8 rounded-rs bg-ink/[.06] font-mono text-sm tabular-nums",
+                    "h-10 rounded-rs bg-ink/[.06] font-mono text-[15px] font-semibold tabular-nums",
                     rest ? "text-ink3" : "text-ink",
                     focusRing,
                   )}
@@ -259,13 +271,19 @@ export function AcidStepSequencer({
               aria-pressed={step.slide}
               disabled={rest}
               onClick={() => onChange(i, { ...step, slide: !step.slide })}
-              className={cn(
-                pip,
-                step.slide ? "border-transparent text-bg" : "border-line text-ink2",
-              )}
-              style={step.slide ? { backgroundColor: "rgb(var(--ink))" } : undefined}
+              className={cn(pip, step.slide ? "text-ink" : "border-line text-ink2")}
+              // The board's slide: a tint of the track colour with a strong edge, so it reads
+              // apart from the solid accent.
+              style={
+                step.slide
+                  ? {
+                      backgroundColor: `color-mix(in srgb, ${color} 18%, transparent)`,
+                      borderColor: `color-mix(in srgb, ${color} 70%, transparent)`,
+                    }
+                  : undefined
+              }
             >
-              Sld
+              Slide
             </button>
           </div>
         );

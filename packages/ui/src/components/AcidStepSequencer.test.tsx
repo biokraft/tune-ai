@@ -226,4 +226,13 @@ describe("AcidStepSequencer columns", () => {
     expect(container.querySelectorAll("[data-playhead-bar]")).toHaveLength(1);
     expect(container.querySelector("[data-step='1'] [data-playhead-bar]")).not.toBeNull();
   });
+  it("numbers each column, the playing one in the play colour", () => {
+    const { container } = render(
+      <AcidStepSequencer patternId="c" steps={cols} playingStep={1} onChange={() => {}} />,
+    );
+    const nums = container.querySelectorAll("[data-step-number]");
+    expect([...nums].map((n) => n.textContent)).toEqual(["1", "2"]);
+    expect(nums[1]).toHaveClass("text-play");
+    expect(nums[0]).toHaveClass("text-ink3");
+  });
 });
