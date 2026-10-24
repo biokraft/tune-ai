@@ -205,3 +205,25 @@ describe("AcidStepSequencer", () => {
     expect(onChange).toHaveBeenLastCalledWith(0, { note: 36, accent: false, slide: false });
   });
 });
+
+describe("AcidStepSequencer columns", () => {
+  const cols = [
+    { note: 36, accent: true, slide: false },
+    { note: null, accent: false, slide: false },
+  ];
+  it("lights the step light for sounding steps only", () => {
+    const { container } = render(
+      <AcidStepSequencer patternId="c" steps={cols} playingStep={null} onChange={() => {}} />,
+    );
+    const lights = container.querySelectorAll("[data-step-light]");
+    expect(lights[0]).toHaveAttribute("data-step-light", "on");
+    expect(lights[1]).toHaveAttribute("data-step-light", "off");
+  });
+  it("puts a play bar on the playing column", () => {
+    const { container } = render(
+      <AcidStepSequencer patternId="c" steps={cols} playingStep={1} onChange={() => {}} />,
+    );
+    expect(container.querySelectorAll("[data-playhead-bar]")).toHaveLength(1);
+    expect(container.querySelector("[data-step='1'] [data-playhead-bar]")).not.toBeNull();
+  });
+});

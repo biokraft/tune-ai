@@ -4,15 +4,14 @@ import {
   Knob,
   Segmented,
   type AcidStep,
-  type AcidStepSequencerProps,
   type ParamSpecView,
 } from "@tune/ui";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { Command, ParamView, SongView, TrackView } from "../client/protocol";
-import { highlightedSteps, patternIn, sentenceCase, stepInPattern } from "../lib/song";
+import { highlightedSteps, patternIn, sentenceCase } from "../lib/song";
 import type { HighlightKind } from "../store/studioStore";
-import { usePlayheadStep } from "../store/useStudio";
 import { BIG, SMALL } from "./dock/SoundTab";
+import { LiveSequencer } from "./dock/StepsTab";
 import { HelpStrip } from "./HelpStrip";
 import { useParamDrag } from "./useParamDrag";
 
@@ -262,21 +261,5 @@ function Screws() {
         <span key={p} aria-hidden="true" className={cn("screw absolute", p)} />
       ))}
     </>
-  );
-}
-
-type LiveSequencerProps = Omit<AcidStepSequencerProps, "playingStep"> & {
-  song: SongView;
-  section: number | null;
-};
-
-/** The step sequencer, lighting the sounding step as the playhead moves. */
-function LiveSequencer({ song, section, ...rest }: LiveSequencerProps) {
-  const step = usePlayheadStep();
-  return (
-    <AcidStepSequencer
-      {...rest}
-      playingStep={stepInPattern(song, section, step, rest.steps.length)}
-    />
   );
 }

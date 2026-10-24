@@ -13,6 +13,8 @@ export type AcidStepSequencerProps = {
   playingStep: number | null;
   highlighted?: Set<number>;
   onChange: (index: number, step: AcidStep) => void;
+  /** CSS colour of lit step lights and flags; defaults to the acid token. */
+  color?: string;
 };
 
 const DEFAULT_NOTE = 36;
@@ -20,7 +22,7 @@ const MIN_OCT = -1;
 const MAX_OCT = 9;
 
 const focusRing =
-  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-silkscreen";
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-play";
 
 const octaveOf = (midi: number) => Math.floor(midi / 12) - 1;
 
@@ -36,8 +38,7 @@ type PianoProps = {
 
 function Piano({ step, lastNote, onPick, onClose }: PianoProps) {
   const [octave, setOctave] = useState(octaveOf(step.note ?? lastNote));
-  const key =
-    "rounded-sm border border-border bg-faceplate px-2 py-1 font-value text-sm text-silkscreen";
+  const key = "rounded-rs border border-line2 bg-glass2 px-2 py-1 font-mono text-sm text-ink";
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -50,11 +51,7 @@ function Piano({ step, lastNote, onPick, onClose }: PianoProps) {
         >
           −
         </button>
-        <span
-          role="status"
-          aria-label="Octave"
-          className="font-value text-sm tabular-nums text-silkscreen"
-        >
+        <span role="status" aria-label="Octave" className="font-mono text-sm tabular-nums text-ink">
           {octave}
         </span>
         <button
@@ -80,8 +77,8 @@ function Piano({ step, lastNote, onPick, onClose }: PianoProps) {
               className={cn(
                 key,
                 focusRing,
-                pc.includes("#") && "bg-chassis",
-                step.note === midi && "border-led",
+                pc.includes("#") && "bg-bg/60",
+                step.note === midi && "border-play",
                 "disabled:opacity-40",
               )}
               onClick={() => {
@@ -114,6 +111,7 @@ export function AcidStepSequencer({
   playingStep,
   highlighted,
   onChange,
+  color = "rgb(var(--acid))",
 }: AcidStepSequencerProps) {
   const root = useRef<HTMLDivElement>(null);
   const lastNotes = useRef<Map<number, number>>(new Map());
@@ -173,14 +171,14 @@ export function AcidStepSequencer({
     e.stopPropagation();
   };
 
-  const toggle = cn(
-    "h-6 w-full rounded-sm border border-border font-label text-xs leading-none text-silkscreen",
+  const pip = cn(
+    "h-5 w-full rounded-rs border text-[9.5px] font-bold uppercase leading-none tracking-[.1em]",
     "disabled:opacity-30",
     focusRing,
   );
 
   return (
-    <div ref={root} role="group" aria-label="303 step sequencer" className="flex gap-1">
+    <div ref={root} role="group" aria-label="303 step sequencer" className="flex">
       {steps.map((step, i) => {
         const playing = playingStep === i;
         const lit = highlighted?.has(i) ?? false;
@@ -193,15 +191,18 @@ export function AcidStepSequencer({
             data-playing={playing}
             data-highlight={lit ? "claude" : undefined}
             className={cn(
-              "flex w-12 flex-col items-stretch gap-1 rounded-sm p-1",
-              i % 4 === 0 && i > 0 && "ml-2",
-              lit && "ring-2 ring-claude",
+              "relative flex w-12 shrink-0 flex-col items-stretch gap-1 border-l px-1 pb-1 pt-2",
+              i % 4 === 0 ? "border-line2" : "border-line",
+              lit && "outline outline-2 -outline-offset-2 outline-agent",
             )}
           >
-            <span
-              aria-hidden="true"
-              className={cn("mx-auto h-2 w-2 rounded-full", playing ? "bg-led" : "bg-border")}
-            />
+            {playing && (
+              <span
+                data-playhead-bar
+                aria-hidden="true"
+                className="absolute inset-x-0 top-0 h-[3px] bg-play shadow-[0_0_8px_rgb(var(--play)/.6)]"
+              />
+            )}
             <Popover.Root open={open === i} onOpenChange={(o) => setOpen(o ? i : null)}>
               <Popover.Trigger asChild>
                 <button
@@ -210,8 +211,8 @@ export function AcidStepSequencer({
                   aria-label={`Step ${n} note`}
                   onKeyDown={(e) => onNoteKey(i, step, e)}
                   className={cn(
-                    "h-9 rounded-sm border border-border bg-chassis font-value text-sm tabular-nums",
-                    rest ? "text-silkscreen/50" : "text-silkscreen",
+                    "h-8 rounded-rs bg-ink/[.06] font-mono text-sm tabular-nums",
+                    rest ? "text-ink3" : "text-ink",
                     focusRing,
                   )}
                 >
@@ -221,7 +222,7 @@ export function AcidStepSequencer({
               <Popover.Portal>
                 <Popover.Content
                   sideOffset={6}
-                  className="z-50 w-56 rounded-md border border-border bg-faceplate p-3 shadow-lg"
+                  className="glass-solid z-50 w-56 rounded-rs p-3 text-ink"
                 >
                   <Piano
                     step={step}
@@ -232,13 +233,23 @@ export function AcidStepSequencer({
                 </Popover.Content>
               </Popover.Portal>
             </Popover.Root>
+            <span
+              aria-hidden="true"
+              data-step-light={rest ? "off" : "on"}
+              className="mx-auto h-2 w-2 rounded-full bg-ink/[.12]"
+              style={rest ? undefined : { backgroundColor: color, boxShadow: `0 0 8px ${color}` }}
+            />
             <button
               type="button"
               aria-label={`Step ${n} accent`}
               aria-pressed={step.accent}
               disabled={rest}
               onClick={() => onChange(i, { ...step, accent: !step.accent })}
-              className={cn(toggle, step.accent && "border-led bg-led text-chassis")}
+              className={cn(
+                pip,
+                step.accent ? "border-transparent text-bg" : "border-line text-ink2",
+              )}
+              style={step.accent ? { backgroundColor: color } : undefined}
             >
               Acc
             </button>
@@ -248,7 +259,11 @@ export function AcidStepSequencer({
               aria-pressed={step.slide}
               disabled={rest}
               onClick={() => onChange(i, { ...step, slide: !step.slide })}
-              className={cn(toggle, step.slide && "border-slide bg-slide text-chassis")}
+              className={cn(
+                pip,
+                step.slide ? "border-transparent text-bg" : "border-line text-ink2",
+              )}
+              style={step.slide ? { backgroundColor: "rgb(var(--ink))" } : undefined}
             >
               Sld
             </button>
