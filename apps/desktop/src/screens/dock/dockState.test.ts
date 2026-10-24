@@ -23,6 +23,24 @@ describe("dockReducer", () => {
     expect(dockReducer(s, { type: "openTrack", track: "kick" })).toBeNull();
   });
 
+  it("shows a track without ever toggling it closed", () => {
+    let s = dockReducer(null, { type: "showTrack", track: "acid" });
+    expect(s).toEqual({ kind: "track", track: "acid", tab: "sound" });
+    s = dockReducer(s, { type: "tab", tab: "steps" });
+    expect(dockReducer(s, { type: "showTrack", track: "acid" })).toBe(s);
+    expect(dockReducer(s, { type: "showTrack", track: "kick" })).toEqual({
+      kind: "track",
+      track: "kick",
+      tab: "steps",
+    });
+    const m = dockReducer(null, { type: "toggleMixer" });
+    expect(dockReducer(m, { type: "showTrack", track: "acid" })).toEqual({
+      kind: "track",
+      track: "acid",
+      tab: "sound",
+    });
+  });
+
   it("toggles the mixer and closes", () => {
     const m = dockReducer(null, { type: "toggleMixer" });
     expect(m).toEqual({ kind: "mixer" });

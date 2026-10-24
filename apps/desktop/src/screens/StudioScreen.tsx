@@ -124,6 +124,7 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
           },
         }),
       onOpenTrack: (track: string) => dispatch({ type: "openTrack", track }),
+      onShowTrack: (track: string) => dispatch({ type: "showTrack", track }),
     }),
     [store, fire],
   );

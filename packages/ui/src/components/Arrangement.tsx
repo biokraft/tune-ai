@@ -52,7 +52,10 @@ export type ArrangementProps = {
   onResize(i: number, bars: number): void;
   onDuplicate(i: number): void;
   onDelete(i: number): void;
+  /** A track header: opens the track in the dock, or closes the dock when it is docked. */
   onOpenTrack(track: string): void;
+  /** A block or empty cell: opens the track in the dock, or keeps it there. */
+  onShowTrack(track: string): void;
   onMix(track: string, patch: { mute?: boolean; solo?: boolean }): void;
 };
 
@@ -464,7 +467,7 @@ export function Arrangement(p: ArrangementProps) {
               drag={drag}
               ppb={ppb}
               onSelect={p.onSelect}
-              onOpenTrack={p.onOpenTrack}
+              onShowTrack={p.onShowTrack}
             />
             <LaneOverlay
               sections={p.sections}
@@ -710,7 +713,7 @@ const TrackHeaders = memo(function TrackHeaders({
 
 type BlocksProps = Pick<
   ArrangementProps,
-  "sections" | "patterns" | "highlighted" | "selected" | "onSelect" | "onOpenTrack"
+  "sections" | "patterns" | "highlighted" | "selected" | "onSelect" | "onShowTrack"
 > & {
   rows: Row[];
   drag: Drag | null;
@@ -720,7 +723,8 @@ type BlocksProps = Pick<
 /**
  * A block per section and track that plays a pattern: the track colour, the pattern's glyph, its
  * id and a `×N` badge when N sections play it. An empty cell shows a dashed outline on hover.
- * Both open the track in the dock on that section. Memoised away from the playhead.
+ * Both show the track in the dock on that section, never closing it. Memoised away from the
+ * playhead.
  */
 const Blocks = memo(function Blocks({
   sections,
@@ -731,7 +735,7 @@ const Blocks = memo(function Blocks({
   drag,
   ppb,
   onSelect,
-  onOpenTrack,
+  onShowTrack,
 }: BlocksProps) {
   const byId = new Map(patterns.map((pat) => [pat.id, pat]));
   const uses = new Map<string, number>();
@@ -771,7 +775,7 @@ const Blocks = memo(function Blocks({
           );
           const open = () => {
             onSelect(i);
-            onOpenTrack(t.id);
+            onShowTrack(t.id);
           };
           if (id === undefined) {
             return (

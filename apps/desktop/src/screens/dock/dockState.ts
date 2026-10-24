@@ -7,19 +7,24 @@ export type DockState = { kind: "track"; track: string; tab: DockTab } | { kind:
 
 export type DockAction =
   | { type: "openTrack"; track: string }
+  | { type: "showTrack"; track: string }
   | { type: "toggleMixer" }
   | { type: "tab"; tab: DockTab }
   | { type: "close" }
   | { type: "prune"; tracks: string[] };
 
 /**
- * Opening the docked track again closes the dock; opening another keeps the tab. Returns the same
- * state object when nothing changes, so React skips the render.
+ * Opening the docked track again closes the dock; opening another keeps the tab. Showing a track
+ * opens it or keeps it open, never closing the dock. Returns the same state object when nothing
+ * changes, so React skips the render.
  */
 export function dockReducer(s: DockState, a: DockAction): DockState {
   switch (a.type) {
     case "openTrack":
       if (s?.kind === "track" && s.track === a.track) return null;
+      return { kind: "track", track: a.track, tab: s?.kind === "track" ? s.tab : "sound" };
+    case "showTrack":
+      if (s?.kind === "track" && s.track === a.track) return s;
       return { kind: "track", track: a.track, tab: s?.kind === "track" ? s.tab : "sound" };
     case "toggleMixer":
       return s?.kind === "mixer" ? null : { kind: "mixer" };
