@@ -36,4 +36,19 @@ describe("FxPanel", () => {
     fireEvent.keyDown(screen.getByRole("slider", { name: "Feedback" }), { key: "ArrowUp" });
     expect(onParam).toHaveBeenCalledWith("delay.feedback", expect.any(Number), true);
   });
+  it("shows the header slot beside the title", () => {
+    render(
+      <FxPanel
+        title="Distortion"
+        params={params}
+        onParam={vi.fn()}
+        header={<span>mode slot</span>}
+      />,
+    );
+    expect(screen.getByText("mode slot")).toBeInTheDocument();
+  });
+  it("passes the colour to the knobs", () => {
+    render(<FxPanel title="Delay" params={params} onParam={vi.fn()} color="rgb(var(--acid))" />);
+    expect(screen.getAllByTestId("knob-arc")[0]!.outerHTML).toContain("--acid");
+  });
 });
