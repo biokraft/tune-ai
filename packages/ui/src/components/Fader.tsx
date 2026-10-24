@@ -14,8 +14,6 @@ export type FaderProps = {
   onChange(v: number): void;
   /** On release, keyboard step and double-click reset. */
   onCommit(v: number): void;
-  /** Called with a short description on focus and with null on blur (drives a help strip). */
-  onHelp?(text: string | null): void;
 };
 
 /** Pointer travel (px) for the full range; Shift makes it ten times finer. */
@@ -39,7 +37,6 @@ export const Fader = memo(function Fader({
   color = "rgb(var(--ink))",
   onChange,
   onCommit,
-  onHelp,
 }: FaderProps) {
   const [dragging, setDragging] = useState(false);
   const drag = useRef<Drag | null>(null);
@@ -141,8 +138,6 @@ export const Fader = memo(function Fader({
         onPointerCancel={endDrag}
         onDoubleClick={() => onCommit(clamp(defaultValue))}
         onKeyDown={onKeyDown}
-        onFocus={() => onHelp?.(`${label} ${text}`)}
-        onBlur={() => onHelp?.(null)}
       >
         {/* The slot, as the MixerDock board: a dark recess with a hairline edge. */}
         <span

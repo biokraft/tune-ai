@@ -5,7 +5,6 @@ import { Fader } from "./Fader";
 function setup(value = 0, extra = {}) {
   const onChange = vi.fn();
   const onCommit = vi.fn();
-  const onHelp = vi.fn();
   render(
     <Fader
       label="Gain"
@@ -16,11 +15,10 @@ function setup(value = 0, extra = {}) {
       unit="dB"
       onChange={onChange}
       onCommit={onCommit}
-      onHelp={onHelp}
       {...extra}
     />,
   );
-  return { onChange, onCommit, onHelp, fader: screen.getByRole("slider", { name: "Gain" }) };
+  return { onChange, onCommit, fader: screen.getByRole("slider", { name: "Gain" }) };
 }
 
 describe("Fader", () => {
@@ -97,13 +95,5 @@ describe("Fader", () => {
     fireEvent.pointerDown(fader, { clientY: 100, button: 0, pointerId: 1 });
     fireEvent.pointerUp(fader, { clientY: 100, pointerId: 1 });
     expect(onCommit).not.toHaveBeenCalled();
-  });
-
-  it("reports help on focus and blur", () => {
-    const { fader, onHelp } = setup();
-    fireEvent.focus(fader);
-    expect(onHelp).toHaveBeenLastCalledWith("Gain 0.0 dB");
-    fireEvent.blur(fader);
-    expect(onHelp).toHaveBeenLastCalledWith(null);
   });
 });
