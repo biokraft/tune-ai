@@ -38,6 +38,8 @@ const CY = 50;
 const ARC_R = 42;
 
 const PX = { lg: 56, md: 46, sm: 36 } as const;
+/** Column width per size, as the board's `.knob` (62) and `.knob.sm` (50). */
+const WIDTH = { lg: 72, md: 62, sm: 50 } as const;
 
 const point = (deg: number, r: number) => {
   const a = (deg * Math.PI) / 180;
@@ -149,7 +151,7 @@ export function Knob({
   return (
     <div
       className={cn("flex select-none flex-col items-center gap-[3px]", disabled && "opacity-40")}
-      style={{ width: px + 16 }}
+      style={{ width: WIDTH[size] }}
     >
       <div
         role="slider"
@@ -256,11 +258,20 @@ export function Knob({
       </div>
       <span
         aria-hidden="true"
-        className="font-mono text-[11px] font-medium leading-none tabular-nums text-ink"
+        className={cn(
+          "whitespace-nowrap font-mono font-medium leading-none tabular-nums text-ink",
+          size === "sm" ? "text-[10px]" : "text-[11px]",
+        )}
       >
         {valueText}
       </span>
-      <span aria-hidden="true" className="lbl leading-none">
+      <span
+        aria-hidden="true"
+        className={cn(
+          "text-center font-bold uppercase leading-[1.15] text-ink2",
+          size === "sm" ? "text-[9px] tracking-[.06em]" : "text-[9.5px] tracking-[.08em]",
+        )}
+      >
         {spec.label}
       </span>
     </div>
