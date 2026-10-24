@@ -16,6 +16,16 @@ export function sectionAtBar(sections: SectionView[], bar: number): number | nul
   return i < 0 ? null : i;
 }
 
+/** Name of the section whose bars equal the half-open `loop`, else null. */
+export function loopSectionName(
+  sections: SectionView[],
+  loop: [number, number] | null,
+): string | null {
+  if (loop === null) return null;
+  const s = sections.find((x) => x.start_bar === loop[0] && x.start_bar + x.bars === loop[1]);
+  return s?.name ?? null;
+}
+
 /** Whether the studio is sounding and the playhead is known. */
 export function playheadStep(view: StudioView): number | null {
   return view.state?.playing && view.playhead ? view.playhead.step : null;

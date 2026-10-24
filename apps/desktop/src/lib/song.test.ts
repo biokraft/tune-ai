@@ -1,7 +1,7 @@
 import { stateEvent } from "../client/fakeClient";
 import type { StudioState } from "../client/protocol";
 import type { StudioView } from "../store/studioStore";
-import { acidSection, currentSection } from "./song";
+import { acidSection, currentSection, loopSectionName } from "./song";
 
 function view(patch: Partial<StudioView> = {}, edit: (s: StudioState) => void = () => {}) {
   const { event: _, ...state } = stateEvent();
@@ -46,5 +46,20 @@ describe("acidSection", () => {
       for (const sec of s.song!.sections) delete sec.play.acid;
     });
     expect(acidSection(v)).toBe(0);
+  });
+});
+
+describe("loopSectionName", () => {
+  const sections = [
+    { name: "intro", start_bar: 0, bars: 16, play: {}, lanes: [] },
+    { name: "drop", start_bar: 80, bars: 16, play: {}, lanes: [] },
+  ];
+  it("names the section whose bars equal the loop", () => {
+    expect(loopSectionName(sections, [80, 96])).toBe("drop");
+  });
+  it("is null for a partial or missing loop", () => {
+    expect(loopSectionName(sections, [80, 88])).toBeNull();
+    expect(loopSectionName(sections, [0, 32])).toBeNull();
+    expect(loopSectionName(sections, null)).toBeNull();
   });
 });

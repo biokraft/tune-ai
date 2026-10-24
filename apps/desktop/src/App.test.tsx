@@ -34,8 +34,8 @@ describe("App", () => {
 
   it("keeps the transport and its change notice in view while the page scrolls", () => {
     setup();
-    const header = screen.getByRole("button", { name: "Play" }).closest("header");
-    expect(header).toHaveClass("sticky", "top-0", "bg-chassis");
+    const header = screen.getByRole("button", { name: "Play (space)" }).closest("header");
+    expect(header).toHaveClass("sticky", "top-0");
   });
 
   it("Space calls play, and stop while playing", () => {
