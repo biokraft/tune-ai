@@ -67,6 +67,15 @@ export function patternIn(song: SongView, i: number | null, track: string): Patt
 }
 
 /**
+ * A pattern's shape for its timeline block, one value per step: a rest is 0, a hit or a note 0.6
+ * and an accented one 1.
+ */
+export function patternGlyph(p: PatternView): number[] {
+  if (p.kind === "drum") return p.hits.map((h) => (h === "accent" ? 1 : h === "hit" ? 0.6 : 0));
+  return p.steps.map((s) => (s.note === null ? 0 : s.accent ? 1 : 0.6));
+}
+
+/**
  * Pattern-relative index of the sounding step, when the playhead is inside section `i`.
  * The engine restarts every pattern at its section start.
  */
