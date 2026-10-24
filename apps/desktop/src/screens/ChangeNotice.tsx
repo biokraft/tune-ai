@@ -1,4 +1,4 @@
-import { cn } from "@tune/ui";
+import { cn, IconButton } from "@tune/ui";
 import type { Change, ExternalChange, SongView } from "../client/protocol";
 import { describeChanges } from "../lib/describeChange";
 
@@ -17,18 +17,15 @@ export type ChangeNoticeProps = {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-const btn = cn(
-  "h-7 rounded-sm border border-claude/60 px-2 font-label text-sm text-claude",
-  "hover:bg-claude/10",
-  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-silkscreen",
-);
-
 /** Whether the notice has anything to say. */
 export function hasChangeNotice(notice: ExternalChange | null, offered: Change[]): boolean {
   return notice !== null || offered.length > 0;
 }
 
-/** "Claude changed 2 things: … Undo", and the re-apply offer for overridden local edits. */
+/**
+ * The change toast, floating top-right under the transport: "Claude changed 2 things: … Undo",
+ * and the re-apply offer for overridden local edits. Cyan marks only Claude's own changes.
+ */
 export function ChangeNotice({
   notice,
   offered,
@@ -42,22 +39,31 @@ export function ChangeNotice({
   const pending = offered.length > 0 ? offered.length : (notice?.offered.length ?? 0);
   if (!notice && pending === 0) return null;
 
-  const button = (label: string, onClick: () => void, aria?: string, icon = false) => (
-    <button
+  // A replaced file and a bare re-apply offer are file events, whoever wrote them.
+  const claude = notice?.source === "claude" && !notice.replaced;
+
+  const button = (label: string, onClick: () => void, aria = label, agent = false) => (
+    <IconButton
       key={label}
-      type="button"
-      aria-label={aria}
-      className={cn(btn, icon && "w-7 px-0")}
+      label={aria}
+      size="sm"
       onClick={onClick}
+      className={cn(agent && "border-agent/45 text-agent")}
     >
       {label}
-    </button>
+    </IconButton>
   );
   const resolve = [
     button("Re-apply", () => onResolve(true)),
     button("Discard", () => onResolve(false)),
   ];
-  const dismiss = button("×", onDismiss, "Dismiss", true);
+  const dismiss = (
+    <IconButton key="dismiss" label="Dismiss" size="sm" onClick={onDismiss}>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
+    </IconButton>
+  );
 
   let text: string;
   let offer: string | null = null;
@@ -80,6 +86,7 @@ export function ChangeNotice({
               "Undo",
               onUndo,
               notice.source === "claude" ? "Undo Claude's change" : "Undo the change on disk",
+              claude,
             ),
           ]
         : []),
@@ -92,19 +99,38 @@ export function ChangeNotice({
   }
 
   return (
-    <div className="flex min-w-0 items-center gap-2">
-      <span
-        aria-hidden="true"
-        className={cn(
-          "h-2 w-2 shrink-0 rounded-full bg-claude",
-          notice?.source === "external" && "bg-transparent ring-1 ring-claude",
-        )}
-      />
-      <span className="min-w-0 truncate" title={text}>
-        {text}
-      </span>
-      {offer && <span className="shrink-0">{offer}</span>}
-      <span className="flex shrink-0 gap-1">{actions}</span>
+    <div
+      role="status"
+      aria-label={claude ? "Claude's change" : "Song file change"}
+      data-source={claude ? "claude" : "file"}
+      className={cn(
+        "glass-solid fixed right-4 top-[72px] z-40 flex w-[360px] flex-col gap-2 rounded-r p-3 text-ink",
+        claude ? "border-agent" : "border-line2",
+      )}
+      style={
+        claude
+          ? {
+              boxShadow:
+                "0 0 22px rgb(var(--agent) / .22), inset 0 1px 0 rgba(255, 255, 255, .06), 0 10px 30px rgba(0, 0, 0, .35)",
+            }
+          : undefined
+      }
+    >
+      <p className="flex items-center gap-2 text-[11.5px] font-bold">
+        <span
+          aria-hidden="true"
+          className={cn(
+            "h-2 w-2 shrink-0 rounded-full",
+            claude ? "bg-agent shadow-[0_0_8px_rgb(var(--agent))]" : "border border-ink2",
+          )}
+        />
+        <span className={claude ? "text-agent" : "text-ink2"}>
+          {claude ? "Claude" : "Song file"}
+        </span>
+      </p>
+      <p className="text-[12.5px] leading-snug">{text}</p>
+      {offer && <p className="text-[12.5px] leading-snug text-ink2">{offer}</p>}
+      <div className="flex flex-wrap justify-end gap-1.5">{actions}</div>
     </div>
   );
 }

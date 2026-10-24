@@ -163,25 +163,23 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
           onUndo={undo}
           onRedo={redo}
         />
-        {/* Task 9 turns this into a floating toast. */}
+        {/* A toast card, fixed top-right under the transport. */}
         {showNotice && (
-          <div role="status" className="mt-2 font-mono text-sm text-agent">
-            <ChangeNotice
-              notice={notice}
-              offered={state.offered}
-              canUndo={noticeUndoable}
-              song={song}
-              onUndo={() => {
-                store.dismissNotice();
-                fire({ cmd: "undo" });
-              }}
-              onResolve={(reapply) => {
-                store.dismissNotice();
-                fire({ cmd: "resolve_offered", args: { reapply } });
-              }}
-              onDismiss={store.dismissNotice}
-            />
-          </div>
+          <ChangeNotice
+            notice={notice}
+            offered={state.offered}
+            canUndo={noticeUndoable}
+            song={song}
+            onUndo={() => {
+              store.dismissNotice();
+              fire({ cmd: "undo" });
+            }}
+            onResolve={(reapply) => {
+              store.dismissNotice();
+              fire({ cmd: "resolve_offered", args: { reapply } });
+            }}
+            onDismiss={store.dismissNotice}
+          />
         )}
       </header>
 
