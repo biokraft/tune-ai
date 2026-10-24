@@ -51,20 +51,20 @@ body {
   box-shadow: 0 1px 1px hsl(0 0% 0% / 0.5);
 }
 
-/* A change from outside fades over its 4 s; reduced motion keeps it steady until removed. */
+/* A change from outside fades over 2.4 s; reduced motion keeps it steady until removed. */
 @keyframes highlight-fade {
   0%,
-  70% {
+  40% {
     opacity: 1;
   }
   100% {
-    opacity: 0.25;
+    opacity: 0.35;
   }
 }
 
 [data-highlight] [data-testid="knob-highlight"],
 rect[data-highlight] {
-  animation: highlight-fade 4s ease-in forwards;
+  animation: highlight-fade 2.4s ease-in forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
