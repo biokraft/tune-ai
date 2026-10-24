@@ -36,6 +36,8 @@ const START = -135;
 const CX = 50;
 const CY = 50;
 const ARC_R = 42;
+/** The lane dot's centre, as a share of the dial: between the cap (r 31) and the arc's foot. */
+const LANE_Y = (CY + ARC_R) / 100;
 
 const PX = { lg: 56, md: 46, sm: 36 } as const;
 /** Column width per size, as the board's `.knob` (62) and `.knob.sm` (50). */
@@ -242,9 +244,10 @@ export function Knob({
           <span
             data-testid="knob-lane"
             title="Automated in this section"
-            className="pointer-events-none absolute left-1/2 h-1 w-1 -translate-x-1/2 rounded-full"
-            // Sits under the value and label, which render below the dial.
-            style={{ top: px + 38, background: color }}
+            className="pointer-events-none absolute left-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full"
+            // Centred in the open foot of the arc, under the cap: inside the dial, so it takes no
+            // room and never lands on the knob below in a stacked strip.
+            style={{ top: px * LANE_Y, background: color }}
           />
         )}
         {dragging && (

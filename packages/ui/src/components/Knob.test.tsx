@@ -110,6 +110,14 @@ describe("Knob", () => {
     expect(screen.getByTestId("knob-highlight")).toBeInTheDocument();
   });
 
+  it("puts the lane dot in the dial's open foot, inside the knob's own box", () => {
+    setup(0.2, { automated: true });
+    const lane = screen.getByTestId("knob-lane");
+    // The md dial is 46 px: the dot sits within it, so it never covers a knob below.
+    expect(parseFloat(lane.style.top)).toBeGreaterThan(36);
+    expect(parseFloat(lane.style.top)).toBeLessThan(46);
+  });
+
   it("gives each knob its own gradient id", () => {
     const { container } = render(
       <>
