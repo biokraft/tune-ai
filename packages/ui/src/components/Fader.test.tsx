@@ -33,6 +33,12 @@ describe("Fader", () => {
     expect(fader).toHaveAttribute("aria-valuetext", "0.0 dB");
   });
 
+  it("marks 0 dB on the slot", () => {
+    setup(-12);
+    // -60..12 dB: 0 dB sits 60/72 of the way up.
+    expect(screen.getByTestId("fader-zero").style.bottom).toBe(`${(60 / 72) * 100}%`);
+  });
+
   it("formats a negative value", () => {
     const { fader } = setup(-3);
     expect(fader).toHaveAttribute("aria-valuetext", "-3.0 dB");
