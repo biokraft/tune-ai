@@ -86,4 +86,30 @@ describe("DrumGrid emphasis", () => {
     expect(fill(acc).style.opacity).toBe("1");
     expect(fill(acc).style.backgroundColor).toBe("rgb(255, 0, 0)");
   });
+  it("numbers the steps above the grid, the playing one in the play colour", () => {
+    const { container } = render(
+      <DrumGrid
+        rows={[{ pattern: "k4", label: "kick", hits: ["hit", "rest", "hit"] }]}
+        playingStep={2}
+        onSet={() => {}}
+      />,
+    );
+    const nums = container.querySelectorAll("[data-step-number]");
+    expect([...nums].map((n) => n.textContent)).toEqual(["1", "2", "3"]);
+    expect(nums[2]).toHaveClass("text-play");
+  });
+  it("heads each row with its colour bar and the voice name", () => {
+    render(
+      <DrumGrid
+        rows={[{ pattern: "k4", label: "kick", hits: ["hit"], color: "rgb(255 0 0)" }]}
+        playingStep={null}
+        onSet={() => {}}
+      />,
+    );
+    const group = screen.getByRole("group", { name: "kick" });
+    expect(group.querySelector<HTMLElement>("[data-color-bar]")!.style.backgroundColor).toBe(
+      "rgb(255, 0, 0)",
+    );
+    expect(group).toHaveTextContent("kick");
+  });
 });
