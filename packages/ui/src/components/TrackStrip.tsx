@@ -86,18 +86,19 @@ export function TrackStrip({
         const spec = strip.find((p) => p.id === id);
         if (!spec) return null;
         return (
-          <Knob
-            key={id}
-            spec={spec}
-            size="sm"
-            color={color}
-            value={spec.value}
-            highlight={highlight?.(id) ?? null}
-            automated={automated?.(id) ?? false}
-            onHelp={onHelp}
-            onChange={(v) => onParam?.(id, v, false)}
-            onCommit={(v) => onParam?.(id, v, true)}
-          />
+          <div key={id} onPointerEnter={() => onHelp?.(spec)} onPointerLeave={() => onHelp?.(null)}>
+            <Knob
+              spec={spec}
+              size="sm"
+              color={color}
+              value={spec.value}
+              highlight={highlight?.(id) ?? null}
+              automated={automated?.(id) ?? false}
+              onHelp={onHelp}
+              onChange={(v) => onParam?.(id, v, false)}
+              onCommit={(v) => onParam?.(id, v, true)}
+            />
+          </div>
         );
       })}
     </div>
@@ -138,17 +139,20 @@ export function TrackStrip({
           />
         </div>
         <div className={cn("flex items-start", compact && "flex-col items-center")}>
-          <Knob
-            spec={PAN}
-            size="sm"
-            color={color}
-            value={pan ?? track.pan}
-            onChange={setPan}
-            onCommit={(v) => {
-              setPan(null);
-              onMix({ pan: v });
-            }}
-          />
+          <div onPointerEnter={() => onHelp?.(PAN)} onPointerLeave={() => onHelp?.(null)}>
+            <Knob
+              spec={PAN}
+              onHelp={onHelp}
+              size="sm"
+              color={color}
+              value={pan ?? track.pan}
+              onChange={setPan}
+              onCommit={(v) => {
+                setPan(null);
+                onMix({ pan: v });
+              }}
+            />
+          </div>
           {sends}
         </div>
       </div>

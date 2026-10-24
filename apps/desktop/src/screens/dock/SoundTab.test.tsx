@@ -42,6 +42,8 @@ function setup(
   return { sent, fired };
 }
 
+const helpLine = () => document.querySelector<HTMLElement>('[aria-live="polite"]')!;
+
 describe("SoundTab", () => {
   it("shows a slider for every 303 knob, the mode switch and the mixer strip", () => {
     setup();
@@ -135,5 +137,23 @@ describe("SoundTab", () => {
     const cutoff = () => screen.getByRole("slider", { name: "Cutoff" });
     setup("acid", { automatedIn: 1 });
     expect(within(cutoff()).getByTestId("knob-lane")).toBeInTheDocument();
+  });
+
+  it("keeps device cards from shrinking so the chain scrolls sideways", () => {
+    setup();
+    for (const name of ["Acid 303", "Distortion"]) {
+      expect(screen.getByRole("group", { name })).toHaveClass("shrink-0");
+    }
+    expect(screen.getByRole("region", { name: "Mixer strip" })).toHaveClass("flex-none");
+  });
+
+  it("hovering a mixer strip knob shows its help", () => {
+    setup();
+    const strip = within(screen.getByRole("region", { name: "Mixer strip" }));
+    fireEvent.pointerEnter(strip.getByRole("slider", { name: "Delay" }).parentElement!);
+    expect(helpLine()).toHaveTextContent("Delay");
+    fireEvent.pointerLeave(strip.getByRole("slider", { name: "Delay" }).parentElement!);
+    fireEvent.pointerEnter(strip.getByRole("slider", { name: "Pan" }).parentElement!);
+    expect(helpLine()).toHaveTextContent("Pan");
   });
 });
