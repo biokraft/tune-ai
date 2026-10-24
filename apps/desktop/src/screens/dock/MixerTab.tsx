@@ -1,6 +1,5 @@
 import {
   FxPanel,
-  Knob,
   TrackStrip,
   trackColor,
   type Highlight,
@@ -19,6 +18,10 @@ export const UNUSED = "No track sends here yet — sends start after the first r
 
 /** Said on the limiter's knobs in clip mode: they are written, but nothing hears them yet. */
 export const LIMITER_OFF = "Off in clip mode";
+
+/** Said under the master in clip mode: why Mode is text, not a switch. */
+export const MASTER_NOTE =
+  'Master: soft clipper (set mix.master = "limit" in the song for the limiter)';
 
 /** The line under the master knobs: which track the sidechain follows, if any. */
 export const duckText = (source: string | null): string =>
@@ -130,20 +133,6 @@ export const MixerTab = memo(function MixerTab({
 
   const { gain, limiter } = splitMaster(mix.master_params);
   const limiting = mix.master === "limit";
-  const knob = (p: ParamView) => (
-    <Knob
-      key={p.id}
-      spec={p}
-      size="sm"
-      value={drag.valueOf(p)}
-      highlight={highlight(p.id)}
-      automated={automated(p.id)}
-      onHelp={help.show}
-      onChange={(v) => onParam(p.id, v, false)}
-      onCommit={(v) => onParam(p.id, v, true)}
-    />
-  );
-
   return (
     <div className="flex min-h-0 items-stretch gap-3 overflow-x-auto overflow-y-hidden p-3">
       {song.tracks.map((t) => (
@@ -163,36 +152,37 @@ export const MixerTab = memo(function MixerTab({
       {bus("Delay", mix.delay, mix.delay_active)}
       {bus("Reverb", mix.reverb, mix.reverb_active)}
       <div className="w-px shrink-0 self-stretch bg-line" aria-hidden="true" />
-      <div
-        role="group"
-        aria-label="Master"
-        className="flex shrink-0 flex-col gap-2 rounded-rs border border-line2 bg-ink/[.06] px-2.5 py-2"
-      >
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-xs font-bold leading-none text-ink">Master</span>
-          <span className="flex items-baseline gap-1.5">
-            <span className="lbl">Mode</span>
-            <span className="text-[11px] font-bold leading-none text-ink">
-              {limiting ? "Limit" : "Clip"}
-            </span>
-          </span>
+      <div className="flex shrink-0 flex-col gap-1.5">
+        <div className="flex items-stretch gap-3">
+          <FxPanel
+            title="Master"
+            params={live(gain)}
+            onParam={onParam}
+            highlight={highlight}
+            automated={automated}
+            onHelp={help.show}
+            header={
+              <span className="flex items-baseline gap-1.5">
+                <span className="lbl">Mode</span>
+                <span className="text-[11px] font-bold leading-none text-ink">
+                  {limiting ? "Limit" : "Clip"}
+                </span>
+              </span>
+            }
+          />
+          <FxPanel
+            title="Limiter"
+            params={live(limiter)}
+            inactiveNote={limiting ? null : LIMITER_OFF}
+            onParam={onParam}
+            highlight={highlight}
+            automated={automated}
+            onHelp={help.show}
+          />
         </div>
-        <div className="flex flex-nowrap items-start gap-1">
-          {gain.map(knob)}
-          <div
-            role="group"
-            aria-label="Limiter"
-            data-inactive={limiting ? undefined : "true"}
-            className="flex flex-col gap-1"
-          >
-            <div
-              className={`flex flex-nowrap items-start gap-1 transition-opacity ${limiting ? "" : "opacity-50"}`}
-            >
-              {limiter.map(knob)}
-            </div>
-            {!limiting && <span className="text-[11px] leading-none text-ink3">{LIMITER_OFF}</span>}
-          </div>
-        </div>
+        <p className="text-[10px] leading-tight text-ink2">
+          {limiting ? "Master: limiter" : MASTER_NOTE}
+        </p>
         <p className="text-[10px] leading-tight text-ink2">{duckText(mix.duck_source)}</p>
       </div>
     </div>

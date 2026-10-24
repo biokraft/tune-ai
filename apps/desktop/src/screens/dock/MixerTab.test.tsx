@@ -123,6 +123,19 @@ describe("MixerTab", () => {
     expect(screen.getByText("Ducking: no kick to follow")).toBeInTheDocument();
   });
 
+  it("explains the read-only mode in clip mode, and says limiter in limit mode", () => {
+    const { unmount } = setup();
+    expect(
+      screen.getByText(
+        'Master: soft clipper (set mix.master = "limit" in the song for the limiter)',
+      ),
+    ).toBeInTheDocument();
+    unmount();
+    setup(stateEvent((s) => (s.song!.mix.master = "limit")).song!);
+    expect(screen.getByText("Master: limiter")).toBeInTheDocument();
+    expect(screen.queryByText(/soft clipper/)).toBeNull();
+  });
+
   it("shows the duck source", () => {
     setup();
     expect(screen.getByText("Ducking follows: kick")).toBeInTheDocument();
@@ -133,7 +146,7 @@ describe("MixerTab", () => {
     const master = screen.getByRole("group", { name: "Master" });
     expect(master).not.toHaveAttribute("data-inactive");
     expect(within(master).getByRole("slider", { name: "Master gain" })).toBeInTheDocument();
-    const limiter = within(master).getByRole("group", { name: "Limiter" });
+    const limiter = screen.getByRole("group", { name: "Limiter" });
     expect(limiter).toHaveAttribute("data-inactive", "true");
     expect(within(limiter).getByText(LIMITER_OFF)).toBeInTheDocument();
     for (const name of ["Ceiling", "Release"]) {
