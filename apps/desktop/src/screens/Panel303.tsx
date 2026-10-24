@@ -12,6 +12,7 @@ import type { Command, ParamView, SongView, TrackView } from "../client/protocol
 import { highlightedSteps, patternIn, sentenceCase, stepInPattern } from "../lib/song";
 import type { HighlightKind } from "../store/studioStore";
 import { usePlayheadStep } from "../store/useStudio";
+import { BIG, SMALL } from "./dock/SoundTab";
 import { HelpStrip } from "./HelpStrip";
 import { useParamDrag } from "./useParamDrag";
 
@@ -28,8 +29,6 @@ export type Panel303Props = {
   send(cmd: Command): Promise<unknown>;
 };
 
-const BIG = ["tuning", "cutoff", "resonance", "env_mod", "decay", "accent"];
-const SMALL = ["waveform", "slide_time", "volume"];
 const DIST = ["drive", "mix", "output"];
 /** How long a knob note (e.g. "automated here") stays in the help strip. */
 const NOTE_MS = 6000;

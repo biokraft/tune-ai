@@ -104,3 +104,12 @@ export function sectionBars(state: StudioState, i: number): [number, number] | n
 export function formatNumber(x: number): string {
   return String(Number(x.toPrecision(4)));
 }
+
+/**
+ * Why `track` gets no duck knob: the duck source would duck itself, and without a source nothing
+ * ducks. Validation refuses both, so a drag would be heard but its release never written.
+ */
+export function whyNoDuck(source: string | null, track: string): string | null {
+  if (source === null) return "No kick";
+  return source === track ? "Duck source" : null;
+}
