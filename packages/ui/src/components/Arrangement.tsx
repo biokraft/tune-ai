@@ -1,7 +1,7 @@
-import * as Popover from "@radix-ui/react-popover";
 import {
   memo,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -17,32 +17,41 @@ import {
   snapBars,
   type SectionView,
 } from "../lib/arrange";
-import { instrumentTitle, trackColor } from "../lib/instruments";
+import { instrumentTitle, trackColor, trackColorVar } from "../lib/instruments";
 import { MuteSolo } from "./MuteSolo";
 
 export type { SectionView } from "../lib/arrange";
 
 export type ArrangementTrack = { id: string; instrument: string; mute: boolean; solo: boolean };
 
+/** A pattern as its block draws it: one glyph value per step (rest 0, hit or note 0.6, accent 1). */
+export type ArrangementPattern = {
+  id: string;
+  track: string;
+  kind: "acid" | "drum";
+  glyph: number[];
+};
+
 export type ArrangementProps = {
   sections: SectionView[];
   tracks: ArrangementTrack[];
-  patterns: { id: string; track: string }[];
+  patterns: ArrangementPattern[];
   /** Fractional zero-based bar. */
   playhead: number;
   selected: number | null;
   loop: [number, number] | null;
   /** The track shown in the dock, if any; its header is pressed. */
   openTrack: string | null;
-  /** Edit paths changed by Claude (`sections`, `sections[i]`, `sections[i].*`). */
+  /** Edit paths changed by Claude (`sections`, `sections[i]`, `sections[i].*`, `patterns.<id>.*`). */
   highlighted?: Set<string>;
+  /** Lane row labels, keyed `${track}.${param}` (mix lanes have track `"mix"`); else the param id. */
+  laneLabels?: Record<string, string>;
   onSelect(i: number): void;
   onSeek(bar: number): void;
   onMove(from: number, to: number): void;
   onResize(i: number, bars: number): void;
   onDuplicate(i: number): void;
   onDelete(i: number): void;
-  onSetPlay(section: number, track: string, pattern: string | null): void;
   onOpenTrack(track: string): void;
   onMix(track: string, patch: { mute?: boolean; solo?: boolean }): void;
 };
@@ -53,14 +62,21 @@ const RULER_H = 24;
 const SECROW_H = 32;
 /** Track row height, as `--row`. */
 const ROW_H = 46;
+/** An automation lane's row, under its track. */
+const LANE_H = 22;
+/** The "Mix" header row above the mix lanes. */
+const MIXHDR_H = 28;
+/** A block's inset inside its cell. */
+const INSET = 3;
+/** The glyph's side padding inside a block. */
+const GLYPH_PAD = 6;
+/** An accented acid dash's height above the block's foot, as a share of the block. */
+const ACID_RISE = 0.45;
 /** Ruler and sections rows: the sticky band above the track rows. */
 const TOP = RULER_H + SECROW_H;
 /** Room after the last bar, as the board's `padding-right`. */
 const PAD_R = 10;
 const HANDLE_W = 6;
-/** Pattern cells are chips sized to their name (at least this wide, at most the section), so
- * names stay readable and the lane curves stay visible across the rest of the section. */
-const CHIP_W = 44;
 /** Pointer travel (px) below which a press is a click, not a drag. */
 const DRAG_SLOP = 4;
 
@@ -69,6 +85,58 @@ const focusRing =
 /** Sticky parts cover what scrolls under them. */
 const stickyFill = "bg-[rgb(var(--solid)/0.92)]";
 const WHITE_EDGE = "rgb(255 255 255 / .4)";
+const NO_LABELS: Record<string, string> = {};
+
+/** One row of the timeline body, `y` from the top of the first track row. */
+type Row =
+  | { kind: "track"; track: ArrangementTrack; y: number; h: number }
+  | { kind: "lane"; track: string; param: string; color: string; y: number; h: number }
+  | { kind: "mix"; y: number; h: number };
+
+/**
+ * Each track's row, then a lane row per param it automates in any section (first seen first),
+ * then a "Mix" header over the mix lanes, if there are any.
+ */
+function layoutRows(tracks: ArrangementTrack[], sections: SectionView[]): Row[] {
+  const lanes = new Map<string, string[]>();
+  for (const s of sections) {
+    for (const l of s.lanes) {
+      const list = lanes.get(l.track) ?? [];
+      if (!list.includes(l.param)) list.push(l.param);
+      lanes.set(l.track, list);
+    }
+  }
+  const rows: Row[] = [];
+  let y = 0;
+  const laneRows = (track: string, color: string) => {
+    for (const param of lanes.get(track) ?? []) {
+      rows.push({ kind: "lane", track, param, color, y, h: LANE_H });
+      y += LANE_H;
+    }
+  };
+  for (const t of tracks) {
+    rows.push({ kind: "track", track: t, y, h: ROW_H });
+    y += ROW_H;
+    laneRows(t.id, trackColor(t.instrument));
+  }
+  if (lanes.has("mix")) {
+    rows.push({ kind: "mix", y, h: MIXHDR_H });
+    y += MIXHDR_H;
+    laneRows("mix", "rgb(var(--ink2))");
+  }
+  return rows;
+}
+
+/** Whether Claude changed what `track` plays in section `i`, or the pattern `id` itself. */
+function isBlockLit(h: Set<string> | undefined, i: number, track: string, id: string | undefined) {
+  if (!h) return false;
+  if (h.has(`sections[${i}].play.${track}`)) return true;
+  if (id === undefined) return false;
+  if (h.has(`patterns.${id}`)) return true;
+  const prefix = `patterns.${id}.`;
+  for (const p of h) if (p.startsWith(prefix)) return true;
+  return false;
+}
 
 type Drag =
   | { kind: "move"; i: number; startX: number; dx: number }
@@ -141,7 +209,8 @@ export function Arrangement(p: ArrangementProps) {
   const ppb = fitPxPerBar(measured > 0 ? measured - PAD_R : 0, total);
   const dragEnd = drag?.kind === "resize" ? p.sections[drag.i]!.start_bar + drag.bars : 0;
   const laneW = Math.max(total, dragEnd) * ppb;
-  const rowsH = p.tracks.length * ROW_H;
+  const rows = useMemo(() => layoutRows(p.tracks, p.sections), [p.tracks, p.sections]);
+  const rowsH = rows.reduce((sum, r) => sum + r.h, 0);
   const secRow = useRef<SVGSVGElement>(null);
   const height = TOP + rowsH;
   const step = rulerStep(ppb);
@@ -195,7 +264,7 @@ export function Arrangement(p: ArrangementProps) {
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    // Portalled popovers bubble React events here; only act on our own subtree.
+    // Portalled content bubbles React events here; only act on our own subtree.
     if (!e.currentTarget.contains(e.target as Node)) return;
     const sel = p.selected;
     if (sel === null) return;
@@ -236,7 +305,8 @@ export function Arrangement(p: ArrangementProps) {
       <div ref={scroller} className="relative min-h-0 flex-1 overflow-auto">
         <div className="relative flex" style={{ width: HEADER_W + laneW + PAD_R, height }}>
           <TrackHeaders
-            tracks={p.tracks}
+            rows={rows}
+            laneLabels={p.laneLabels ?? NO_LABELS}
             openTrack={p.openTrack}
             onOpenTrack={p.onOpenTrack}
             onMix={p.onMix}
@@ -355,29 +425,32 @@ export function Arrangement(p: ArrangementProps) {
                   stroke="rgb(var(--ink) / .05)"
                 />
               ))}
-              {p.tracks.map((t, r) => (
+              {rows.map((r) => (
                 <line
-                  key={t.id}
+                  key={r.y}
                   x1={0}
                   x2={laneW}
-                  y1={(r + 1) * ROW_H - 0.5}
-                  y2={(r + 1) * ROW_H - 0.5}
+                  y1={r.y + r.h - 0.5}
+                  y2={r.y + r.h - 0.5}
                   stroke="rgb(var(--ink) / .045)"
                 />
               ))}
               <LoopBand loop={p.loop} ppb={ppb} height={rowsH} testId="loop-band" />
             </svg>
-            <Cells
+            <Blocks
               sections={p.sections}
-              tracks={p.tracks}
+              rows={rows}
               patterns={p.patterns}
+              highlighted={p.highlighted}
+              selected={p.selected}
               drag={drag}
               ppb={ppb}
-              onSetPlay={p.onSetPlay}
+              onSelect={p.onSelect}
+              onOpenTrack={p.onOpenTrack}
             />
             <LaneOverlay
               sections={p.sections}
-              tracks={p.tracks}
+              rows={rows}
               ppb={ppb}
               width={laneW}
               height={height}
@@ -506,11 +579,18 @@ const Ruler = memo(function Ruler({ laneW, ppb, step, loop }: RulerProps) {
   );
 });
 
-type TrackHeadersProps = Pick<ArrangementProps, "tracks" | "openTrack" | "onOpenTrack" | "onMix">;
+type TrackHeadersProps = Pick<ArrangementProps, "openTrack" | "onOpenTrack" | "onMix"> & {
+  rows: Row[];
+  laneLabels: Record<string, string>;
+};
 
-/** The sticky header column: the ruler and sections labels, then one `.hdr` per track. */
+/**
+ * The sticky header column: the ruler and sections labels, then one `.hdr` per track with its
+ * `↳` lane labels under it, and a "Mix" header over the mix lanes.
+ */
 const TrackHeaders = memo(function TrackHeaders({
-  tracks,
+  rows,
+  laneLabels,
   openTrack,
   onOpenTrack,
   onMix,
@@ -530,7 +610,34 @@ const TrackHeaders = memo(function TrackHeaders({
           <span className="lbl">Sections</span>
         </div>
       </div>
-      {tracks.map((t) => {
+      {rows.map((r) => {
+        if (r.kind === "mix") {
+          return (
+            <div
+              key="mix"
+              data-testid="mix-header"
+              className="flex items-center border-b border-ink/5 pl-[15px]"
+              style={{ height: r.h }}
+            >
+              <span className="text-[12.5px] font-bold leading-tight">Mix</span>
+            </div>
+          );
+        }
+        if (r.kind === "lane") {
+          const label = laneLabels[`${r.track}.${r.param}`] ?? r.param;
+          return (
+            <div
+              key={`${r.track}.${r.param}`}
+              className="flex items-center border-b border-ink/5 pl-6 pr-2"
+              style={{ height: r.h }}
+            >
+              <span className="lbl truncate" style={{ color: r.color }}>
+                {`↳ ${label}`}
+              </span>
+            </div>
+          );
+        }
+        const t = r.track;
         const open = openTrack === t.id;
         return (
           <div
@@ -577,114 +684,197 @@ const TrackHeaders = memo(function TrackHeaders({
   );
 });
 
-type CellsProps = Pick<ArrangementProps, "sections" | "tracks" | "patterns" | "onSetPlay"> & {
+type BlocksProps = Pick<
+  ArrangementProps,
+  "sections" | "patterns" | "highlighted" | "selected" | "onSelect" | "onOpenTrack"
+> & {
+  rows: Row[];
   drag: Drag | null;
   ppb: number;
 };
 
-/** One pattern picker per track and section. Task 10 replaces these with blocks. */
-const Cells = memo(function Cells({
+/**
+ * A block per section and track that plays a pattern: the track colour, the pattern's glyph, its
+ * id and a `×N` badge when N sections play it. An empty cell shows a dashed outline on hover.
+ * Both open the track in the dock on that section. Memoised away from the playhead.
+ */
+const Blocks = memo(function Blocks({
   sections,
-  tracks,
+  rows,
   patterns,
+  highlighted,
+  selected,
   drag,
   ppb,
-  onSetPlay,
-}: CellsProps) {
-  const [open, setOpen] = useState<string | null>(null);
+  onSelect,
+  onOpenTrack,
+}: BlocksProps) {
+  const byId = new Map(patterns.map((pat) => [pat.id, pat]));
+  const uses = new Map<string, number>();
+  for (const s of sections) {
+    for (const id of Object.values(s.play)) uses.set(id, (uses.get(id) ?? 0) + 1);
+  }
   return (
     <>
-      {tracks.map((t, r) =>
-        sections.map((s, i) => {
-          const key = `${i}:${t.id}`;
-          const current = s.play[t.id];
-          const w = widthOf(s, i, drag, ppb);
-          return (
-            <Popover.Root
-              key={key}
-              open={open === key}
-              onOpenChange={(o) => setOpen(o ? key : null)}
-            >
-              <Popover.Trigger asChild>
-                <button
-                  type="button"
-                  aria-label={`${t.id} in section ${i + 1}`}
-                  title={current ?? undefined}
-                  className={cn(
-                    "absolute truncate rounded-[7px] border border-line bg-ink/5 px-1.5 text-left",
-                    "font-mono text-[10.5px]",
-                    current ? "text-ink2" : "text-ink3",
-                    focusRing,
-                  )}
-                  style={{
-                    left: xOf(s, i, drag, ppb) + 2,
-                    top: TOP + r * ROW_H + 5,
-                    minWidth: Math.min(CHIP_W, w - 4),
-                    maxWidth: w - 4,
-                    height: ROW_H - 10,
-                  }}
-                >
-                  {current ?? "—"}
-                </button>
-              </Popover.Trigger>
-              <Popover.Portal>
-                <Popover.Content
-                  sideOffset={4}
-                  className="glass-solid z-50 flex w-40 flex-col gap-1 rounded-rs p-2 text-ink"
-                >
-                  {patterns
-                    .filter((pat) => pat.track === t.id)
-                    .map((pat) => (
-                      <button
-                        key={pat.id}
-                        type="button"
-                        aria-current={current === pat.id ? "true" : undefined}
-                        className={cn(
-                          "rounded-[7px] border border-line px-2 py-1 text-left font-mono text-xs text-ink2 hover:bg-ink/5",
-                          current === pat.id && "border-line2 bg-ink/10 text-ink",
-                          focusRing,
-                        )}
-                        onClick={() => {
-                          onSetPlay(i, t.id, pat.id);
-                          setOpen(null);
-                        }}
-                      >
-                        {pat.id}
-                      </button>
-                    ))}
-                  <button
-                    type="button"
-                    className={cn(
-                      "rounded-[7px] border border-line px-2 py-1 text-left text-xs text-ink2 hover:bg-ink/5",
-                      focusRing,
-                    )}
-                    onClick={() => {
-                      onSetPlay(i, t.id, null);
-                      setOpen(null);
-                    }}
-                  >
-                    None
-                  </button>
-                </Popover.Content>
-              </Popover.Portal>
-            </Popover.Root>
+      {rows.map((r) => {
+        if (r.kind !== "track") return null;
+        const t = r.track;
+        const c = trackColorVar(t.instrument);
+        return sections.map((s, i) => {
+          const id = s.play[t.id];
+          const w = Math.max(0, widthOf(s, i, drag, ppb) - 2 * INSET);
+          const h = ROW_H - 2 * INSET;
+          const box = {
+            left: xOf(s, i, drag, ppb) + INSET,
+            top: TOP + r.y + INSET,
+            width: w,
+            height: h,
+          };
+          const lit = isBlockLit(highlighted, i, t.id, id);
+          const ring = lit && (
+            <rect
+              data-testid="block-highlight"
+              data-highlight="claude"
+              x={0.75}
+              y={0.75}
+              width={Math.max(0, w - 1.5)}
+              height={h - 1.5}
+              rx={9}
+              fill="none"
+              stroke="rgb(var(--agent))"
+              strokeWidth={1.5}
+            />
           );
-        }),
-      )}
+          const open = () => {
+            onSelect(i);
+            onOpenTrack(t.id);
+          };
+          if (id === undefined) {
+            return (
+              <div
+                key={`${i}:${t.id}`}
+                aria-hidden="true"
+                data-testid={`empty-${i}-${t.id}`}
+                onClick={open}
+                className="absolute cursor-pointer rounded-rs border border-dashed border-transparent hover:border-line"
+                style={box}
+              >
+                {ring && (
+                  <svg width={w} height={h} className="absolute -left-px -top-px">
+                    {ring}
+                  </svg>
+                )}
+              </div>
+            );
+          }
+          const pat = byId.get(id);
+          const n = uses.get(id) ?? 0;
+          return (
+            <button
+              key={`${i}:${t.id}`}
+              type="button"
+              aria-label={`${id} in ${s.name}`}
+              title={id}
+              onClick={open}
+              className={cn(
+                "absolute cursor-pointer overflow-hidden rounded-rs border-0 bg-transparent p-0 text-left",
+                focusRing,
+              )}
+              style={box}
+            >
+              <svg width={w} height={h} className="absolute left-0 top-0" aria-hidden="true">
+                <rect
+                  data-testid="block-fill"
+                  x={0.5}
+                  y={0.5}
+                  width={Math.max(0, w - 1)}
+                  height={h - 1}
+                  rx={9}
+                  fill={`rgb(var(${c}) / ${selected === i ? ".32" : ".22"})`}
+                  stroke={`rgb(var(${c}) / .45)`}
+                />
+                {pat && (
+                  <Glyph kind={pat.kind} glyph={pat.glyph} w={w} h={h} color={`rgb(var(${c}))`} />
+                )}
+                {ring}
+              </svg>
+              <span
+                className="absolute left-1.5 right-0 top-[3px] truncate text-[10.5px] font-bold leading-[14px] text-ink"
+                style={{ paddingRight: n > 1 ? 30 : 6 }}
+              >
+                {id}
+              </span>
+              {n > 1 && (
+                <span className="badge absolute right-1 top-[3px] bg-bg/[.35] leading-[13px]">
+                  ×{n}
+                </span>
+              )}
+            </button>
+          );
+        });
+      })}
     </>
   );
 });
 
-type LaneOverlayProps = Pick<ArrangementProps, "sections" | "tracks"> & {
+type GlyphProps = { kind: "acid" | "drum"; glyph: number[]; w: number; h: number; color: string };
+
+/**
+ * A pattern's shape across its block. Drums: a bar per step, `value` × 60 % of the block tall.
+ * Acid: a 2 px dash per note, raised by its value (accents sit higher) but kept under the id.
+ */
+function Glyph({ kind, glyph, w, h, color }: GlyphProps) {
+  const inner = w - 2 * GLYPH_PAD;
+  if (glyph.length === 0 || inner <= 0) return null;
+  const step = inner / glyph.length;
+  const barW = Math.max(1, step - 1.5);
+  const base = h - INSET;
+  return (
+    <g fill={color}>
+      {glyph.map((v, k) => {
+        if (v <= 0) return null;
+        const x = GLYPH_PAD + k * step;
+        // Dashes rise less than bars: an accent at 60 % would sit on the pattern id's line.
+        const rise = v * (kind === "drum" ? 0.6 : ACID_RISE) * h;
+        return kind === "drum" ? (
+          <rect
+            key={k}
+            data-testid="glyph-step"
+            x={x}
+            y={base - rise}
+            width={barW}
+            height={rise}
+            rx={1}
+            opacity={v >= 1 ? 1 : 0.7}
+          />
+        ) : (
+          <rect
+            key={k}
+            data-testid="glyph-step"
+            x={x}
+            y={base - rise}
+            width={barW}
+            height={2}
+            rx={1}
+            opacity={v >= 1 ? 1 : 0.6}
+          />
+        );
+      })}
+    </g>
+  );
+}
+
+type LaneOverlayProps = Pick<ArrangementProps, "sections"> & {
+  rows: Row[];
   ppb: number;
   width: number;
   height: number;
 };
 
-/** Automation curves over the cells, in the track's colour; clicks pass through. */
+/** Automation curves, each in its own lane row and its track's colour; clicks pass through. */
 const LaneOverlay = memo(function LaneOverlay({
   sections,
-  tracks,
+  rows,
   ppb,
   width,
   height,
@@ -697,30 +887,34 @@ const LaneOverlay = memo(function LaneOverlay({
       className="pointer-events-none absolute left-0 top-0 z-10"
       aria-hidden="true"
     >
-      {tracks.map((t, r) => (
-        <g key={t.id} transform={`translate(0 ${TOP + r * ROW_H})`}>
-          {sections.map((s, i) =>
-            s.lanes
-              .filter((l) => l.track === t.id && l.points.length > 0)
-              .map((l) => (
-                <polyline
-                  key={`${i}-${l.param}`}
-                  data-lane={l.param}
-                  fill="none"
-                  stroke={trackColor(t.instrument)}
-                  strokeOpacity={0.75}
-                  strokeWidth={1.25}
-                  points={holdPoints(l.points, s.bars)
-                    .map(([bar, v]) => {
-                      const y = ROW_H - 6 - Math.min(1, Math.max(0, v)) * (ROW_H - 12);
-                      return `${(s.start_bar + bar) * ppb},${y}`;
-                    })
-                    .join(" ")}
-                />
-              )),
-          )}
-        </g>
-      ))}
+      {rows.map((r) => {
+        if (r.kind !== "lane") return null;
+        const top = TOP + r.y;
+        return (
+          <g key={`${r.track}.${r.param}`}>
+            {sections.map((s, i) =>
+              s.lanes
+                .filter((l) => l.track === r.track && l.param === r.param && l.points.length > 0)
+                .map((l) => (
+                  <polyline
+                    key={i}
+                    data-lane={l.param}
+                    fill="none"
+                    stroke={r.color}
+                    strokeOpacity={0.85}
+                    strokeWidth={1.25}
+                    points={holdPoints(l.points, s.bars)
+                      .map(([bar, v]) => {
+                        const y = top + LANE_H - 3 - Math.min(1, Math.max(0, v)) * (LANE_H - 6);
+                        return `${(s.start_bar + bar) * ppb},${y}`;
+                      })
+                      .join(" ")}
+                  />
+                )),
+            )}
+          </g>
+        );
+      })}
     </svg>
   );
 });

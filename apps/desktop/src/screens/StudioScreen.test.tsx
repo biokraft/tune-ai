@@ -142,3 +142,46 @@ describe("StudioScreen shell", () => {
     expect(screen.getByRole("status", { name: "Song file change" })).toHaveClass("glass-solid");
   });
 });
+
+describe("StudioScreen timeline blocks", () => {
+  const dock = () => screen.getByRole("region", { name: "Dock" });
+
+  it("a block opens its track in the dock on its section", () => {
+    render303();
+    fireEvent.click(screen.getByRole("button", { name: "a1 in b" }));
+    expect(within(dock()).getByTestId("dock-track")).toHaveTextContent("acid");
+    expect(within(dock()).getByText("b · bars 3–4")).toBeInTheDocument();
+    expect(screen.getByTestId("section-1")).toHaveAttribute("data-selected", "true");
+  });
+
+  it("keeps a valid dock header when the selected last section leaves the song", () => {
+    const client = render303();
+    fireEvent.click(screen.getByTestId("section-1"));
+    fireEvent.click(screen.getByRole("button", { name: "Open acid" }));
+    expect(within(dock()).getByText("b · bars 3–4")).toBeInTheDocument();
+    act(() =>
+      client.emit(
+        stateEvent((s) => {
+          s.song!.sections.pop();
+          s.song!.total_bars = 2;
+        }),
+      ),
+    );
+    expect(within(dock()).getByText("a · bars 1–2")).toBeInTheDocument();
+  });
+
+  it("labels lane rows from the track, strip and mix params", () => {
+    render303(
+      stateEvent((s) => {
+        s.song!.sections[0]!.lanes.push(
+          { track: "kick", param: "send.delay", points: [[0, 0.5]] },
+          { track: "mix", param: "reverb.size", points: [[0, 0.2]] },
+        );
+      }),
+    );
+    expect(screen.getByText("↳ Cutoff")).toBeInTheDocument();
+    expect(screen.getByText("↳ Delay")).toBeInTheDocument();
+    expect(screen.getByText("↳ Reverb size")).toBeInTheDocument();
+    expect(screen.getByTestId("mix-header")).toHaveTextContent("Mix");
+  });
+});

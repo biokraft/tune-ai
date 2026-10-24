@@ -1,13 +1,15 @@
 import { Arrangement, TransportBar, type ArrangementProps, type TransportBarProps } from "@tune/ui";
 import { memo, useCallback, useEffect, useMemo, useReducer } from "react";
-import type { Command, SongView, StudioState } from "../client/protocol";
+import type { Command, MixView, SongView, StudioState, TrackView } from "../client/protocol";
 import {
   currentSection,
   formatNumber,
   loopSectionName,
+  patternGlyph,
   playheadStep,
   sectionAtBar,
   sectionBars,
+  sentenceCase,
   STEPS_PER_BAR,
 } from "../lib/song";
 import { useStudioKeys } from "../lib/useStudioKeys";
@@ -84,9 +86,16 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
     [song.tracks],
   );
   const patterns = useMemo(
-    () => song.patterns.map((p) => ({ id: p.id, track: p.track })),
+    () =>
+      song.patterns.map((p) => ({
+        id: p.id,
+        track: p.track,
+        kind: p.kind,
+        glyph: patternGlyph(p),
+      })),
     [song.patterns],
   );
+  const laneLabels = useMemo(() => laneLabelsOf(song.tracks, song.mix), [song.tracks, song.mix]);
   const arrangementHandlers = useMemo(
     () => ({
       onSelect: (i: number) => store.select(i),
@@ -102,8 +111,6 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
         fire({ cmd: "delete_section", args: { index } });
         store.select(null);
       },
-      onSetPlay: (sec: number, track: string, pattern: string | null) =>
-        fire({ cmd: "set_section_play", args: { section: sec, track, pattern } }),
       onMix: (track: string, patch: { mute?: boolean; solo?: boolean }) =>
         fire({
           cmd: "set_track_mix",
@@ -160,6 +167,7 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
             sections={song.sections}
             tracks={tracks}
             patterns={patterns}
+            laneLabels={laneLabels}
             cursorBar={state.cursor_bar}
             selected={view.selectedSection}
             loop={loop}
@@ -200,6 +208,24 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
       </div>
     </HelpProvider>
   );
+}
+
+/**
+ * The timeline's lane row labels, keyed `${track}.${param}`: a track's instrument, fx and strip
+ * params, and the mix's under track `"mix"`. Delay and reverb params carry their bus name, since
+ * both buses have a "Low cut" and a "Width".
+ */
+function laneLabelsOf(tracks: TrackView[], mix: MixView): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const t of tracks) {
+    for (const p of [...t.params, ...t.fx.flatMap((f) => f.params), ...t.strip]) {
+      out[`${t.id}.${p.id}`] = sentenceCase(p.label);
+    }
+  }
+  for (const p of mix.delay) out[`mix.${p.id}`] = `Delay ${p.label.toLowerCase()}`;
+  for (const p of mix.reverb) out[`mix.${p.id}`] = `Reverb ${p.label.toLowerCase()}`;
+  for (const p of mix.master_params) out[`mix.${p.id}`] = sentenceCase(p.label);
+  return out;
 }
 
 /** Three soft colour fields behind the glass. */
