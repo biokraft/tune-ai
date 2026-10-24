@@ -151,6 +151,27 @@ describe("Arrangement", () => {
     expect(screen.getByRole("rowgroup", { name: "Tracks" })).toHaveClass("sticky", "left-0");
   });
 
+  it("fills the sticky parts only while something scrolls under them", () => {
+    setup([sec("a", 0, 16)]);
+    const column = screen.getByRole("rowgroup", { name: "Tracks" });
+    const scroller = column.parentElement!.parentElement!;
+    const filled = (el: Element) => el.className.includes("--solid");
+    const band = column.nextElementSibling!.firstElementChild!;
+    expect(filled(column)).toBe(false);
+    expect(filled(band)).toBe(false);
+
+    scroller.scrollTop = 40;
+    fireEvent.scroll(scroller);
+    expect(filled(band)).toBe(true);
+    expect(filled(column)).toBe(false);
+
+    scroller.scrollTop = 0;
+    scroller.scrollLeft = 30;
+    fireEvent.scroll(scroller);
+    expect(filled(band)).toBe(false);
+    expect(filled(column)).toBe(true);
+  });
+
   it("lanes hold flat to the section edges and single points span the section", () => {
     const lanes = [
       {
