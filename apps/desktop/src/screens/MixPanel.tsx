@@ -2,6 +2,7 @@ import { FxPanel, type Highlight, type ParamSpecView } from "@tune/ui";
 import { memo, useMemo, useState } from "react";
 import type { Command, ParamView, SongView } from "../client/protocol";
 import type { HighlightKind } from "../store/studioStore";
+import { duckText, LIMITER_OFF, splitMaster, UNUSED } from "./dock/MixerTab";
 import { HelpStrip } from "./HelpStrip";
 import { useParamDrag } from "./useParamDrag";
 
@@ -16,13 +17,9 @@ export type MixPanelProps = {
   onHelp?(spec: ParamSpecView | null): void;
 };
 
-/** Said on a bus nobody sends to: its knobs work, but only a release builds the bus. */
-const UNUSED = "No track sends here yet — sends start after the first release";
-
 const MASTER_NOTE = 'Master: soft clipper (set mix.master = "limit" in the song for the limiter)';
 
-/** Said on the limiter's knobs in clip mode: they are written, but nothing hears them yet. */
-export const LIMITER_OFF = "Off in clip mode";
+export { LIMITER_OFF };
 
 /**
  * The shared effects and the master: delay and reverb buses, the master gain, and the limiter's
@@ -46,9 +43,7 @@ export const MixPanel = memo(function MixPanel({
   );
   const drag = useParamDrag("mix", send, all);
   const live = (params: ParamView[]) => params.map((p) => ({ ...p, value: drag.valueOf(p) }));
-  // The gain drives either master stage; ceiling and release only the limiter.
-  const gain = mix.master_params.filter((p) => p.id === "master.gain");
-  const limiter = mix.master_params.filter((p) => p.id !== "master.gain");
+  const { gain, limiter } = splitMaster(mix.master_params);
 
   const lanes = automatedIn === null ? undefined : song.sections[automatedIn]?.lanes;
   const automated = (id: string) =>
@@ -78,9 +73,7 @@ export const MixPanel = memo(function MixPanel({
       <p className="font-value text-xs text-silkscreen/70">
         {mix.master === "limit" ? "Master: limiter" : MASTER_NOTE}
       </p>
-      <p className="font-value text-xs text-silkscreen/70">
-        {mix.duck_source ? `Ducking follows: ${mix.duck_source}` : "Ducking: no kick to follow"}
-      </p>
+      <p className="font-value text-xs text-silkscreen/70">{duckText(mix.duck_source)}</p>
     </section>
   );
 });
