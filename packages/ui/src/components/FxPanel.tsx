@@ -43,7 +43,7 @@ export function FxPanel({
       role="group"
       aria-label={title}
       data-inactive={inactive ? "true" : undefined}
-      className="flex flex-col rounded-rs border border-line bg-glass2"
+      className="flex shrink-0 flex-col rounded-rs border border-line bg-glass2"
     >
       <div className="flex items-center gap-2 border-b border-line px-2.5 py-2">
         <span className="text-xs font-bold leading-none text-ink">{title}</span>
@@ -52,7 +52,7 @@ export function FxPanel({
       </div>
       <div
         className={cn(
-          "flex flex-wrap items-start gap-1 p-2.5 transition-opacity",
+          "flex flex-nowrap items-start gap-1 p-2.5 transition-opacity",
           inactive && "opacity-50",
         )}
       >
