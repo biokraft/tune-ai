@@ -4,7 +4,6 @@ import type { Command, SongView } from "../../client/protocol";
 import { StepsTab } from "./StepsTab";
 
 const song = goldenState.song! as SongView;
-const track = (id: string) => song.tracks.find((t) => t.id === id)!;
 
 function setup(trackId: string, section: number | null, s: SongView = song) {
   const sent: Command[] = [];
@@ -67,6 +66,5 @@ describe("StepsTab", () => {
     s.tracks = s.tracks.filter((t) => t.id === "acid");
     setup("acid", 1, s);
     expect(screen.getByRole("group", { name: "303 step sequencer" })).toBeInTheDocument();
-    expect(track("acid")).toBeTruthy();
   });
 });
