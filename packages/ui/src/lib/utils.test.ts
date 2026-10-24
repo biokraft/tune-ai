@@ -4,7 +4,7 @@ import { cn } from "./utils";
 describe("cn", () => {
   it("keeps the solid outline beside its width, as Tailwind 3 reads them", () => {
     const ring =
-      "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-silkscreen";
+      "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-play";
     expect(cn(ring).split(" ")).toEqual(ring.split(" "));
   });
 
