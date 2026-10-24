@@ -9,3 +9,4 @@ export { Arrangement, type ArrangementProps } from "./components/Arrangement";
 export { TrackStrip, type TrackStripProps } from "./components/TrackStrip";
 export { TransportBar, type TransportBarProps } from "./components/TransportBar";
 export { FxPanel, type FxPanelProps } from "./components/FxPanel";
+export { instrumentTitle, trackColor, trackColorVar } from "./lib/instruments";

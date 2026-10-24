@@ -196,7 +196,7 @@ export function Arrangement(p: ArrangementProps) {
                     x2={b * PX_PER_BAR}
                     y1={RULER_H - 6}
                     y2={height}
-                    stroke="hsl(var(--border))"
+                    stroke="rgb(var(--border))"
                     strokeWidth={1}
                     opacity={0.5}
                   />
@@ -204,7 +204,7 @@ export function Arrangement(p: ArrangementProps) {
                     x={b * PX_PER_BAR + 3}
                     y={12}
                     fontSize={11}
-                    fill="hsl(var(--silkscreen))"
+                    fill="rgb(var(--silkscreen))"
                     className="font-value"
                   >
                     {b + 1}
@@ -219,7 +219,7 @@ export function Arrangement(p: ArrangementProps) {
                 y={RULER_H - 4}
                 width={(p.loop[1] - p.loop[0]) * PX_PER_BAR}
                 height={4}
-                fill="hsl(var(--slide))"
+                fill="rgb(var(--slide))"
               />
             )}
             {p.sections.map((s, i) => {
@@ -239,13 +239,13 @@ export function Arrangement(p: ArrangementProps) {
                     width={w}
                     height={BLOCK_H}
                     rx={3}
-                    fill="hsl(var(--faceplate))"
+                    fill="rgb(var(--faceplate))"
                     stroke={
                       lit
-                        ? "hsl(var(--claude))"
+                        ? "rgb(var(--claude))"
                         : sel
-                          ? "hsl(var(--silkscreen))"
-                          : "hsl(var(--border))"
+                          ? "rgb(var(--silkscreen))"
+                          : "rgb(var(--border))"
                     }
                     strokeWidth={lit || sel ? 2 : 1}
                     className="cursor-grab touch-none"
@@ -264,7 +264,7 @@ export function Arrangement(p: ArrangementProps) {
                     x={8}
                     y={21}
                     fontSize={14}
-                    fill="hsl(var(--silkscreen))"
+                    fill="rgb(var(--silkscreen))"
                     pointerEvents="none"
                     className="font-label"
                   >
@@ -276,7 +276,7 @@ export function Arrangement(p: ArrangementProps) {
                     y={0}
                     width={HANDLE_W}
                     height={BLOCK_H}
-                    fill="hsl(var(--silkscreen))"
+                    fill="rgb(var(--silkscreen))"
                     opacity={0.25}
                     className="cursor-ew-resize touch-none"
                     onPointerDown={(e) => edgeDown(i, e)}
@@ -294,7 +294,7 @@ export function Arrangement(p: ArrangementProps) {
                   x2={width}
                   y1={ROW_H}
                   y2={ROW_H}
-                  stroke="hsl(var(--border))"
+                  stroke="rgb(var(--border))"
                   opacity={0.4}
                 />
               </g>
@@ -305,7 +305,7 @@ export function Arrangement(p: ArrangementProps) {
               x2={p.playhead * PX_PER_BAR}
               y1={0}
               y2={height}
-              stroke="hsl(var(--led))"
+              stroke="rgb(var(--led))"
               strokeWidth={2}
               pointerEvents="none"
             />
@@ -405,7 +405,7 @@ export function Arrangement(p: ArrangementProps) {
                         key={`${i}-${l.param}`}
                         data-lane={l.param}
                         fill="none"
-                        stroke="hsl(var(--slide))"
+                        stroke="rgb(var(--slide))"
                         strokeWidth={1}
                         points={holdPoints(l.points, s.bars)
                           .map(([bar, v]) => {

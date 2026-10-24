@@ -299,7 +299,7 @@ function ModeSwitch({ modes, mode, highlight, onPick }: ModeSwitchProps) {
               aria-hidden="true"
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
-                on ? "bg-led shadow-[0_0_6px_hsl(var(--led))]" : "bg-black/50",
+                on ? "bg-led shadow-[0_0_6px_rgb(var(--led))]" : "bg-black/50",
               )}
             />
             <span className="font-label text-sm leading-none text-silkscreen">

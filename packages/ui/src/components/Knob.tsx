@@ -179,7 +179,7 @@ export function Knob({
               cy={CY}
               r={47}
               fill="none"
-              stroke="hsl(var(--claude))"
+              stroke="rgb(var(--claude))"
               strokeWidth={2.5}
               strokeDasharray={highlight === "external" ? "4 3" : undefined}
             />
@@ -187,7 +187,7 @@ export function Knob({
           <path
             d={arc(START, START + SWEEP, ARC_R)}
             fill="none"
-            stroke="hsl(var(--border))"
+            stroke="rgb(var(--border))"
             strokeWidth={4}
             strokeLinecap="round"
           />
@@ -196,7 +196,7 @@ export function Knob({
               data-testid="knob-arc"
               d={arc(START, angle, ARC_R)}
               fill="none"
-              stroke="hsl(var(--led))"
+              stroke="rgb(var(--led))"
               strokeWidth={4}
               strokeLinecap="round"
             />
@@ -214,18 +214,18 @@ export function Knob({
             y1={hub.y}
             x2={tip.x}
             y2={tip.y}
-            stroke="hsl(var(--silkscreen))"
+            stroke="rgb(var(--silkscreen))"
             strokeWidth={3}
             strokeLinecap="round"
           />
           {automated && (
             <g data-testid="knob-lane">
               <title>Automated in this section</title>
-              <rect x={78} y={4} width={18} height={9} rx={2} fill="hsl(var(--slide))" />
+              <rect x={78} y={4} width={18} height={9} rx={2} fill="rgb(var(--slide))" />
               <path
                 d="M81 10 L85 7 L89 10 L93 7"
                 fill="none"
-                stroke="hsl(var(--chassis))"
+                stroke="rgb(var(--chassis))"
                 strokeWidth={1.4}
               />
             </g>
