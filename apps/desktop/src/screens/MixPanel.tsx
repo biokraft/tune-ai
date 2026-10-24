@@ -2,7 +2,7 @@ import { FxPanel, type Highlight, type ParamSpecView } from "@tune/ui";
 import { memo, useMemo, useState } from "react";
 import type { Command, ParamView, SongView } from "../client/protocol";
 import type { HighlightKind } from "../store/studioStore";
-import { duckText, LIMITER_OFF, splitMaster, UNUSED } from "./dock/MixerTab";
+import { duckText, LIMITER_OFF, MASTER_NOTE, splitMaster, UNUSED } from "./dock/MixerTab";
 import { HelpStrip } from "./HelpStrip";
 import { useParamDrag } from "./useParamDrag";
 
@@ -16,8 +16,6 @@ export type MixPanelProps = {
   help?: ParamSpecView | null;
   onHelp?(spec: ParamSpecView | null): void;
 };
-
-const MASTER_NOTE = 'Master: soft clipper (set mix.master = "limit" in the song for the limiter)';
 
 export { LIMITER_OFF };
 
