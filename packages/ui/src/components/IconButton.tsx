@@ -40,7 +40,7 @@ export const IconButton = memo(function IconButton({
         size === "md"
           ? "h-8 min-w-8 gap-1.5 px-[9px] text-[12px] [&_svg]:h-4 [&_svg]:w-4"
           : "h-[26px] min-w-[26px] gap-1.5 px-1.5 text-[11px] [&_svg]:h-[14px] [&_svg]:w-[14px]",
-        pressed ? "border-line2 bg-ink/12" : "border-line bg-ink/[.04]",
+        pressed ? "border-line2 bg-ink/[.12]" : "border-line bg-ink/[.04]",
         !disabled && (pressed ? "hover:bg-ink/[.16]" : "hover:bg-ink/[.09]"),
         className,
       )}
