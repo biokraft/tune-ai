@@ -10,3 +10,7 @@ export { TrackStrip, type TrackStripProps } from "./components/TrackStrip";
 export { TransportBar, type TransportBarProps } from "./components/TransportBar";
 export { FxPanel, type FxPanelProps } from "./components/FxPanel";
 export { instrumentTitle, trackColor, trackColorVar } from "./lib/instruments";
+export { Fader, type FaderProps } from "./components/Fader";
+export { Segmented, type SegmentedProps } from "./components/Segmented";
+export { MuteSolo, type MuteSoloProps } from "./components/MuteSolo";
+export { IconButton, type IconButtonProps } from "./components/IconButton";
