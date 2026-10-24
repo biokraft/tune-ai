@@ -58,6 +58,12 @@ describe("TransportBar", () => {
     setup({ playing: true });
     expect(screen.getByRole("button", { name: "Pause (space)" })).toBeInTheDocument();
   });
+  it("Pause click while playing calls onStop, not onPlay", () => {
+    const f = setup({ playing: true });
+    fireEvent.click(screen.getByRole("button", { name: "Pause (space)" }));
+    expect(f.onStop).toHaveBeenCalledTimes(1);
+    expect(f.onPlay).not.toHaveBeenCalled();
+  });
   it("Stop calls onStop", () => {
     const f = setup();
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));

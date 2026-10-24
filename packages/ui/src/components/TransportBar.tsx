@@ -105,7 +105,7 @@ export const TransportBar = memo(function TransportBar(p: TransportBarProps) {
       <button
         type="button"
         aria-label={p.playing ? "Pause (space)" : "Play (space)"}
-        onClick={p.onPlay}
+        onClick={p.playing ? p.onStop : p.onPlay}
         className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-full bg-play text-bg shadow-[0_0_0_4px_rgb(var(--play)/.12),0_0_24px_rgb(220_200_255/.55)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-play"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true" className="h-[18px] w-[18px] fill-current">
