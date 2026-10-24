@@ -18,6 +18,7 @@ import {
   type SectionView,
 } from "../lib/arrange";
 import { instrumentTitle, trackColor, trackColorVar } from "../lib/instruments";
+import type { Highlight } from "./Knob";
 import { MuteSolo } from "./MuteSolo";
 
 export type { SectionView } from "../lib/arrange";
@@ -42,8 +43,12 @@ export type ArrangementProps = {
   loop: [number, number] | null;
   /** The track shown in the dock, if any; its header is pressed. */
   openTrack: string | null;
-  /** Edit paths changed by Claude (`sections`, `sections[i]`, `sections[i].*`, `patterns.<id>.*`). */
-  highlighted?: Set<string>;
+  /**
+   * Edit paths changed from outside (`sections`, `sections[i]`, `sections[i].*`,
+   * `patterns.<id>.*`), each with who changed it: Claude's are ringed cyan, the song file's
+   * outlined dashed in ink2.
+   */
+  highlighted?: ReadonlyMap<string, Mark>;
   /** Lane row labels, keyed `${track}.${param}` (mix lanes have track `"mix"`); else the param id. */
   laneLabels?: Record<string, string>;
   onSelect(i: number): void;
@@ -133,16 +138,43 @@ function layoutRows(tracks: ArrangementTrack[], sections: SectionView[]): Row[] 
   return rows;
 }
 
-/** Whether Claude changed what `track` plays in section `i`, or the pattern `id` itself. */
-function isBlockLit(h: Set<string> | undefined, i: number, track: string, id: string | undefined) {
-  if (!h) return false;
-  if (h.has(`sections[${i}].play.${track}`)) return true;
-  if (id === undefined) return false;
-  if (h.has(`patterns.${id}`)) return true;
-  const prefix = `patterns.${id}.`;
-  for (const p of h) if (p.startsWith(prefix)) return true;
-  return false;
+/** Who changed something: Claude or the song file on disk. */
+type Mark = NonNullable<Highlight>;
+type Marks = ReadonlyMap<string, Mark> | undefined;
+
+/** The strongest mark among the paths that `hit` matches: Claude's over the song file's. */
+function strongest(h: Marks, hit: (path: string) => boolean): Highlight {
+  if (!h) return null;
+  let out: Highlight = null;
+  for (const [path, kind] of h) {
+    if (!hit(path)) continue;
+    if (kind === "claude") return kind;
+    out = kind;
+  }
+  return out;
 }
+
+/** Who changed what `track` plays in section `i`, or the pattern `id` itself, if anyone. */
+function blockMark(h: Marks, i: number, track: string, id: string | undefined): Highlight {
+  const play = `sections[${i}].play.${track}`;
+  const pat = `patterns.${id}`;
+  return strongest(
+    h,
+    (p) => p === play || (id !== undefined && (p === pat || p.startsWith(`${pat}.`))),
+  );
+}
+
+/** Who changed section `i` (or the section list), if anyone. */
+function sectionMark(h: Marks, i: number): Highlight {
+  const self = `sections[${i}]`;
+  return strongest(h, (p) => p === "sections" || p === self || p.startsWith(`${self}.`));
+}
+
+/** A highlight outline's stroke: cyan for Claude, a dashed ink2 line for the song file. */
+const markStroke = (kind: Mark) =>
+  kind === "claude"
+    ? { stroke: "rgb(var(--agent))" }
+    : { stroke: "rgb(var(--ink2))", strokeDasharray: "4 3" };
 
 type Drag =
   | { kind: "move"; i: number; startX: number; dx: number }
@@ -163,14 +195,6 @@ function release(e: PointerEvent<Element>) {
   } catch {
     /* ignore */
   }
-}
-
-function isLit(h: Set<string> | undefined, i: number): boolean {
-  if (!h) return false;
-  if (h.has("sections") || h.has(`sections[${i}]`)) return true;
-  const prefix = `sections[${i}].`;
-  for (const p of h) if (p.startsWith(prefix)) return true;
-  return false;
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -345,7 +369,7 @@ export function Arrangement(p: ArrangementProps) {
                 {p.sections.map((s, i) => {
                   const moving = drag?.kind === "move" && drag.i === i;
                   const w = widthOf(s, i, drag, ppb);
-                  const lit = isLit(p.highlighted, i);
+                  const lit = sectionMark(p.highlighted, i);
                   const sel = p.selected === i;
                   return (
                     <g
@@ -365,14 +389,14 @@ export function Arrangement(p: ArrangementProps) {
                       />
                       {lit && (
                         <rect
-                          data-highlight="claude"
+                          data-highlight={lit}
                           x={1}
                           y={4}
                           width={Math.max(0, w - 2)}
                           height={SECROW_H - 8}
                           rx={7}
                           fill="none"
-                          stroke="rgb(var(--agent))"
+                          {...markStroke(lit)}
                           strokeWidth={1.5}
                           pointerEvents="none"
                         />
@@ -390,7 +414,7 @@ export function Arrangement(p: ArrangementProps) {
                       </svg>
                       <rect
                         data-testid={`section-${i}`}
-                        data-highlight={lit ? "claude" : undefined}
+                        data-highlight={lit ?? undefined}
                         data-selected={sel}
                         x={0}
                         y={0}
@@ -758,18 +782,18 @@ const Blocks = memo(function Blocks({
             width: w,
             height: h,
           };
-          const lit = isBlockLit(highlighted, i, t.id, id);
+          const lit = blockMark(highlighted, i, t.id, id);
           const ring = lit && (
             <rect
               data-testid="block-highlight"
-              data-highlight="claude"
+              data-highlight={lit}
               x={0.75}
               y={0.75}
               width={Math.max(0, w - 1.5)}
               height={h - 1.5}
               rx={9}
               fill="none"
-              stroke="rgb(var(--agent))"
+              {...markStroke(lit)}
               strokeWidth={1.5}
             />
           );

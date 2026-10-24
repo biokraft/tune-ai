@@ -155,14 +155,22 @@ describe("AcidStepSequencer", () => {
         patternId="p"
         steps={steps}
         playingStep={null}
-        highlighted={new Set([2])}
+        highlighted={
+          new Map([
+            [2, "claude"],
+            [3, "external"],
+          ])
+        }
         onChange={() => {}}
       />,
     );
-    expect(container.querySelectorAll("[data-step]")[2]).toHaveAttribute(
-      "data-highlight",
-      "claude",
-    );
+    const cols = container.querySelectorAll("[data-step]");
+    expect(cols[2]).toHaveAttribute("data-highlight", "claude");
+    expect(cols[2]).toHaveClass("outline-agent");
+    expect(cols[3]).toHaveAttribute("data-highlight", "external");
+    expect(cols[3]).toHaveClass("outline-dashed", "outline-ink2");
+    expect(cols[3]!.className).not.toMatch(/agent/);
+    expect(cols[1]).not.toHaveAttribute("data-highlight");
   });
 
   it("handled keys do not reach document listeners", () => {

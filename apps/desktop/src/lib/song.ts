@@ -1,6 +1,6 @@
 import type { SectionView } from "@tune/ui";
 import type { PatternView, SongView, StudioState } from "../client/protocol";
-import type { StudioView } from "../store/studioStore";
+import type { HighlightKind, StudioView } from "../store/studioStore";
 
 /** 16ths per bar. */
 export const STEPS_PER_BAR = 16;
@@ -75,12 +75,15 @@ export function stepInPattern(
   return offset % length;
 }
 
-/** The step indices of `pattern` highlighted in `highlights`. */
-export function highlightedSteps(highlights: Map<string, unknown>, pattern: string): Set<number> {
+/** The step indices of `pattern` highlighted in `highlights`, each with who changed it. */
+export function highlightedSteps(
+  highlights: ReadonlyMap<string, HighlightKind>,
+  pattern: string,
+): Map<number, HighlightKind> {
   const prefix = `patterns.${pattern}.steps[`;
-  const out = new Set<number>();
-  for (const key of highlights.keys()) {
-    if (key.startsWith(prefix)) out.add(Number(key.slice(prefix.length, -1)));
+  const out = new Map<number, HighlightKind>();
+  for (const [key, kind] of highlights) {
+    if (key.startsWith(prefix)) out.set(Number(key.slice(prefix.length, -1)), kind);
   }
   return out;
 }

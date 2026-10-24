@@ -1,6 +1,7 @@
 import * as Popover from "@radix-ui/react-popover";
 import { useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "../lib/utils";
+import type { Highlight } from "./Knob";
 import { noteName, PITCH_CLASSES, type AcidStep } from "../lib/notes";
 
 export type { AcidStep } from "../lib/notes";
@@ -11,7 +12,8 @@ export type AcidStepSequencerProps = {
   steps: AcidStep[];
   /** Pattern-relative index of the sounding step. */
   playingStep: number | null;
-  highlighted?: Set<number>;
+  /** Steps changed from outside, by whom: Claude's ringed cyan, the song file's dashed ink2. */
+  highlighted?: ReadonlyMap<number, NonNullable<Highlight>>;
   onChange: (index: number, step: AcidStep) => void;
   /** CSS colour of lit step lights and flags; defaults to the acid token. */
   color?: string;
@@ -181,7 +183,7 @@ export function AcidStepSequencer({
     <div ref={root} role="group" aria-label="303 step sequencer" className="flex w-full">
       {steps.map((step, i) => {
         const playing = playingStep === i;
-        const lit = highlighted?.has(i) ?? false;
+        const lit = highlighted?.get(i) ?? null;
         const n = i + 1;
         const rest = step.note === null;
         return (
@@ -189,13 +191,14 @@ export function AcidStepSequencer({
             key={i}
             data-step={i}
             data-playing={playing}
-            data-highlight={lit ? "claude" : undefined}
+            data-highlight={lit ?? undefined}
             className={cn(
               // Columns share the dock's width, as the Seq303 board's `.sc`; past 16 steps on a
               // narrow dock they hold 44 px and the tab scrolls sideways.
               "relative flex min-w-[44px] flex-1 flex-col items-stretch gap-1 border-l px-1 pb-1 pt-2",
               i % 4 === 0 ? "border-line2" : "border-line",
-              lit && "outline outline-2 -outline-offset-2 outline-agent",
+              lit === "claude" && "outline outline-2 -outline-offset-2 outline-agent",
+              lit === "external" && "outline-dashed outline-2 -outline-offset-2 outline-ink2",
             )}
           >
             {playing && (

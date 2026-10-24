@@ -209,9 +209,35 @@ describe("Arrangement", () => {
   });
 
   it("highlighted paths ring the block", () => {
-    setup([sec("a", 0, 16), sec("b", 16, 16)], { highlighted: new Set(["sections[1].bars"]) });
+    setup([sec("a", 0, 16), sec("b", 16, 16)], {
+      highlighted: new Map([["sections[1].bars", "claude"]]),
+    });
     expect(block(0)).not.toHaveAttribute("data-highlight");
     expect(block(1)).toHaveAttribute("data-highlight", "claude");
+    const ring = block(1).parentElement!.querySelector('rect[data-highlight="claude"]')!;
+    expect(ring).toHaveAttribute("stroke", "rgb(var(--agent))");
+  });
+
+  it("marks a section changed on disk with a dashed ink2 outline, not cyan", () => {
+    setup([sec("a", 0, 16), sec("b", 16, 16)], {
+      highlighted: new Map([["sections[1].bars", "external"]]),
+    });
+    expect(block(1)).toHaveAttribute("data-highlight", "external");
+    const g = block(1).parentElement!;
+    expect(g.innerHTML).not.toMatch(/--agent/);
+    const mark = g.querySelector('rect[data-highlight="external"]')!;
+    expect(mark).toHaveAttribute("stroke", "rgb(var(--ink2))");
+    expect(mark).toHaveAttribute("stroke-dasharray");
+  });
+
+  it("a Claude change wins over a change on disk in the same section", () => {
+    setup([sec("a", 0, 16)], {
+      highlighted: new Map([
+        ["sections[0].bars", "external"],
+        ["sections[0].name", "claude"],
+      ]),
+    });
+    expect(block(0)).toHaveAttribute("data-highlight", "claude");
   });
 
   it("keys act on the selected section, only inside the arrangement", async () => {
@@ -437,7 +463,12 @@ describe("Arrangement blocks", () => {
         sec("a", 0, 16, { play: { acid: "a1", drums: "d1" } }),
         sec("b", 16, 16, { play: { acid: "a1", drums: "d1" } }),
       ],
-      { highlighted: new Set(["sections[0].play.drums", "patterns.a1.steps[2]"]) },
+      {
+        highlighted: new Map([
+          ["sections[0].play.drums", "claude"],
+          ["patterns.a1.steps[2]", "claude"],
+        ]),
+      },
     );
     const ring = (name: string) => within(blk(name)).queryByTestId("block-highlight");
     const r = ring("d1 in a")!;
@@ -448,6 +479,29 @@ describe("Arrangement blocks", () => {
     expect(ring("d1 in b")).toBeNull();
     expect(ring("a1 in a")).toBeInTheDocument();
     expect(ring("a1 in b")).toBeInTheDocument();
+  });
+
+  it("outlines a block changed on disk dashed in ink2, not cyan", () => {
+    setup([sec("a", 0, 16, { play: { acid: "a1", drums: "d1" } })], {
+      highlighted: new Map([
+        ["sections[0].play.drums", "external"],
+        ["patterns.a1.steps[2]", "external"],
+      ]),
+    });
+    for (const name of ["d1 in a", "a1 in a"]) {
+      const r = within(blk(name)).getByTestId("block-highlight");
+      expect(r).toHaveAttribute("data-highlight", "external");
+      expect(r).toHaveAttribute("stroke", "rgb(var(--ink2))");
+      expect(r).toHaveAttribute("stroke-dasharray");
+      expect(blk(name).innerHTML).not.toMatch(/--agent/);
+    }
+  });
+
+  it("outlines an empty cell changed on disk dashed in ink2", () => {
+    setup([sec("a", 0, 16)], { highlighted: new Map([["sections[0].play.drums", "external"]]) });
+    const r = within(screen.getByTestId("empty-0-drums")).getByTestId("block-highlight");
+    expect(r).toHaveAttribute("data-highlight", "external");
+    expect(r).toHaveAttribute("stroke", "rgb(var(--ink2))");
   });
 
   it("gives each automated param a 22 px row under its track", () => {

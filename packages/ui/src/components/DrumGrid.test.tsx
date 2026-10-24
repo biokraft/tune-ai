@@ -34,7 +34,7 @@ describe("DrumGrid", () => {
   it("marks the playing step and highlights", () => {
     setup({
       playingStep: 1,
-      rows: [{ ...rows[0]!, hits: [...rows[0]!.hits], highlighted: new Set([3]) }],
+      rows: [{ ...rows[0]!, hits: [...rows[0]!.hits], highlighted: new Map([[3, "claude"]]) }],
     });
     expect(screen.getByRole("button", { name: "kick step 2: hit" })).toHaveAttribute(
       "data-playing",
@@ -44,6 +44,17 @@ describe("DrumGrid", () => {
       "data-highlight",
       "claude",
     );
+    expect(screen.getByRole("button", { name: "kick step 4: rest" })).toHaveClass("ring-agent");
+  });
+  it("marks a step changed on disk with a dashed ink2 outline, not cyan", () => {
+    setup({
+      rows: [{ ...rows[0]!, hits: [...rows[0]!.hits], highlighted: new Map([[3, "external"]]) }],
+    });
+    const step = screen.getByRole("button", { name: "kick step 4: rest" });
+    expect(step).toHaveAttribute("data-highlight", "external");
+    expect(step.className).not.toMatch(/agent/);
+    const mark = step.querySelector("[data-external-mark]")!;
+    expect(mark).toHaveClass("border-dashed", "border-ink2");
   });
 });
 

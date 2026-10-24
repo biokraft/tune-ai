@@ -80,7 +80,6 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
     escape: () => dispatch({ type: "close" }),
   });
 
-  const highlightedPaths = useMemo(() => new Set(highlights.keys()), [highlights]);
   const tracks = useMemo(
     () =>
       song.tracks.map((t) => ({ id: t.id, instrument: t.instrument, mute: t.mute, solo: t.solo })),
@@ -174,7 +173,7 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
             selected={view.selectedSection}
             loop={loop}
             openTrack={openTrack}
-            highlighted={highlightedPaths}
+            highlighted={highlights}
             {...arrangementHandlers}
           />
           {dock === null && <HelpLine />}
