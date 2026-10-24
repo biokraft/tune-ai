@@ -82,7 +82,10 @@ const DRAG_SLOP = 4;
 
 const focusRing =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-play";
-/** Sticky parts cover what scrolls under them. */
+/**
+ * Sticky parts cover what scrolls under them. Only then: at rest they stay clear like the
+ * Timeline board's header column, so the glass shows through.
+ */
 const stickyFill = "bg-[rgb(var(--solid)/0.92)]";
 const WHITE_EDGE = "rgb(255 255 255 / .4)";
 const NO_LABELS: Record<string, string> = {};
@@ -194,6 +197,15 @@ export function Arrangement(p: ArrangementProps) {
 
   const scroller = useRef<HTMLDivElement>(null);
   const [measured, setMeasured] = useState(0);
+  /** Whether rows (y) or lanes (x) have scrolled under the sticky band and header column. */
+  const [under, setUnder] = useState({ x: false, y: false });
+  const onScroll = () => {
+    const el = scroller.current;
+    if (!el) return;
+    const x = el.scrollLeft > 0;
+    const y = el.scrollTop > 0;
+    setUnder((u) => (u.x === x && u.y === y ? u : { x, y }));
+  };
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -302,9 +314,11 @@ export function Arrangement(p: ArrangementProps) {
           {plural(p.sections.length, "section")} · {plural(p.tracks.length, "track")}
         </span>
       </div>
-      <div ref={scroller} className="relative min-h-0 flex-1 overflow-auto">
+      <div ref={scroller} className="relative min-h-0 flex-1 overflow-auto" onScroll={onScroll}>
         <div className="relative flex" style={{ width: HEADER_W + laneW + PAD_R, height }}>
           <TrackHeaders
+            fillColumn={under.x}
+            fillTop={under.y}
             rows={rows}
             laneLabels={p.laneLabels ?? NO_LABELS}
             openTrack={p.openTrack}
@@ -312,7 +326,7 @@ export function Arrangement(p: ArrangementProps) {
             onMix={p.onMix}
           />
           <div className="relative shrink-0" style={{ width: laneW, height }}>
-            <div className={cn("sticky top-0 z-20", stickyFill)} style={{ height: TOP }}>
+            <div className={cn("sticky top-0 z-20", under.y && stickyFill)} style={{ height: TOP }}>
               <Ruler laneW={laneW} ppb={ppb} step={step} loop={p.loop} />
               <svg
                 ref={secRow}
@@ -582,6 +596,10 @@ const Ruler = memo(function Ruler({ laneW, ppb, step, loop }: RulerProps) {
 type TrackHeadersProps = Pick<ArrangementProps, "openTrack" | "onOpenTrack" | "onMix"> & {
   rows: Row[];
   laneLabels: Record<string, string>;
+  /** Lanes have scrolled under the column. */
+  fillColumn: boolean;
+  /** Rows have scrolled under the Bar and Sections labels. */
+  fillTop: boolean;
 };
 
 /**
@@ -589,6 +607,8 @@ type TrackHeadersProps = Pick<ArrangementProps, "openTrack" | "onOpenTrack" | "o
  * `↳` lane labels under it, and a "Mix" header over the mix lanes.
  */
 const TrackHeaders = memo(function TrackHeaders({
+  fillColumn,
+  fillTop,
   rows,
   laneLabels,
   openTrack,
@@ -599,10 +619,10 @@ const TrackHeaders = memo(function TrackHeaders({
     <div
       role="rowgroup"
       aria-label="Tracks"
-      className={cn("sticky left-0 z-30 shrink-0 border-r border-line", stickyFill)}
+      className={cn("sticky left-0 z-30 shrink-0 border-r border-line", fillColumn && stickyFill)}
       style={{ width: HEADER_W }}
     >
-      <div aria-hidden="true" className={cn("sticky top-0 z-10", stickyFill)}>
+      <div aria-hidden="true" className={cn("sticky top-0 z-10", fillTop && stickyFill)}>
         <div className="flex items-center border-b border-line pl-3" style={{ height: RULER_H }}>
           <span className="lbl">Bar</span>
         </div>
