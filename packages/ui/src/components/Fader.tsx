@@ -8,7 +8,7 @@ export type FaderProps = {
   max: number;
   defaultValue: number;
   unit: string;
-  /** CSS colour of the filled part of the track. */
+  /** CSS colour of the filled part of the slot (the track colour, as the knob arcs). */
   color?: string;
   /** Live, on every pointer move. */
   onChange(v: number): void;
@@ -20,6 +20,8 @@ export type FaderProps = {
 
 /** Pointer travel (px) for the full range; Shift makes it ten times finer. */
 const TRAVEL_PX = 160;
+/** The drawn slot's height: shorter than the travel, so a strip fits a 720 px window's dock. */
+const SLOT_PX = 128;
 const FINE = 0.1;
 const STEP = 0.5;
 const STEP_PAGE = 3;
@@ -45,6 +47,8 @@ export const Fader = memo(function Fader({
   const shown = clamp(value);
   const norm = max > min ? (shown - min) / (max - min) : 0;
   const text = `${shown.toFixed(1)} ${unit}`.trim();
+  /** Where 0 sits on the slot, when the range spans it. */
+  const zero = min < 0 && max > 0 ? -min / (max - min) : null;
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -116,7 +120,7 @@ export const Fader = memo(function Fader({
   };
 
   return (
-    <div className="flex w-8 select-none flex-col items-center gap-1.5">
+    <div className="flex w-10 select-none flex-col items-center gap-1.5">
       <div
         role="slider"
         tabIndex={0}
@@ -127,10 +131,10 @@ export const Fader = memo(function Fader({
         aria-valuenow={shown}
         aria-valuetext={text}
         className={cn(
-          "relative w-8 cursor-ns-resize touch-none rounded-rs",
+          "relative w-10 cursor-ns-resize touch-none rounded-rs",
           "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-play",
         )}
-        style={{ height: TRAVEL_PX }}
+        style={{ height: SLOT_PX }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
@@ -140,22 +144,33 @@ export const Fader = memo(function Fader({
         onFocus={() => onHelp?.(`${label} ${text}`)}
         onBlur={() => onHelp?.(null)}
       >
+        {/* The slot, as the MixerDock board: a dark recess with a hairline edge. */}
         <span
           aria-hidden="true"
-          className="absolute bottom-0 left-1/2 top-0 w-1.5 -translate-x-1/2 rounded-full bg-ink/10"
+          className="absolute bottom-0 left-1/2 top-0 w-1 -translate-x-1/2 rounded-full bg-black/[.45] shadow-[inset_0_0_0_1px_rgba(255,255,255,.06)]"
         />
         <span
           aria-hidden="true"
           data-testid="fader-fill"
-          className="absolute bottom-0 left-1/2 w-1.5 -translate-x-1/2 rounded-full"
+          className="absolute bottom-0 left-1/2 w-1 -translate-x-1/2 rounded-full"
           style={{ height: `${norm * 100}%`, background: color }}
         />
+        {zero !== null && (
+          <span
+            aria-hidden="true"
+            data-testid="fader-zero"
+            className="absolute left-1/2 h-px w-3 -translate-x-1/2 bg-white/25"
+            style={{ bottom: `${zero * 100}%` }}
+          />
+        )}
         <span
           aria-hidden="true"
           data-testid="fader-thumb"
-          className="absolute left-1/2 h-3 w-[22px] -translate-x-1/2 translate-y-1/2 rounded-[4px] border border-line2 bg-ink"
+          className="absolute left-1/2 h-3.5 w-[26px] -translate-x-1/2 translate-y-1/2 rounded-[4px] border border-white/30 bg-[linear-gradient(180deg,#4A3E66,#231A36)] shadow-[0_2px_6px_rgba(0,0,0,.5)]"
           style={{ bottom: `${norm * 100}%` }}
-        />
+        >
+          <span className="absolute inset-x-1 top-1/2 h-px -translate-y-1/2 bg-ink" />
+        </span>
         {dragging && (
           <span
             data-testid="fader-chip"
@@ -167,7 +182,7 @@ export const Fader = memo(function Fader({
       </div>
       <span
         aria-hidden="true"
-        className="font-mono text-[11px] font-medium leading-none tabular-nums text-ink"
+        className="whitespace-nowrap font-mono text-[11px] font-medium leading-none tabular-nums text-ink"
       >
         {text}
       </span>
