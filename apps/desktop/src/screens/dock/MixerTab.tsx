@@ -36,7 +36,7 @@ export function splitMaster(params: ParamView[]): { gain: ParamView[]; limiter: 
 }
 
 /** One mixer channel; re-renders only when its track changes. */
-export const MixerStrip = memo(function MixerStrip({
+const MixerStrip = memo(function MixerStrip({
   track,
   noDuck,
   fire,

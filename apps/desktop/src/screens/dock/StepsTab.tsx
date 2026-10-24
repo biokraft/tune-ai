@@ -29,7 +29,7 @@ type LiveSequencerProps = Omit<AcidStepSequencerProps, "playingStep"> & {
 };
 
 /** The step sequencer, lighting the sounding step as the playhead moves. */
-export function LiveSequencer({ song, section, ...rest }: LiveSequencerProps) {
+function LiveSequencer({ song, section, ...rest }: LiveSequencerProps) {
   const step = usePlayheadStep();
   return (
     <AcidStepSequencer
@@ -40,7 +40,7 @@ export function LiveSequencer({ song, section, ...rest }: LiveSequencerProps) {
 }
 
 /** Every drum track's pattern in `section`; the `docked` track's row is emphasised. */
-export function drumRows(
+function drumRows(
   song: SongView,
   section: number | null,
   highlights: Map<string, HighlightKind>,
@@ -63,7 +63,7 @@ export function drumRows(
 }
 
 /** The drum grid, chasing the playhead. */
-export function LiveDrumGrid({
+function LiveDrumGrid({
   song,
   section,
   rows,
