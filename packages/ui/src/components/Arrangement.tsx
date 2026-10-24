@@ -142,6 +142,7 @@ export function Arrangement(p: ArrangementProps) {
   const dragEnd = drag?.kind === "resize" ? p.sections[drag.i]!.start_bar + drag.bars : 0;
   const laneW = Math.max(total, dragEnd) * ppb;
   const rowsH = p.tracks.length * ROW_H;
+  const secRow = useRef<SVGSVGElement>(null);
   const height = TOP + rowsH;
   const step = rulerStep(ppb);
 
@@ -202,6 +203,10 @@ export function Arrangement(p: ArrangementProps) {
       e.preventDefault();
       p.onDuplicate(sel);
     } else if (e.key === "Delete" || e.key === "Backspace") {
+      // Only from the frame or the sections row: a focused header or block button keeps its section.
+      const onSections =
+        e.target === e.currentTarget || !!secRow.current?.contains(e.target as Node);
+      if (!onSections) return;
       e.preventDefault();
       p.onDelete(sel);
     } else if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
@@ -239,7 +244,12 @@ export function Arrangement(p: ArrangementProps) {
           <div className="relative shrink-0" style={{ width: laneW, height }}>
             <div className={cn("sticky top-0 z-20", stickyFill)} style={{ height: TOP }}>
               <Ruler laneW={laneW} ppb={ppb} step={step} loop={p.loop} />
-              <svg width={laneW} height={SECROW_H} className="block border-b border-line">
+              <svg
+                ref={secRow}
+                width={laneW}
+                height={SECROW_H}
+                className="block border-b border-line"
+              >
                 <LoopBand loop={p.loop} ppb={ppb} height={SECROW_H} />
                 {p.sections.map((s, i) => {
                   const moving = drag?.kind === "move" && drag.i === i;

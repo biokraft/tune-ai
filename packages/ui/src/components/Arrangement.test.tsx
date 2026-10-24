@@ -323,4 +323,25 @@ describe("Arrangement", () => {
     expect(screen.getByText("17")).toBeInTheDocument();
     expect(screen.queryByText("5")).toBeNull();
   });
+
+  it("Delete on a header or cell button leaves the selected section alone", async () => {
+    const user = userEvent.setup();
+    const { onDelete } = setup([sec("a", 0, 16, { play: { acid: "a1" } })], { selected: 0 });
+    const head = screen.getAllByRole("rowheader")[0]!;
+    const buttons = [
+      screen.getByRole("button", { name: "Open acid" }),
+      within(head).getByRole("button", { name: "M" }),
+      within(head).getByRole("button", { name: "S" }),
+      screen.getByRole("button", { name: "acid in section 1" }),
+    ];
+    for (const b of buttons) {
+      b.focus();
+      await user.keyboard("{Delete}");
+      await user.keyboard("{Backspace}");
+    }
+    expect(onDelete).not.toHaveBeenCalled();
+    screen.getByRole("group", { name: "Arrangement" }).focus();
+    await user.keyboard("{Backspace}");
+    expect(onDelete).toHaveBeenCalledWith(0);
+  });
 });
