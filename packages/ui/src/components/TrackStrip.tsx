@@ -73,7 +73,7 @@ export function TrackStrip({
     <div
       role="group"
       aria-label={`${track.id} sends`}
-      className={cn("flex items-start", compact && "flex-col items-center")}
+      className={cn("flex items-start gap-1", compact && "flex-col items-center")}
     >
       {STRIP_KNOBS.map((id) => {
         if (id === "duck.depth" && noDuck) {
@@ -103,58 +103,90 @@ export function TrackStrip({
       })}
     </div>
   );
-  return (
-    <div
-      role="group"
-      aria-label={`Track ${track.id}`}
-      data-compact={compact ? "true" : undefined}
-      className={cn(
-        "flex items-start gap-3",
-        compact && "w-[92px] flex-col items-center gap-2 text-center",
-      )}
-    >
-      <Fader
-        label="Gain"
-        value={gain ?? track.gain_db}
-        min={-60}
-        max={12}
-        defaultValue={0}
-        unit="dB"
-        color={color}
-        onChange={setGain}
-        onCommit={(v) => {
-          setGain(null);
-          onMix({ gain_db: v });
-        }}
+  const fader = (
+    <Fader
+      label="Gain"
+      value={gain ?? track.gain_db}
+      min={-60}
+      max={12}
+      defaultValue={0}
+      unit="dB"
+      color={color}
+      onChange={setGain}
+      onCommit={(v) => {
+        setGain(null);
+        onMix({ gain_db: v });
+      }}
+    />
+  );
+  const name = (
+    <div className={cn("flex items-center gap-2", compact && "w-full flex-col gap-1")}>
+      <span
+        title={track.id}
+        className={cn(
+          "text-xs font-bold text-ink",
+          compact && "max-w-full truncate text-[11.5px] font-extrabold",
+        )}
+      >
+        {track.id}
+      </span>
+      <MuteSolo
+        track={track.id}
+        mute={track.mute}
+        solo={track.solo}
+        onMute={(v) => onMix({ mute: v })}
+        onSolo={(v) => onMix({ solo: v })}
       />
-      <div className={cn("flex flex-col gap-1", compact && "items-center")}>
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-ink">{track.id}</span>
-          <MuteSolo
-            track={track.id}
-            mute={track.mute}
-            solo={track.solo}
-            onMute={(v) => onMix({ mute: v })}
-            onSolo={(v) => onMix({ solo: v })}
-          />
-        </div>
-        <div className={cn("flex items-start", compact && "flex-col items-center")}>
-          <div onPointerEnter={() => onHelp?.(PAN)} onPointerLeave={() => onHelp?.(null)}>
-            <Knob
-              spec={PAN}
-              onHelp={onHelp}
-              size="sm"
-              color={color}
-              value={pan ?? track.pan}
-              onChange={setPan}
-              onCommit={(v) => {
-                setPan(null);
-                onMix({ pan: v });
-              }}
-            />
-          </div>
-          {sends}
-        </div>
+    </div>
+  );
+  const knobs = (
+    <div className={cn("flex items-start gap-1", compact && "flex-col items-center")}>
+      <div onPointerEnter={() => onHelp?.(PAN)} onPointerLeave={() => onHelp?.(null)}>
+        <Knob
+          spec={PAN}
+          onHelp={onHelp}
+          size="sm"
+          color={color}
+          value={pan ?? track.pan}
+          onChange={setPan}
+          onCommit={(v) => {
+            setPan(null);
+            onMix({ pan: v });
+          }}
+        />
+      </div>
+      {sends}
+    </div>
+  );
+
+  if (compact) {
+    // The MixerDock board's strip: a card with a track-colour top bar, the name and M/S first
+    // so they stay in view when the dock is short, then the fader, then pan and sends.
+    return (
+      <div
+        role="group"
+        aria-label={`Track ${track.id}`}
+        data-compact="true"
+        className="flex w-[92px] shrink-0 flex-col items-center gap-2 overflow-hidden rounded-rs border border-line bg-ink/[.035] px-1 pb-2 text-center"
+      >
+        <span
+          aria-hidden="true"
+          className="-mx-1 h-[3px] self-stretch"
+          style={{ background: color ?? "rgb(var(--ink2))" }}
+        />
+        {name}
+        {fader}
+        {knobs}
+      </div>
+    );
+  }
+
+  return (
+    <div role="group" aria-label={`Track ${track.id}`} className="flex items-start gap-3">
+      {fader}
+      <div className="flex flex-col gap-1">
+        {name}
+        {knobs}
       </div>
     </div>
   );
