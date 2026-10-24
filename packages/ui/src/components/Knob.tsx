@@ -1,4 +1,4 @@
-import { useId, useRef, type KeyboardEvent, type PointerEvent } from "react";
+import { useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { cn } from "../lib/utils";
 import { formatValue, toNormalized, toPlain, type ParamSpecView } from "../lib/param";
 
@@ -18,6 +18,10 @@ export type KnobProps = {
   highlight?: Highlight;
   /** The param is automated in the current section. */
   automated?: boolean;
+  /** CSS colour for the value arc and the automation dot. */
+  color?: string;
+  /** Dimmed; ignores pointer and keys. */
+  disabled?: boolean;
 };
 
 /** Pointer travel (px) for the full range; Shift makes it ten times finer. */
@@ -33,7 +37,7 @@ const CX = 50;
 const CY = 50;
 const ARC_R = 42;
 
-const PX = { lg: 96, md: 72, sm: 56 } as const;
+const PX = { lg: 56, md: 46, sm: 36 } as const;
 
 const point = (deg: number, r: number) => {
   const a = (deg * Math.PI) / 180;
@@ -58,20 +62,22 @@ export function Knob({
   onHelp,
   highlight = null,
   automated = false,
+  color = "rgb(var(--ink))",
+  disabled = false,
 }: KnobProps) {
+  const [dragging, setDragging] = useState(false);
   const norm = toNormalized(spec, value);
   const drag = useRef<Drag | null>(null);
   const gradientId = `knob-body-${useId().replace(/:/g, "")}`;
   const valueText = formatValue(spec, value);
 
   const angle = START + norm * SWEEP;
-  const tip = point(angle, 30);
-  const hub = point(angle, 10);
   const px = PX[size];
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
+    if (disabled || e.button !== 0) return;
     drag.current = { startY: e.clientY, startNorm: norm, shift: e.shiftKey, norm, moved: false };
+    setDragging(true);
     // jsdom (and a stale pointer id) can lack or reject capture; dragging still works.
     try {
       e.currentTarget.setPointerCapture?.(e.pointerId);
@@ -83,7 +89,7 @@ export function Knob({
 
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     const d = drag.current;
-    if (!d) return;
+    if (!d || disabled) return;
     if (e.shiftKey !== d.shift) {
       // Re-anchor so pressing or releasing Shift mid-drag does not make the value jump.
       d.startY = e.clientY;
@@ -100,6 +106,7 @@ export function Knob({
     const d = drag.current;
     if (!d) return;
     drag.current = null;
+    setDragging(false);
     try {
       e.currentTarget.releasePointerCapture?.(e.pointerId);
     } catch {
@@ -110,6 +117,7 @@ export function Knob({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (disabled) return;
     let next: number | null = null;
     switch (e.key) {
       case "ArrowUp":
@@ -139,37 +147,43 @@ export function Knob({
   };
 
   return (
-    <div className="flex select-none flex-col items-center gap-1" style={{ width: px + 16 }}>
+    <div
+      className={cn("flex select-none flex-col items-center gap-[3px]", disabled && "opacity-40")}
+      style={{ width: px + 16 }}
+    >
       <div
         role="slider"
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
         aria-label={spec.label}
         aria-valuemin={spec.min}
         aria-valuemax={spec.max}
         aria-valuenow={value}
         aria-valuetext={valueText}
+        aria-disabled={disabled ? "true" : undefined}
         data-highlight={highlight ?? undefined}
         className={cn(
-          "relative cursor-ns-resize touch-none rounded-full",
+          "group relative touch-none rounded-full",
+          disabled ? "cursor-not-allowed" : "cursor-ns-resize",
           "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-          "focus-visible:outline-silkscreen",
+          "focus-visible:outline-ink2",
         )}
         style={{ width: px, height: px }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        onDoubleClick={() => onCommit(spec.default)}
+        onDoubleClick={() => {
+          if (!disabled) onCommit(spec.default);
+        }}
         onKeyDown={onKeyDown}
         onFocus={() => onHelp?.(spec)}
         onBlur={() => onHelp?.(null)}
       >
-        <svg viewBox="0 0 100 100" width={px} height={px} aria-hidden="true">
+        <svg viewBox="0 0 100 100" width={px} height={px} aria-hidden="true" overflow="visible">
           <defs>
-            <radialGradient id={gradientId} cx="40%" cy="32%" r="75%">
-              <stop offset="0%" stopColor="hsl(215 9% 34%)" />
-              <stop offset="60%" stopColor="hsl(216 10% 19%)" />
-              <stop offset="100%" stopColor="hsl(210 8% 9%)" />
+            <radialGradient id={gradientId} cx="35%" cy="30%" r="72%">
+              <stop offset="0%" stopColor="#3B2F57" />
+              <stop offset="72%" stopColor="#140E1F" />
             </radialGradient>
           </defs>
           {highlight && (
@@ -177,69 +191,77 @@ export function Knob({
               data-testid="knob-highlight"
               cx={CX}
               cy={CY}
-              r={47}
+              r={49}
               fill="none"
-              stroke="rgb(var(--claude))"
-              strokeWidth={2.5}
-              strokeDasharray={highlight === "external" ? "4 3" : undefined}
+              stroke={highlight === "claude" ? "rgb(var(--agent))" : "rgb(var(--ink2))"}
+              strokeWidth={3}
+              style={
+                highlight === "claude"
+                  ? { filter: "drop-shadow(0 0 5px rgb(var(--agent) / 0.6))" }
+                  : undefined
+              }
             />
           )}
           <path
             d={arc(START, START + SWEEP, ARC_R)}
             fill="none"
-            stroke="rgb(var(--border))"
-            strokeWidth={4}
+            stroke="rgba(255,255,255,.1)"
+            strokeWidth={8}
             strokeLinecap="round"
+            className={disabled ? undefined : "group-hover:[stroke:rgba(255,255,255,.16)]"}
           />
           {norm > 0 && (
             <path
               data-testid="knob-arc"
               d={arc(START, angle, ARC_R)}
               fill="none"
-              stroke="rgb(var(--led))"
-              strokeWidth={4}
+              stroke={color}
+              strokeWidth={8}
               strokeLinecap="round"
             />
           )}
-          <circle
-            cx={CX}
-            cy={CY}
-            r={33}
-            fill={`url(#${gradientId})`}
-            stroke="hsl(210 8% 6%)"
-            strokeWidth={1.5}
+          <circle cx={CX} cy={CY} r={31} fill={`url(#${gradientId})`} />
+          <rect
+            x={49}
+            y={CY - 31 + 4}
+            width={4}
+            height={17}
+            rx={2}
+            fill="rgb(var(--ink))"
+            transform={`rotate(${angle} ${CX} ${CY})`}
           />
-          <line
-            x1={hub.x}
-            y1={hub.y}
-            x2={tip.x}
-            y2={tip.y}
-            stroke="rgb(var(--silkscreen))"
-            strokeWidth={3}
-            strokeLinecap="round"
-          />
-          {automated && (
-            <g data-testid="knob-lane">
-              <title>Automated in this section</title>
-              <rect x={78} y={4} width={18} height={9} rx={2} fill="rgb(var(--slide))" />
-              <path
-                d="M81 10 L85 7 L89 10 L93 7"
-                fill="none"
-                stroke="rgb(var(--chassis))"
-                strokeWidth={1.4}
-              />
-            </g>
-          )}
         </svg>
+        {highlight === "claude" && (
+          <span className="absolute -right-2 -top-1.5 rounded-[4px] bg-agent/15 px-[3px] font-mono text-[8.5px] leading-[12px] text-agent">
+            AI
+          </span>
+        )}
+        {automated && (
+          <span
+            data-testid="knob-lane"
+            title="Automated in this section"
+            className="pointer-events-none absolute left-1/2 h-1 w-1 -translate-x-1/2 rounded-full"
+            // Sits under the value and label, which render below the dial.
+            style={{ top: px + 38, background: color }}
+          />
+        )}
+        {dragging && (
+          <span
+            data-testid="knob-chip"
+            className="glass-solid pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-rs px-1.5 py-0.5 font-mono text-[11px] font-medium leading-none tabular-nums text-ink"
+          >
+            {valueText}
+          </span>
+        )}
       </div>
-      <span aria-hidden="true" className="font-label text-sm leading-none text-silkscreen">
-        {spec.label}
-      </span>
       <span
         aria-hidden="true"
-        className="font-value text-xs leading-none tabular-nums text-silkscreen/80"
+        className="font-mono text-[11px] font-medium leading-none tabular-nums text-ink"
       >
         {valueText}
+      </span>
+      <span aria-hidden="true" className="lbl leading-none">
+        {spec.label}
       </span>
     </div>
   );

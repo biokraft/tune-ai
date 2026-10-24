@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { toNormalized, toPlain } from "../lib/param";
+import { formatValue, toNormalized, toPlain } from "../lib/param";
 import { cutoff } from "../test-fixtures";
 import { Knob } from "./Knob";
 
@@ -150,5 +151,63 @@ describe("Knob", () => {
     fireEvent.pointerCancel(knob, { pointerId: 1 });
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith(toPlain(cutoff, 0.5));
+  });
+  it("draws the value arc in the track colour", () => {
+    render(
+      <Knob
+        spec={cutoff}
+        value={500}
+        onChange={() => {}}
+        onCommit={() => {}}
+        color="rgb(var(--acid))"
+      />,
+    );
+    expect(screen.getByTestId("knob-arc")).toHaveAttribute("stroke", "rgb(var(--acid))");
+  });
+
+  it("marks Claude's edit with an AI badge, and other edits without one", () => {
+    const { rerender } = render(
+      <Knob spec={cutoff} value={500} onChange={() => {}} onCommit={() => {}} highlight="claude" />,
+    );
+    expect(screen.getByTestId("knob-highlight")).toBeInTheDocument();
+    expect(screen.getByText("AI")).toBeInTheDocument();
+    rerender(
+      <Knob
+        spec={cutoff}
+        value={500}
+        onChange={() => {}}
+        onCommit={() => {}}
+        highlight="external"
+      />,
+    );
+    expect(screen.getByTestId("knob-highlight")).toBeInTheDocument();
+    expect(screen.queryByText("AI")).not.toBeInTheDocument();
+  });
+
+  it("ignores keys and drags when disabled", async () => {
+    const onCommit = vi.fn();
+    const onChange = vi.fn();
+    render(<Knob spec={cutoff} value={500} onChange={onChange} onCommit={onCommit} disabled />);
+    const k = screen.getByRole("slider", { name: /cutoff/i });
+    expect(k).toHaveAttribute("aria-disabled", "true");
+    k.focus();
+    await userEvent.keyboard("{ArrowUp}");
+    fireEvent.pointerDown(k, { clientY: 300, pointerId: 1 });
+    fireEvent.pointerMove(k, { clientY: 200, pointerId: 1 });
+    fireEvent.pointerUp(k, { clientY: 200, pointerId: 1 });
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("knob-chip")).not.toBeInTheDocument();
+  });
+
+  it("shows a value chip while dragging", () => {
+    const { knob } = setup(0.5);
+    expect(screen.queryByTestId("knob-chip")).not.toBeInTheDocument();
+    fireEvent.pointerDown(knob, { clientY: 300, pointerId: 1 });
+    expect(screen.getByTestId("knob-chip")).toHaveTextContent(
+      formatValue(cutoff, toPlain(cutoff, 0.5)),
+    );
+    fireEvent.pointerUp(knob, { clientY: 300, pointerId: 1 });
+    expect(screen.queryByTestId("knob-chip")).not.toBeInTheDocument();
   });
 });
