@@ -31,6 +31,7 @@ import { usePlayheadPosition, usePlayheadStep, useStudioSelector } from "../stor
 import { FileErrorBanner, LostBanner, MessageBanner } from "./Banners";
 import { ChangeNotice, hasChangeNotice } from "./ChangeNotice";
 import { drumRows, LiveDrumGrid } from "./dock/StepsTab";
+import { MixerStrip } from "./dock/MixerTab";
 import { MixPanel } from "./MixPanel";
 import { Panel303 } from "./Panel303";
 import { useParamDrag } from "./useParamDrag";
@@ -291,51 +292,6 @@ function Mixer({ song, highlights, automatedIn, fire, send }: MixerProps) {
     </aside>
   );
 }
-
-/** One mixer channel; re-renders only when its track changes. */
-const MixerStrip = memo(function MixerStrip({
-  track,
-  noDuck,
-  fire,
-  send,
-  highlights,
-  lanes,
-  onHelp,
-}: {
-  track: TrackView;
-  noDuck: string | null;
-  fire(cmd: Command): void;
-  send(cmd: Command): Promise<unknown>;
-  highlights: Map<string, HighlightKind>;
-  lanes: SectionView["lanes"] | undefined;
-  onHelp(spec: ParamSpecView | null): void;
-}) {
-  const drag = useParamDrag(track.id, send, track.strip);
-  const strip = track.strip.map((p) => ({ ...p, value: drag.valueOf(p) }));
-  return (
-    <TrackStrip
-      track={track}
-      strip={strip}
-      onParam={(id, v, commit) => (commit ? drag.commit(id, v) : drag.change(id, v))}
-      onHelp={onHelp}
-      noDuck={noDuck}
-      automated={(id) => lanes?.some((l) => l.track === track.id && l.param === id) ?? false}
-      highlight={(id) => highlights.get(`tracks.${track.id}.${id}`) ?? null}
-      onMix={(patch) =>
-        fire({
-          cmd: "set_track_mix",
-          args: {
-            track: track.id,
-            gain_db: patch.gain_db ?? null,
-            pan: patch.pan ?? null,
-            mute: patch.mute ?? null,
-            solo: patch.solo ?? null,
-          },
-        })
-      }
-    />
-  );
-});
 
 type DrumSectionProps = {
   song: SongView;
