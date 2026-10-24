@@ -1,7 +1,7 @@
 import { stateEvent } from "../client/fakeClient";
 import type { StudioState } from "../client/protocol";
 import type { StudioView } from "../store/studioStore";
-import { currentSection, loopSectionName, patternGlyph } from "./song";
+import { currentSection, highlightedSteps, loopSectionName, patternGlyph } from "./song";
 
 function view(patch: Partial<StudioView> = {}, edit: (s: StudioState) => void = () => {}) {
   const { event: _, ...state } = stateEvent();
@@ -80,5 +80,22 @@ describe("patternGlyph", () => {
         steps: [c2, rest, { ...c2, accent: true }, rest],
       }),
     ).toEqual([0.6, 0, 1, 0]);
+  });
+});
+
+describe("highlightedSteps", () => {
+  it("keeps who changed each step of the pattern", () => {
+    const h = new Map([
+      ["patterns.a1.steps[2]", "claude" as const],
+      ["patterns.a1.steps[5]", "external" as const],
+      ["patterns.a10.steps[1]", "claude" as const],
+      ["patterns.a1.length", "external" as const],
+    ]);
+    expect(highlightedSteps(h, "a1")).toEqual(
+      new Map([
+        [2, "claude"],
+        [5, "external"],
+      ]),
+    );
   });
 });

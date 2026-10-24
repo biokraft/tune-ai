@@ -1,11 +1,13 @@
 import { cn } from "../lib/utils";
 import { nextHit, type DrumHit } from "../lib/notes";
+import type { Highlight } from "./Knob";
 
 export type DrumRow = {
   pattern: string;
   label: string;
   hits: DrumHit[];
-  highlighted?: Set<number>;
+  /** Steps changed from outside, by whom: Claude's ringed cyan, the song file's dashed ink2. */
+  highlighted?: ReadonlyMap<number, NonNullable<Highlight>>;
   /** CSS colour of the row's hits; defaults to ink. */
   color?: string;
   /** The docked voice: full strength, while the other rows dim until hovered. */
@@ -74,7 +76,7 @@ export function DrumGrid({ rows, playingStep, onSet }: DrumGridProps) {
             </span>
             <div className="flex flex-1 gap-1">
               {row.hits.map((hit, i) => {
-                const highlighted = row.highlighted?.has(i) ?? false;
+                const highlighted = row.highlighted?.get(i) ?? null;
                 const playing = playingStep === i;
                 return (
                   <button
@@ -83,14 +85,14 @@ export function DrumGrid({ rows, playingStep, onSet }: DrumGridProps) {
                     aria-label={`${row.label} step ${i + 1}: ${hit}`}
                     data-hit={hit}
                     data-playing={playing}
-                    data-highlight={highlighted ? "claude" : undefined}
+                    data-highlight={highlighted ?? undefined}
                     onClick={() => onSet(row.pattern, i, nextHit(hit))}
                     className={cn(
                       slot(i),
                       "relative h-8 rounded-rs border transition-none",
                       hit === "rest" ? "border-line bg-ink/[.04]" : "border-transparent",
                       playing && "outline outline-2 -outline-offset-1 outline-play",
-                      highlighted && "ring-2 ring-agent",
+                      highlighted === "claude" && "ring-2 ring-agent",
                       "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
                       "focus-visible:outline-play",
                     )}
@@ -104,6 +106,14 @@ export function DrumGrid({ rows, playingStep, onSet }: DrumGridProps) {
                           backgroundColor: color,
                           opacity: hit === "accent" ? 1 : 0.55,
                         }}
+                      />
+                    )}
+                    {highlighted === "external" && (
+                      // Where Claude's ring sits, but dashed: a ring cannot be.
+                      <span
+                        data-external-mark
+                        aria-hidden="true"
+                        className="pointer-events-none absolute -inset-[3px] rounded-[11px] border-2 border-dashed border-ink2"
                       />
                     )}
                   </button>
