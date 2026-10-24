@@ -1,7 +1,7 @@
 import { stateEvent } from "../client/fakeClient";
 import type { StudioState } from "../client/protocol";
 import type { StudioView } from "../store/studioStore";
-import { acidSection, currentSection, loopSectionName } from "./song";
+import { acidSection, currentSection, loopSectionName, patternGlyph } from "./song";
 
 function view(patch: Partial<StudioView> = {}, edit: (s: StudioState) => void = () => {}) {
   const { event: _, ...state } = stateEvent();
@@ -61,5 +61,33 @@ describe("loopSectionName", () => {
     expect(loopSectionName(sections, [80, 88])).toBeNull();
     expect(loopSectionName(sections, [0, 32])).toBeNull();
     expect(loopSectionName(sections, null)).toBeNull();
+  });
+});
+
+describe("patternGlyph", () => {
+  it("draws a drum pattern's rests, hits and accents", () => {
+    const hits = [..."x...X..."].map((c) => (c === "x" ? "hit" : c === "X" ? "accent" : "rest"));
+    expect(
+      patternGlyph({
+        kind: "drum",
+        id: "k",
+        track: "kick",
+        hits: hits as ("rest" | "hit" | "accent")[],
+      }),
+    ).toEqual([0.6, 0, 0, 0, 1, 0, 0, 0]);
+  });
+
+  it("draws an acid pattern's rests, notes and accented notes", () => {
+    // C2 . C2! .
+    const c2 = { note: 36, accent: false, slide: false };
+    const rest = { note: null, accent: false, slide: false };
+    expect(
+      patternGlyph({
+        kind: "acid",
+        id: "a",
+        track: "acid",
+        steps: [c2, rest, { ...c2, accent: true }, rest],
+      }),
+    ).toEqual([0.6, 0, 1, 0]);
   });
 });
