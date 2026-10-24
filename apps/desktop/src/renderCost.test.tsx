@@ -42,7 +42,7 @@ describe("playhead ticks", () => {
     expect(knobRenders.count).toBe(0);
     const playing = document.querySelector('[data-step][data-playing="true"]');
     expect(playing).toHaveAttribute("data-step", "2");
-    expect(screen.getByLabelText("Position")).toHaveTextContent("003:3");
+    expect(screen.getByLabelText("Position")).toHaveTextContent("3.3");
     expect(screen.getByTestId("playhead")).toHaveAttribute("x1", String((42 / 16) * 12));
   });
 });

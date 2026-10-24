@@ -16,6 +16,7 @@ import {
   currentSection,
   formatNumber,
   highlightedSteps,
+  loopSectionName,
   patternIn,
   playheadStep,
   sectionAtBar,
@@ -36,6 +37,8 @@ export type StudioScreenProps = {
   view: StudioView & { state: StudioState & { song: SongView } };
   store: StudioStore;
 };
+
+const noop = () => {};
 
 const sameRange = (a: [number, number] | null, b: [number, number] | null) =>
   a !== null && b !== null && a[0] === b[0] && a[1] === b[1];
@@ -122,7 +125,7 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
       {view.message && <MessageBanner message={view.message} onDismiss={store.dismissMessage} />}
 
       {/* Sticky, so play state and Claude's change notice stay in view over the drum grid. */}
-      <header className="sticky top-0 z-30 border-b border-black/40 bg-chassis px-6 py-3">
+      <header className="sticky top-0 z-30 px-3 pb-2 pt-3">
         <LiveTransport
           cursorBar={state.cursor_bar}
           playing={state.playing}
@@ -132,31 +135,37 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
           canUndo={state.can_undo}
           canRedo={state.can_redo}
           songName={song.name}
-          notice={
-            showNotice ? (
-              <ChangeNotice
-                notice={notice}
-                offered={state.offered}
-                canUndo={noticeUndoable}
-                song={song}
-                onUndo={() => {
-                  store.dismissNotice();
-                  fire({ cmd: "undo" });
-                }}
-                onResolve={(reapply) => {
-                  store.dismissNotice();
-                  fire({ cmd: "resolve_offered", args: { reapply } });
-                }}
-                onDismiss={store.dismissNotice}
-              />
-            ) : undefined
-          }
+          totalBars={song.total_bars}
+          loopBars={loop}
+          loopName={loopSectionName(song.sections, loop)}
+          mixerOpen={false}
+          onToggleMixer={noop}
           onPlay={() => fire({ cmd: "play", args: { from_bar: null } })}
           onStop={() => fire({ cmd: "stop" })}
           onToggleLoop={toggleLoop}
           onUndo={undo}
           onRedo={redo}
         />
+        {/* Task 9 turns this into a floating toast. */}
+        {showNotice && (
+          <div role="status" className="mt-2 font-mono text-sm text-agent">
+            <ChangeNotice
+              notice={notice}
+              offered={state.offered}
+              canUndo={noticeUndoable}
+              song={song}
+              onUndo={() => {
+                store.dismissNotice();
+                fire({ cmd: "undo" });
+              }}
+              onResolve={(reapply) => {
+                store.dismissNotice();
+                fire({ cmd: "resolve_offered", args: { reapply } });
+              }}
+              onDismiss={store.dismissNotice}
+            />
+          </div>
+        )}
       </header>
 
       <section aria-label="Song arrangement" className="border-b border-black/40 py-2">

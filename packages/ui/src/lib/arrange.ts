@@ -23,9 +23,17 @@ export function dropIndex(sections: SectionView[], x: number): number {
   return i;
 }
 
-/** Zero-based bar and beat in, one-based "033:2" out. */
+/** Zero-based bar and beat in, one-based "88.3" out. */
 export function formatPosition(bar: number, beat: number): string {
-  return `${String(bar + 1).padStart(3, "0")}:${beat + 1}`;
+  return `${bar + 1}.${beat + 1}`;
+}
+
+/** Elapsed time at a zero-based bar and beat (4/4) as "m:ss.d". */
+export function formatTime(bar: number, beat: number, bpm: number): string {
+  const tenths = Math.floor(((bar * 4 + beat) * 60 * 10) / bpm + 1e-9);
+  const m = Math.floor(tenths / 600);
+  const s = Math.floor((tenths % 600) / 10);
+  return `${m}:${String(s).padStart(2, "0")}.${tenths % 10}`;
 }
 
 /**

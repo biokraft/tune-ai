@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { dropIndex, holdPoints, formatPosition, snapBars, type SectionView } from "./arrange";
+import {
+  dropIndex,
+  holdPoints,
+  formatPosition,
+  formatTime,
+  snapBars,
+  type SectionView,
+} from "./arrange";
 
 const sec = (start_bar: number, bars: number): SectionView => ({
   name: "s",
@@ -16,9 +23,14 @@ describe("arrange", () => {
     expect(snapBars(21, true)).toBe(21);
     expect(snapBars(0, true)).toBe(1);
   });
-  it("formats positions one-based", () => {
-    expect(formatPosition(32, 1)).toBe("033:2");
-    expect(formatPosition(0, 0)).toBe("001:1");
+  it("formats positions one-based, unpadded", () => {
+    expect(formatPosition(87, 2)).toBe("88.3");
+    expect(formatPosition(0, 0)).toBe("1.1");
+  });
+  it("formats elapsed time as m:ss.d", () => {
+    // (87*4 + 2) * 60 / 145 = 144.83 s
+    expect(formatTime(87, 2, 145)).toBe("2:24.8");
+    expect(formatTime(0, 0, 145)).toBe("0:00.0");
   });
   it("drops by section midpoints", () => {
     const s = [sec(0, 16), sec(16, 16), sec(32, 32)];
