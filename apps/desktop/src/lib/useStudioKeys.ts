@@ -5,6 +5,10 @@ export type StudioKeys = {
   undo(): void;
   redo(): void;
   loop(): void;
+  /** Open or close the mixer in the dock. */
+  mixer(): void;
+  /** Close the dock. */
+  escape(): void;
 };
 
 const TYPING = 'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
@@ -23,7 +27,8 @@ const isSpace = (e: KeyboardEvent) => e.code === "Space" || e.key === " ";
 
 /**
  * Window-wide shortcuts: Space play/stop, Cmd+Z undo, Shift+Cmd+Z redo, L loop the selected
- * section. Controls that handle a key themselves stop it or prevent its default first.
+ * section, M the mixer, Esc close the dock. Controls that handle a key themselves stop it or
+ * prevent its default first; an open popover closes on Esc itself (Radix prevents its default).
  */
 export function useStudioKeys(keys: StudioKeys) {
   const ref = useRef(keys);
@@ -45,6 +50,11 @@ export function useStudioKeys(keys: StudioKeys) {
       } else if (!mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "l") {
         e.preventDefault();
         if (!e.repeat) k.loop();
+      } else if (!mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        if (!e.repeat) k.mixer();
+      } else if (e.key === "Escape" && !mod && !e.altKey && !e.shiftKey) {
+        k.escape();
       }
     };
     // Some engines press a focused button on Space's keyup; swallow that too.

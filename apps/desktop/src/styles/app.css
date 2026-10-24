@@ -73,3 +73,21 @@ rect[data-highlight] {
     animation: none !important;
   }
 }
+
+/* The dock grows in from the timeline's bottom edge in 220 ms; reduced motion opens it at once. */
+@keyframes dock-open {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+}
+
+.dock-open {
+  animation: dock-open 220ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock-open {
+    animation: none;
+  }
+}
