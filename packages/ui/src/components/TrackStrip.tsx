@@ -104,20 +104,27 @@ export function TrackStrip({
     </div>
   );
   const fader = (
-    <Fader
-      label="Gain"
-      value={gain ?? track.gain_db}
-      min={-60}
-      max={12}
-      defaultValue={0}
-      unit="dB"
-      color={color}
-      onChange={setGain}
-      onCommit={(v) => {
-        setGain(null);
-        onMix({ gain_db: v });
-      }}
-    />
+    <div
+      onPointerEnter={() => onHelp?.(GAIN)}
+      onPointerLeave={() => onHelp?.(null)}
+      onFocus={() => onHelp?.(GAIN)}
+      onBlur={() => onHelp?.(null)}
+    >
+      <Fader
+        label={GAIN.label}
+        value={gain ?? track.gain_db}
+        min={GAIN.min}
+        max={GAIN.max}
+        defaultValue={GAIN.default}
+        unit={GAIN.unit}
+        color={color}
+        onChange={setGain}
+        onCommit={(v) => {
+          setGain(null);
+          onMix({ gain_db: v });
+        }}
+      />
+    </div>
   );
   const name = (
     <div className={cn("flex items-center gap-2", compact && "w-full flex-col gap-1")}>

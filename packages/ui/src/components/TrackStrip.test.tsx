@@ -74,6 +74,21 @@ describe("TrackStrip", () => {
     act(() => screen.getByRole("slider", { name: "Duck" }).focus());
     expect(onHelp).toHaveBeenCalledWith(expect.objectContaining({ id: "duck.depth" }));
   });
+  it("the gain fader reports its spec to onHelp on hover and focus", () => {
+    const onHelp = vi.fn();
+    render(<TrackStrip track={track} onMix={vi.fn()} onHelp={onHelp} />);
+    const gain = screen.getByRole("slider", { name: "Gain" });
+    expect(gain).toHaveAttribute("aria-valuemin", "-60");
+    expect(gain).toHaveAttribute("aria-valuemax", "12");
+    fireEvent.pointerEnter(gain);
+    expect(onHelp).toHaveBeenLastCalledWith(expect.objectContaining({ id: "gain_db", unit: "dB" }));
+    fireEvent.pointerLeave(gain);
+    expect(onHelp).toHaveBeenLastCalledWith(null);
+    act(() => gain.focus());
+    expect(onHelp).toHaveBeenLastCalledWith(expect.objectContaining({ id: "gain_db" }));
+    act(() => gain.blur());
+    expect(onHelp).toHaveBeenLastCalledWith(null);
+  });
   it("leaves out the duck knob, with the reason, when the track cannot duck", () => {
     render(<TrackStrip track={track} onMix={vi.fn()} strip={stripParams} noDuck="Duck source" />);
     expect(screen.queryByRole("slider", { name: "Duck" })).toBeNull();
