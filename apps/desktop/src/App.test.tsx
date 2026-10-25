@@ -12,6 +12,11 @@ function setup(state: StateEvent | null = stateEvent()) {
   return { client, store };
 }
 
+const openDock = (track: string) => {
+  fireEvent.click(screen.getByRole("button", { name: `Open ${track}` }));
+  return screen.getByRole("region", { name: "Dock" });
+};
+
 const press = (init: KeyboardEventInit, target: EventTarget = document.body) =>
   act(() => {
     target.dispatchEvent(
@@ -20,9 +25,9 @@ const press = (init: KeyboardEventInit, target: EventTarget = document.body) =>
   });
 
 describe("App", () => {
-  it("shows the 303 panel's knobs", () => {
+  it("shows the 303's knobs in the dock", () => {
     setup();
-    const panel = screen.getByRole("region", { name: "303 acid" });
+    const panel = openDock("acid");
     for (const name of ["Tuning", "Cutoff", "Resonance", "Env mod", "Decay", "Accent"]) {
       expect(within(panel).getByRole("slider", { name })).toBeInTheDocument();
     }
@@ -32,10 +37,15 @@ describe("App", () => {
     expect(within(panel).getByRole("radio", { name: "Soft" })).toBeChecked();
   });
 
-  it("keeps the transport and its change notice in view while the page scrolls", () => {
+  it("keeps the transport and the change notice in view: the window never scrolls", () => {
     setup();
-    const header = screen.getByRole("button", { name: "Play" }).closest("header");
-    expect(header).toHaveClass("sticky", "top-0", "bg-chassis");
+    const shell = screen.getByRole("region", { name: "Song arrangement" }).parentElement;
+    expect(shell).toHaveClass("h-screen", "overflow-hidden");
+    const toast = screen.getByRole("status", { name: "Song file change" });
+    expect(toast).toHaveClass("absolute", "top-full");
+    expect(toast.parentElement).toContainElement(
+      screen.getByRole("toolbar", { name: "Transport" }),
+    );
   });
 
   it("Space calls play, and stop while playing", () => {
@@ -67,6 +77,7 @@ describe("App", () => {
 
   it("dragging Cutoff sends live values, then one commit on release", async () => {
     const { client } = setup();
+    openDock("acid");
     const knob = screen.getByRole("slider", { name: "Cutoff" });
     fireEvent.pointerDown(knob, { clientY: 300, pointerId: 1 });
     fireEvent.pointerMove(knob, { clientY: 290, pointerId: 1 });
@@ -139,6 +150,8 @@ describe("App", () => {
     );
     expect(within(banner).getByText("12:5 expected a value")).toBeInTheDocument();
     expect(within(banner).getByText("30:1 unknown pattern `a9`")).toBeInTheDocument();
+    // A long list scrolls inside the banner rather than pushing the dock off-screen.
+    expect(within(banner).getByRole("list")).toHaveClass("max-h-[30vh]", "overflow-auto");
   });
 
   it("shows file errors instead of the song list when the open song does not parse", () => {
@@ -220,6 +233,8 @@ describe("App", () => {
     const input = document.createElement("input");
     document.body.append(input);
     press({ key: " ", code: "Space" }, input);
+    press({ key: "m" }, input);
+    expect(screen.queryByRole("region", { name: "Dock" })).toBeNull();
     const pop = document.createElement("div");
     pop.setAttribute("data-radix-popper-content-wrapper", "");
     const inner = document.createElement("button");
@@ -236,26 +251,40 @@ describe("App", () => {
     pop.remove();
   });
 
-  it("opens the 303 sequencer on the first section the 303 plays in", () => {
-    // Stopped at bar 1, nothing selected: section `a` has no 303, section `b` plays a1.
+  it("docks the 303 on the section at the cursor, and Steps offers a pattern pick there", () => {
+    // Stopped at bar 1, nothing selected: section `a` has no 303.
     setup();
-    const seq = screen.getByRole("group", { name: "303 step sequencer" });
-    expect(within(seq).getByRole("button", { name: "Step 1 note" })).toHaveTextContent("C2");
-    expect(screen.getByText("Pattern a1 in b")).toBeInTheDocument();
+    const dock = openDock("acid");
+    fireEvent.click(within(dock).getByRole("tab", { name: "Steps" }));
+    expect(within(dock).getByText("a · bars 1–2")).toBeInTheDocument();
+    expect(
+      within(dock).getByText("acid plays nothing in a. Pick a pattern above."),
+    ).toBeInTheDocument();
+    expect(within(dock).getByRole("button", { name: "acid in section 1" })).toHaveTextContent("—");
   });
 
   it("while playing, the 303 sequencer follows the playhead into a section without the 303", () => {
     const { client } = setup(stateEvent((s) => (s.playing = true)));
+    const dock = openDock("acid");
+    fireEvent.click(within(dock).getByRole("tab", { name: "Steps" }));
+    act(() => client.emit({ event: "playhead", step: 36, bar: 2, beat: 1, playing: true }));
+    expect(within(dock).getByRole("group", { name: "303 step sequencer" })).toBeInTheDocument();
     act(() => client.emit({ event: "playhead", step: 4, bar: 0, beat: 1, playing: true }));
-    expect(screen.getByText("The 303 rests in this section.")).toBeInTheDocument();
+    expect(
+      within(dock).getByText("acid plays nothing in a. Pick a pattern above."),
+    ).toBeInTheDocument();
   });
 
   it("shows the selected section's acid pattern, or says it plays none", () => {
     setup();
+    const dock = openDock("acid");
+    fireEvent.click(within(dock).getByRole("tab", { name: "Steps" }));
     fireEvent.click(screen.getByTestId("section-0"));
-    expect(screen.getByText("The 303 rests in this section.")).toBeInTheDocument();
+    expect(
+      within(dock).getByText("acid plays nothing in a. Pick a pattern above."),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("section-1"));
-    const seq = screen.getByRole("group", { name: "303 step sequencer" });
+    const seq = within(dock).getByRole("group", { name: "303 step sequencer" });
     expect(within(seq).getByRole("button", { name: "Step 1 note" })).toHaveTextContent("C2");
     fireEvent.click(within(seq).getByRole("button", { name: "Step 2 accent" }));
   });
@@ -263,7 +292,7 @@ describe("App", () => {
   it("the drum grid shows the selected section's drum patterns", () => {
     const { client } = setup();
     fireEvent.click(screen.getByTestId("section-0"));
-    const drums = screen.getByRole("region", { name: "Drums" });
+    const drums = openDock("kick");
     expect(within(drums).getByRole("group", { name: "kick" })).toBeInTheDocument();
     expect(within(drums).getByRole("group", { name: "hat" })).toBeInTheDocument();
     fireEvent.click(within(drums).getByRole("button", { name: "kick step 2: rest" }));
@@ -274,6 +303,7 @@ describe("App", () => {
 
   it("highlights a knob Claude changed", () => {
     const { client } = setup();
+    openDock("acid");
     act(() =>
       client.emit({
         ...structuredClone(goldenExternal),

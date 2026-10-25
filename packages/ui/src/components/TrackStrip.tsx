@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { cn } from "../lib/utils";
 import type { ParamSpecView } from "../lib/param";
+import { Fader } from "./Fader";
 import { Knob, type Highlight } from "./Knob";
+import { MuteSolo } from "./MuteSolo";
 
 export type TrackStripProps = {
   track: { id: string; gain_db: number; pan: number; mute: boolean; solo: boolean };
@@ -23,6 +25,10 @@ export type TrackStripProps = {
    * out and this short reason shows in its place.
    */
   noDuck?: string | null;
+  /** CSS colour of the fader fill and the knob arcs (the track colour). */
+  color?: string;
+  /** The narrow vertical strip used by the Mixer tab. */
+  compact?: boolean;
 };
 
 /** The strip params that get a knob on the channel, in panel order. */
@@ -48,11 +54,6 @@ const PAN: ParamSpecView = {
   default: 0,
 };
 
-const toggle = cn(
-  "h-7 w-7 rounded-sm border border-border font-label text-sm leading-none text-silkscreen",
-  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-silkscreen",
-);
-
 export function TrackStrip({
   track,
   onMix,
@@ -62,52 +63,97 @@ export function TrackStrip({
   automated,
   onHelp,
   noDuck = null,
+  color,
+  compact = false,
 }: TrackStripProps) {
   // Live values while a knob is held; cleared on commit so the prop takes over again.
   const [gain, setGain] = useState<number | null>(null);
   const [pan, setPan] = useState<number | null>(null);
-  return (
+  const sends = strip && (
     <div
       role="group"
-      aria-label={`Track ${track.id}`}
-      className="flex flex-col border-b border-black/30 pb-1"
+      aria-label={`${track.id} sends`}
+      className={cn("flex items-start gap-1", compact && "flex-col items-center")}
     >
-      <div className="flex items-center gap-1 px-2">
-        <span className="font-label text-base text-silkscreen">{track.id}</span>
-        <span className="flex-1" />
-        <button
-          type="button"
-          title="Mute"
-          aria-pressed={track.mute}
-          className={cn(toggle, track.mute && "border-led bg-led text-chassis")}
-          onClick={() => onMix({ mute: !track.mute })}
-        >
-          M
-        </button>
-        <button
-          type="button"
-          title="Solo"
-          aria-pressed={track.solo}
-          className={cn(toggle, track.solo && "border-slide bg-slide text-chassis")}
-          onClick={() => onMix({ solo: !track.solo })}
-        >
-          S
-        </button>
-      </div>
-      <div className="flex items-center">
-        <Knob
-          spec={GAIN}
-          size="sm"
-          value={gain ?? track.gain_db}
-          onChange={setGain}
-          onCommit={(v) => {
-            setGain(null);
-            onMix({ gain_db: v });
-          }}
-        />
+      {STRIP_KNOBS.map((id) => {
+        if (id === "duck.depth" && noDuck) {
+          return (
+            <span key={id} className="w-14 pt-3 text-center text-[11px] leading-tight text-ink3">
+              {noDuck}
+            </span>
+          );
+        }
+        const spec = strip.find((p) => p.id === id);
+        if (!spec) return null;
+        return (
+          <div key={id} onPointerEnter={() => onHelp?.(spec)} onPointerLeave={() => onHelp?.(null)}>
+            <Knob
+              spec={spec}
+              size="sm"
+              color={color}
+              value={spec.value}
+              highlight={highlight?.(id) ?? null}
+              automated={automated?.(id) ?? false}
+              onHelp={onHelp}
+              onChange={(v) => onParam?.(id, v, false)}
+              onCommit={(v) => onParam?.(id, v, true)}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+  const fader = (
+    <div
+      onPointerEnter={() => onHelp?.(GAIN)}
+      onPointerLeave={() => onHelp?.(null)}
+      onFocus={() => onHelp?.(GAIN)}
+      onBlur={() => onHelp?.(null)}
+    >
+      <Fader
+        label={GAIN.label}
+        value={gain ?? track.gain_db}
+        min={GAIN.min}
+        max={GAIN.max}
+        defaultValue={GAIN.default}
+        unit={GAIN.unit}
+        color={color}
+        onChange={setGain}
+        onCommit={(v) => {
+          setGain(null);
+          onMix({ gain_db: v });
+        }}
+      />
+    </div>
+  );
+  const name = (
+    <div className={cn("flex items-center gap-2", compact && "w-full flex-col gap-1")}>
+      <span
+        title={track.id}
+        className={cn(
+          "text-xs font-bold text-ink",
+          compact && "max-w-full truncate text-[11.5px] font-extrabold",
+        )}
+      >
+        {track.id}
+      </span>
+      <MuteSolo
+        track={track.id}
+        mute={track.mute}
+        solo={track.solo}
+        onMute={(v) => onMix({ mute: v })}
+        onSolo={(v) => onMix({ solo: v })}
+      />
+    </div>
+  );
+  const knobs = (
+    <div className={cn("flex items-start gap-1", compact && "flex-col items-center")}>
+      <div onPointerEnter={() => onHelp?.(PAN)} onPointerLeave={() => onHelp?.(null)}>
         <Knob
           spec={PAN}
+          onHelp={onHelp}
           size="sm"
+          color={color}
           value={pan ?? track.pan}
           onChange={setPan}
           onCommit={(v) => {
@@ -115,41 +161,39 @@ export function TrackStrip({
             onMix({ pan: v });
           }}
         />
-        {strip && (
-          <div
-            role="group"
-            aria-label={`${track.id} sends`}
-            className="flex items-center border-l border-silkscreen/20 pl-1"
-          >
-            {STRIP_KNOBS.map((id) => {
-              if (id === "duck.depth" && noDuck) {
-                return (
-                  <span
-                    key={id}
-                    className="w-14 text-center font-value text-xs leading-tight text-silkscreen/50"
-                  >
-                    {noDuck}
-                  </span>
-                );
-              }
-              const spec = strip.find((p) => p.id === id);
-              if (!spec) return null;
-              return (
-                <Knob
-                  key={id}
-                  spec={spec}
-                  size="sm"
-                  value={spec.value}
-                  highlight={highlight?.(id) ?? null}
-                  automated={automated?.(id) ?? false}
-                  onHelp={onHelp}
-                  onChange={(v) => onParam?.(id, v, false)}
-                  onCommit={(v) => onParam?.(id, v, true)}
-                />
-              );
-            })}
-          </div>
-        )}
+      </div>
+      {sends}
+    </div>
+  );
+
+  if (compact) {
+    // The MixerDock board's strip: a card with a track-colour top bar, the name and M/S first
+    // so they stay in view when the dock is short, then the fader, then pan and sends.
+    return (
+      <div
+        role="group"
+        aria-label={`Track ${track.id}`}
+        data-compact="true"
+        className="flex w-[92px] shrink-0 flex-col items-center gap-2 overflow-hidden rounded-rs border border-line bg-ink/[.035] px-1 pb-2 text-center"
+      >
+        <span
+          aria-hidden="true"
+          className="-mx-1 h-[3px] self-stretch"
+          style={{ background: color ?? "rgb(var(--ink2))" }}
+        />
+        {name}
+        {fader}
+        {knobs}
+      </div>
+    );
+  }
+
+  return (
+    <div role="group" aria-label={`Track ${track.id}`} className="flex items-start gap-3">
+      {fader}
+      <div className="flex flex-col gap-1">
+        {name}
+        {knobs}
       </div>
     </div>
   );

@@ -34,7 +34,7 @@ describe("DrumGrid", () => {
   it("marks the playing step and highlights", () => {
     setup({
       playingStep: 1,
-      rows: [{ ...rows[0]!, hits: [...rows[0]!.hits], highlighted: new Set([3]) }],
+      rows: [{ ...rows[0]!, hits: [...rows[0]!.hits], highlighted: new Map([[3, "claude"]]) }],
     });
     expect(screen.getByRole("button", { name: "kick step 2: hit" })).toHaveAttribute(
       "data-playing",
@@ -44,5 +44,83 @@ describe("DrumGrid", () => {
       "data-highlight",
       "claude",
     );
+    expect(screen.getByRole("button", { name: "kick step 4: rest" })).toHaveClass("ring-agent");
+  });
+  it("marks a step changed on disk with a dashed ink2 outline, not cyan", () => {
+    setup({
+      rows: [{ ...rows[0]!, hits: [...rows[0]!.hits], highlighted: new Map([[3, "external"]]) }],
+    });
+    const step = screen.getByRole("button", { name: "kick step 4: rest" });
+    expect(step).toHaveAttribute("data-highlight", "external");
+    expect(step.className).not.toMatch(/agent/);
+    const mark = step.querySelector("[data-external-mark]")!;
+    expect(mark).toHaveClass("border-dashed", "border-ink2");
+  });
+});
+
+describe("DrumGrid emphasis", () => {
+  it("marks only the emphasised row and dims the others", () => {
+    render(
+      <DrumGrid
+        rows={[
+          {
+            pattern: "k4",
+            label: "kick",
+            hits: ["hit"],
+            emphasis: true,
+            color: "rgb(var(--kick))",
+          },
+          { pattern: "h", label: "hat", hits: ["hit"], color: "rgb(var(--hat))" },
+        ]}
+        playingStep={null}
+        onSet={() => {}}
+      />,
+    );
+    expect(screen.getByRole("group", { name: "kick" })).toHaveAttribute("data-emphasis", "true");
+    const hat = screen.getByRole("group", { name: "hat" });
+    expect(hat).not.toHaveAttribute("data-emphasis");
+    expect(hat.className).toContain("opacity-[.55]");
+  });
+  it("fills hits at 55% and accents fully in the row colour", () => {
+    render(
+      <DrumGrid
+        rows={[{ pattern: "k4", label: "kick", hits: ["hit", "accent"], color: "rgb(255 0 0)" }]}
+        playingStep={null}
+        onSet={() => {}}
+      />,
+    );
+    const hit = screen.getByRole("button", { name: "kick step 1: hit" });
+    const acc = screen.getByRole("button", { name: "kick step 2: accent" });
+    const fill = (b: HTMLElement) => b.querySelector<HTMLElement>("[data-fill]")!;
+    expect(fill(hit).style.opacity).toBe("0.55");
+    expect(fill(hit).style.backgroundColor).toBe("rgb(255, 0, 0)");
+    expect(fill(acc).style.opacity).toBe("1");
+    expect(fill(acc).style.backgroundColor).toBe("rgb(255, 0, 0)");
+  });
+  it("numbers the steps above the grid, the playing one in the play colour", () => {
+    const { container } = render(
+      <DrumGrid
+        rows={[{ pattern: "k4", label: "kick", hits: ["hit", "rest", "hit"] }]}
+        playingStep={2}
+        onSet={() => {}}
+      />,
+    );
+    const nums = container.querySelectorAll("[data-step-number]");
+    expect([...nums].map((n) => n.textContent)).toEqual(["1", "2", "3"]);
+    expect(nums[2]).toHaveClass("text-play");
+  });
+  it("heads each row with its colour bar and the voice name", () => {
+    render(
+      <DrumGrid
+        rows={[{ pattern: "k4", label: "kick", hits: ["hit"], color: "rgb(255 0 0)" }]}
+        playingStep={null}
+        onSet={() => {}}
+      />,
+    );
+    const group = screen.getByRole("group", { name: "kick" });
+    expect(group.querySelector<HTMLElement>("[data-color-bar]")!.style.backgroundColor).toBe(
+      "rgb(255, 0, 0)",
+    );
+    expect(group).toHaveTextContent("kick");
   });
 });

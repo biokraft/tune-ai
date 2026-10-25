@@ -9,18 +9,23 @@ function setup(extra: Partial<TransportBarProps> = {}) {
     onToggleLoop: vi.fn(),
     onUndo: vi.fn(),
     onRedo: vi.fn(),
+    onToggleMixer: vi.fn(),
   };
   render(
     <TransportBar
       playing={false}
       bpm={145}
-      bar={32}
-      beat={1}
+      bar={2}
+      beat={2}
       loopOn={false}
       canLoop={true}
       canUndo={true}
       canRedo={false}
       songName="first-acid"
+      totalBars={144}
+      loopBars={null}
+      loopName={null}
+      mixerOpen={false}
       {...fns}
       {...extra}
     />,
@@ -31,13 +36,47 @@ function setup(extra: Partial<TransportBarProps> = {}) {
 describe("TransportBar", () => {
   it("loop disabled without selection", () => {
     setup({ canLoop: false });
-    expect(screen.getByRole("button", { name: "Loop selected section" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Loop (L)" })).toBeDisabled();
   });
-  it("Play click calls onPlay; shows position", () => {
+  it("loop button reflects and toggles the loop", () => {
+    const f = setup({ loopOn: true });
+    const loop = screen.getByRole("button", { name: "Loop (L)" });
+    expect(loop).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(loop);
+    expect(f.onToggleLoop).toHaveBeenCalled();
+  });
+  it("Play click calls onPlay; shows position, time and tempo", () => {
     const f = setup();
-    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    fireEvent.click(screen.getByRole("button", { name: "Play (space)" }));
     expect(f.onPlay).toHaveBeenCalled();
-    expect(screen.getByLabelText("Position")).toHaveTextContent("033:2");
+    expect(screen.getByLabelText("Position")).toHaveTextContent("3.3");
+    expect(screen.getByLabelText("Time")).toHaveTextContent("0:04.1");
+    expect(screen.getByLabelText("BPM")).toHaveTextContent("145");
+    expect(screen.getByText("145 BPM · 144 bars")).toBeInTheDocument();
+  });
+  it("names the button Pause while playing", () => {
+    setup({ playing: true });
+    expect(screen.getByRole("button", { name: "Pause (space)" })).toBeInTheDocument();
+  });
+  it("Pause click while playing calls onStop, not onPlay", () => {
+    const f = setup({ playing: true });
+    fireEvent.click(screen.getByRole("button", { name: "Pause (space)" }));
+    expect(f.onStop).toHaveBeenCalledTimes(1);
+    expect(f.onPlay).not.toHaveBeenCalled();
+  });
+  it("Stop calls onStop", () => {
+    const f = setup();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(f.onStop).toHaveBeenCalled();
+  });
+  it("shows the loop range one-based inclusive with its section name", () => {
+    setup({ loopBars: [80, 96], loopName: "drop" });
+    expect(screen.getByLabelText("Loop range")).toHaveTextContent("81 – 96");
+    expect(screen.getByLabelText("Loop range")).toHaveTextContent("drop");
+  });
+  it("hides the loop range without a loop", () => {
+    setup();
+    expect(screen.queryByLabelText("Loop range")).toBeNull();
   });
   it("undo and redo respect their flags", () => {
     const f = setup();
@@ -45,8 +84,15 @@ describe("TransportBar", () => {
     expect(f.onUndo).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Redo" })).toBeDisabled();
   });
-  it("renders the notice", () => {
-    setup({ notice: "Claude changed 2 things" });
-    expect(screen.getByRole("status")).toHaveTextContent("Claude changed 2 things");
+  it("Mixer toggles through onToggleMixer", () => {
+    const f = setup({ mixerOpen: true });
+    const mixer = screen.getByRole("button", { name: "Mixer (M)" });
+    expect(mixer).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(mixer);
+    expect(f.onToggleMixer).toHaveBeenCalled();
+  });
+  it("has no notice slot", () => {
+    setup();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });

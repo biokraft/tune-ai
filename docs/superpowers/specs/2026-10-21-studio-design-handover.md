@@ -118,20 +118,26 @@ Brief §8 item numbers in brackets.
 The producer picks one option per row (or a combination) before the design
 counts as approved. "Lean" is the designer's suggestion, not a decision.
 
-| Decision | Options | Lean |
-| --- | --- | --- |
-| Overall style | A Dusk Glass (`StyleA`), B Night Console (`StyleB`), C Aurora (`StyleC`) | A, with B's density as the reduced-effects setting |
-| Base view | A panel layout (`Main`), B song-map ribbon (`BaseB`) | A, with B's ribbon as an option |
-| Agent panel | A top tabs (`AgentPanelsA`), B side tabs (`AgentPanelsB`) | A tabs, plus B's rail toast |
-| Module placement | Dock under the timeline only (`Dock303`) or under timeline and chat | Under the timeline only |
-| Note editor | Tab in the dock (`Dock303`), side by side with the sound (`DockDrum`), in a floating window (`Float303`) | Side by side for drums, tab for the 303 |
-| 303 sequencer | A columns, B pitch lane (`Seq303`) | Undecided |
-| Drum grid | A all voices, B one voice (`DrumGrid`) | A, with B as a zoom |
-| Mixer | A dock tab (`MixerDock`), B full view (`MixerView`) | Undecided |
-| Listening view | A full view (`Listen`), B side drawer (`ListenB`) | B, with "open full" to A |
-| Learning mode | A spotlight and bubble (`Learn`), B lesson rail (`LearnB`) | A on the control, B's rail for the step list |
-| Permissions defaults | The Balanced preset as drawn in `Permissions` | Balanced |
-| Free note clips | Phase 2 variation in `Timeline` (e) | Phase 2, as the brief says |
+| Decision | Options | Lean | Picked (2026-10-24) |
+| --- | --- | --- | --- |
+| Overall style | A Dusk Glass (`StyleA`), B Night Console (`StyleB`), C Aurora (`StyleC`) | A, with B's density as the reduced-effects setting | A Dusk Glass |
+| Base view | A panel layout (`Main`), B song-map ribbon (`BaseB`) | A, with B's ribbon as an option | A panel layout (`Main`) |
+| Agent panel | A top tabs (`AgentPanelsA`), B side tabs (`AgentPanelsB`) | A tabs, plus B's rail toast | Not yet (later phase) |
+| Module placement | Dock under the timeline only (`Dock303`) or under timeline and chat | Under the timeline only | Dock under the timeline only |
+| Note editor | Tab in the dock (`Dock303`), side by side with the sound (`DockDrum`), in a floating window (`Float303`) | Side by side for drums, tab for the 303 | 303: Sound \| Steps tabs in the dock. Drums: side by side with the sound (`DockDrum`) |
+| 303 sequencer | A columns, B pitch lane (`Seq303`) | Undecided | A columns (`Seq303`) |
+| Drum grid | A all voices, B one voice (`DrumGrid`) | A, with B as a zoom | A all voices (`DrumGrid`), with the docked voice emphasised |
+| Mixer | A dock tab (`MixerDock`), B full view (`MixerView`) | Undecided | A dock tab (`MixerDock`) |
+| Listening view | A full view (`Listen`), B side drawer (`ListenB`) | B, with "open full" to A | B side drawer, not built yet |
+| Learning mode | A spotlight and bubble (`Learn`), B lesson rail (`LearnB`) | A on the control, B's rail for the step list | Not yet (later phase) |
+| Permissions defaults | The Balanced preset as drawn in `Permissions` | Balanced | Not yet (later phase) |
+| Free note clips | Phase 2 variation in `Timeline` (e) | Phase 2, as the brief says | Not yet (later phase) |
+| Right panel | Chat, browser or listening beside the timeline (`Main`) | — | None. Timeline and dock take the full width |
+| Claude's edits | How the studio shows a change Claude made (`AgentEdit`) | — | The change notice becomes a cyan action-card toast, floating top-right |
+| Drum voice knobs | Knobs for a drum voice in the dock (`DockDrum`) | — | Yes: generic knobs from the track's params |
+
+Plan 6 built look A on the studio's existing features. The rest of the design
+waits for Phases 2–5.
 
 ## 5. Decisions made in the design
 

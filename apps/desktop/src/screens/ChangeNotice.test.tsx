@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { goldenState } from "../client/fakeClient";
 import type { ExternalChange } from "../client/protocol";
 import { ChangeNotice } from "./ChangeNotice";
@@ -103,6 +103,44 @@ describe("ChangeNotice", () => {
     expect(
       screen.getByText("A change on disk overrode 1 unsaved edit. Re-apply it?"),
     ).toBeInTheDocument();
+  });
+
+  it("is a status card named for Claude's change, titled Claude", () => {
+    setup(notice({ changes: [{ path: "tracks.acid.acid303.resonance", old: 70, new: 90 }] }));
+    const card = screen.getByRole("status", { name: "Claude's change" });
+    expect(within(card).getByText("Claude")).toBeInTheDocument();
+    expect(card).toHaveAttribute("data-source", "claude");
+  });
+
+  it("is a status card named for a song file change, titled Song file", () => {
+    setup(notice({ source: "external", changes: [{ path: "song.bpm", old: 120, new: 125 }] }));
+    const card = screen.getByRole("status", { name: "Song file change" });
+    expect(within(card).getByText("Song file")).toBeInTheDocument();
+    expect(card).toHaveAttribute("data-source", "file");
+  });
+
+  it("names a replaced file and a bare re-apply offer as song file changes", () => {
+    const { unmount } = render(
+      <ChangeNotice
+        notice={notice({ replaced: true })}
+        offered={[]}
+        canUndo
+        song={song}
+        onUndo={() => {}}
+        onResolve={() => {}}
+        onDismiss={() => {}}
+      />,
+    );
+    expect(screen.getByRole("status", { name: "Song file change" })).toBeInTheDocument();
+    unmount();
+    setup(null, [{ path: "tracks.acid.acid303.cutoff", old: 820, new: 500 }]);
+    expect(screen.getByRole("status", { name: "Song file change" })).toBeInTheDocument();
+  });
+
+  it("Dismiss calls onDismiss", () => {
+    const { onDismiss } = setup(notice({ changes: [{ path: "song.bpm", old: 120, new: 125 }] }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
   it("renders nothing when there is nothing to say", () => {
