@@ -100,6 +100,11 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
     () => ({
       onSelect: (i: number) => store.select(i),
       onSeek: (bar: number) => fire({ cmd: "seek_bar", args: { bar } }),
+      // Loop the dragged range and jump to its start; a stopped transport stays stopped.
+      onLoop: (bars: [number, number]) => {
+        fire({ cmd: "set_loop", args: { bars } });
+        fire({ cmd: "seek_bar", args: { bar: bars[0] } });
+      },
       onMove: (from: number, to: number) => {
         fire({ cmd: "move_section", args: { from, to } });
         store.select(to);

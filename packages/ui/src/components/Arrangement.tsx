@@ -52,7 +52,10 @@ export type ArrangementProps = {
   /** Lane row labels, keyed `${track}.${param}` (mix lanes have track `"mix"`); else the param id. */
   laneLabels?: Record<string, string>;
   onSelect(i: number): void;
+  /** Jump to a zero-based bar, playing or stopped. */
   onSeek(bar: number): void;
+  /** Loop zero-based bars `[start, end)`, from a drag on the ruler. */
+  onLoop(bars: [number, number]): void;
   onMove(from: number, to: number): void;
   onResize(i: number, bars: number): void;
   onDuplicate(i: number): void;
@@ -222,6 +225,11 @@ export function Arrangement(p: ArrangementProps) {
     setDrag(d);
   };
 
+  /** The bar the playhead's cap is being dragged to; the playhead is drawn there, not at ticks. */
+  const [capBar, setCapBar] = useState<number | null>(null);
+  /** The sticky band over the lanes: its left edge is bar 0 on screen. */
+  const band = useRef<HTMLDivElement>(null);
+
   const scroller = useRef<HTMLDivElement>(null);
   const [measured, setMeasured] = useState(0);
   /** Whether rows (y) or lanes (x) have scrolled under the sticky band and header column. */
@@ -253,6 +261,12 @@ export function Arrangement(p: ArrangementProps) {
   const secRow = useRef<SVGSVGElement>(null);
   const height = TOP + rowsH;
   const step = rulerStep(ppb);
+  const playhead = capBar ?? p.playhead;
+  /** The bar line nearest the pointer, on the song's bars. */
+  const capBarAt = (clientX: number) => {
+    const left = band.current?.getBoundingClientRect().left ?? 0;
+    return clampBar(Math.round((clientX - left) / ppb), total);
+  };
 
   const bodyDown = (i: number, e: PointerEvent<SVGRectElement>) => {
     if (e.button !== 0) return;
@@ -357,8 +371,30 @@ export function Arrangement(p: ArrangementProps) {
             onMix={p.onMix}
           />
           <div className="relative shrink-0" style={{ width: laneW, height }}>
-            <div className={cn("sticky top-0 z-20", under.y && stickyFill)} style={{ height: TOP }}>
-              <Ruler laneW={laneW} ppb={ppb} step={step} loop={p.loop} />
+            <div
+              ref={band}
+              className={cn("sticky top-0 z-20", under.y && stickyFill)}
+              style={{ height: TOP }}
+            >
+              <Ruler
+                laneW={laneW}
+                ppb={ppb}
+                step={step}
+                loop={p.loop}
+                total={total}
+                onSeek={p.onSeek}
+                onLoop={p.onLoop}
+              />
+              {total > 0 && (
+                <PlayheadCap
+                  x={playhead * ppb}
+                  bar={clampBar(Math.floor(playhead), total)}
+                  total={total}
+                  barAt={capBarAt}
+                  onDrag={setCapBar}
+                  onSeek={p.onSeek}
+                />
+              )}
               <svg
                 ref={secRow}
                 width={laneW}
@@ -500,7 +536,7 @@ export function Arrangement(p: ArrangementProps) {
               width={laneW}
               height={height}
             />
-            <Playhead x={p.playhead * ppb} height={height} />
+            <Playhead x={playhead * ppb} height={height} />
           </div>
         </div>
       </div>
@@ -571,20 +607,80 @@ function Playhead({ x, height }: { x: number; height: number }) {
   );
 }
 
+/** Bar `bar` kept on the song's bars, `[0, total - 1]`. */
+const clampBar = (bar: number, total: number) => Math.max(0, Math.min(total - 1, bar));
+
 type RulerProps = {
   laneW: number;
   ppb: number;
   step: number;
   loop: [number, number] | null;
+  /** The song's length in bars. */
+  total: number;
+  onSeek(bar: number): void;
+  onLoop(bars: [number, number]): void;
 };
 
-/** One-based bar numbers every `step` bars over a tick per bar, and the loop's white bracket. */
-const Ruler = memo(function Ruler({ laneW, ppb, step, loop }: RulerProps) {
+/** A press on the ruler: the bar it started on, the bar under the pointer, and whether it moved. */
+type RulerPress = { x0: number; from: number; to: number; drag: boolean };
+
+/**
+ * One-based bar numbers every `step` bars over a tick per bar, and the loop's white bracket.
+ * A click seeks to the bar under the pointer; a drag previews a range and loops it on release.
+ */
+const Ruler = memo(function Ruler({ laneW, ppb, step, loop, total, onSeek, onLoop }: RulerProps) {
+  const [press, setPress] = useState<RulerPress | null>(null);
+  const pressRef = useRef<RulerPress | null>(null);
+  const set = (next: RulerPress | null) => {
+    pressRef.current = next;
+    setPress(next);
+  };
+  // From the ruler's own left edge, so a scrolled timeline still finds the right bar.
+  const barAt = (e: PointerEvent<SVGSVGElement>) =>
+    clampBar(Math.floor((e.clientX - e.currentTarget.getBoundingClientRect().left) / ppb), total);
+
+  const down = (e: PointerEvent<SVGSVGElement>) => {
+    if (e.button !== 0 || total <= 0) return;
+    capture(e);
+    const bar = barAt(e);
+    set({ x0: e.clientX, from: bar, to: bar, drag: false });
+  };
+  const move = (e: PointerEvent<SVGSVGElement>) => {
+    const cur = pressRef.current;
+    if (!cur) return;
+    const drag = cur.drag || Math.abs(e.clientX - cur.x0) >= DRAG_SLOP;
+    const to = barAt(e);
+    if (drag !== cur.drag || to !== cur.to) set({ ...cur, to, drag });
+  };
+  const up = (e: PointerEvent<SVGSVGElement>) => {
+    const cur = pressRef.current;
+    if (!cur) return;
+    release(e);
+    set(null);
+    if (!cur.drag) {
+      onSeek(cur.from);
+      return;
+    }
+    const to = barAt(e);
+    onLoop([Math.min(cur.from, to), Math.min(total, Math.max(cur.from, to) + 1)]);
+  };
+  const cancel = (e: PointerEvent<SVGSVGElement>) => {
+    if (!pressRef.current) return;
+    release(e);
+    set(null);
+  };
+
+  const preview: [number, number] | null =
+    press?.drag === true
+      ? [Math.min(press.from, press.to), Math.min(total, Math.max(press.from, press.to) + 1)]
+      : null;
+
   return (
     <svg
+      data-testid="ruler"
       width={laneW}
       height={RULER_H}
-      className="block border-b border-line"
+      className="block cursor-pointer touch-none border-b border-line"
       style={{
         backgroundImage:
           "repeating-linear-gradient(90deg, rgb(255 255 255 / .22) 0 1px, transparent 1px 100%)",
@@ -592,9 +688,17 @@ const Ruler = memo(function Ruler({ laneW, ppb, step, loop }: RulerProps) {
         backgroundRepeat: "repeat-x",
         backgroundPosition: "0 100%",
       }}
+      onPointerDown={down}
+      onPointerMove={move}
+      onPointerUp={up}
+      onPointerCancel={cancel}
     >
-      <LoopBand loop={loop} ppb={ppb} height={RULER_H} />
-      {loop && (
+      {preview ? (
+        <LoopBand loop={preview} ppb={ppb} height={RULER_H} testId="loop-preview" />
+      ) : (
+        <LoopBand loop={loop} ppb={ppb} height={RULER_H} />
+      )}
+      {loop && !preview && (
         <rect
           data-testid="loop-range"
           x={loop[0] * ppb}
@@ -606,7 +710,7 @@ const Ruler = memo(function Ruler({ laneW, ppb, step, loop }: RulerProps) {
           pointerEvents="none"
         />
       )}
-      <g aria-hidden="true">
+      <g aria-hidden="true" pointerEvents="none">
         {gridBars(laneW / ppb, step).map((b) => (
           <g key={b}>
             <line
@@ -632,6 +736,102 @@ const Ruler = memo(function Ruler({ laneW, ppb, step, loop }: RulerProps) {
     </svg>
   );
 });
+
+/** The cap's hit area, centred on the playhead; the visible tab inside it is smaller. */
+const CAP_W = 16;
+const CAP_TAB = 12;
+
+type PlayheadCapProps = {
+  /** The playhead's x in the lanes. */
+  x: number;
+  /** The zero-based bar the playhead is in. */
+  bar: number;
+  total: number;
+  /** The bar line nearest a pointer's clientX. */
+  barAt(clientX: number): number;
+  /** The bar the cap is dragged to, or null when the drag ends. */
+  onDrag(bar: number | null): void;
+  onSeek(bar: number): void;
+};
+
+/**
+ * A grab tab on the playhead's top, in the ruler: drag it to move the playhead bar by bar (it
+ * seeks on release), or focus it and step a bar with the arrow keys.
+ */
+function PlayheadCap({ x, bar, total, barAt, onDrag, onSeek }: PlayheadCapProps) {
+  /** Where the drag started and the bar it has reached, if it has moved. */
+  const drag = useRef<{ x0: number; bar: number | null } | null>(null);
+  const down = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    // The ruler under the cap must not start a loop drag.
+    e.stopPropagation();
+    capture(e);
+    drag.current = { x0: e.clientX, bar: null };
+  };
+  const move = (e: PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    if (d.bar === null && Math.abs(e.clientX - d.x0) < DRAG_SLOP) return;
+    const next = barAt(e.clientX);
+    if (next === d.bar) return;
+    d.bar = next;
+    onDrag(next);
+  };
+  const up = (e: PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    e.stopPropagation();
+    release(e);
+    drag.current = null;
+    onDrag(null);
+    if (d.bar !== null) onSeek(d.bar);
+  };
+  const cancel = (e: PointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return;
+    release(e);
+    drag.current = null;
+    onDrag(null);
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    // The frame's Alt+arrow moves the selected section; on the cap, arrows move the playhead only.
+    e.preventDefault();
+    e.stopPropagation();
+    onSeek(clampBar(bar + (e.key === "ArrowLeft" ? -1 : 1), total));
+  };
+  return (
+    <div
+      role="slider"
+      aria-label="Playhead"
+      aria-valuemin={1}
+      aria-valuemax={total}
+      aria-valuenow={bar + 1}
+      aria-valuetext={`Bar ${bar + 1}`}
+      tabIndex={0}
+      className={cn(
+        "pointer-events-auto absolute left-0 top-0 z-10 flex cursor-ew-resize touch-none justify-center rounded-sm",
+        focusRing,
+      )}
+      style={{ width: CAP_W, height: RULER_H, transform: `translateX(${x - CAP_W / 2}px)` }}
+      onPointerDown={down}
+      onPointerMove={move}
+      onPointerUp={up}
+      onPointerCancel={cancel}
+      onKeyDown={onKeyDown}
+    >
+      <span
+        aria-hidden="true"
+        className="block rounded-t-[3px]"
+        style={{
+          width: CAP_TAB,
+          height: 11,
+          background: "rgb(var(--play))",
+          clipPath: "polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%)",
+        }}
+      />
+    </div>
+  );
+}
 
 type TrackHeadersProps = Pick<ArrangementProps, "openTrack" | "onOpenTrack" | "onMix"> & {
   rows: Row[];

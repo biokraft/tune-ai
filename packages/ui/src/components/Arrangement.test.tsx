@@ -17,6 +17,7 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
   const fns = {
     onSelect: vi.fn(),
     onSeek: vi.fn(),
+    onLoop: vi.fn(),
     onMove: vi.fn(),
     onResize: vi.fn(),
     onDuplicate: vi.fn(),
@@ -25,7 +26,7 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
     onShowTrack: vi.fn(),
     onMix: vi.fn(),
   };
-  const utils = render(
+  const ui = (more: Record<string, unknown>) => (
     <div>
       <button>outside</button>
       <Arrangement
@@ -45,10 +46,14 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
         openTrack={null}
         {...fns}
         {...extra}
+        {...more}
       />
-    </div>,
+    </div>
   );
-  return { ...fns, ...utils };
+  const utils = render(ui({}));
+  /** Re-renders with `more` on top of the first props, as a new playhead tick would. */
+  const update = (more: Record<string, unknown>) => utils.rerender(ui(more));
+  return { ...fns, ...utils, update };
 }
 
 const block = (i: number) => screen.getByTestId(`section-${i}`);
@@ -613,5 +618,169 @@ describe("Arrangement blocks", () => {
       delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("Arrangement ruler", () => {
+  // 12 px per bar in jsdom (nothing measures the scroller), over two 16-bar sections.
+  const two = () => [sec("a", 0, 16), sec("b", 16, 16)];
+  const ruler = () => screen.getByTestId("ruler");
+  const at = (bar: number, into = 3) => ({ clientX: bar * 12 + into, pointerId: 1 });
+  const cap = () => screen.getByRole("slider", { name: "Playhead" });
+
+  it("a click on the ruler seeks to the bar under the pointer", () => {
+    const { onSeek, onLoop } = setup(two());
+    expect(ruler()).toHaveClass("cursor-pointer");
+    fireEvent.pointerDown(ruler(), at(5));
+    fireEvent.pointerUp(ruler(), at(5));
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek).toHaveBeenCalledWith(5);
+    expect(onLoop).not.toHaveBeenCalled();
+  });
+
+  it("a press that moves less than the slop is still a click", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(5, 1));
+    fireEvent.pointerMove(ruler(), at(5, 3));
+    fireEvent.pointerUp(ruler(), at(5, 3));
+    expect(onSeek).toHaveBeenCalledWith(5);
+    expect(onLoop).not.toHaveBeenCalled();
+  });
+
+  it("only the left button acts", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), { ...at(5), button: 2 });
+    fireEvent.pointerUp(ruler(), { ...at(5), button: 2 });
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(onLoop).not.toHaveBeenCalled();
+  });
+
+  it("measures the pointer from the ruler's own left edge, so a scrolled timeline still hits", () => {
+    const { onSeek } = setup(two());
+    // Scrolled 120 px: the ruler's left edge sits 120 px left of the viewport's.
+    vi.spyOn(ruler(), "getBoundingClientRect").mockReturnValue({
+      left: -120,
+      top: 0,
+      right: 0,
+      bottom: 24,
+      width: 384,
+      height: 24,
+      x: -120,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    fireEvent.pointerDown(ruler(), { clientX: 3, pointerId: 1 });
+    fireEvent.pointerUp(ruler(), { clientX: 3, pointerId: 1 });
+    expect(onSeek).toHaveBeenCalledWith(10);
+  });
+
+  it("clamps a press past the last bar to the last bar", () => {
+    const { onSeek } = setup(two());
+    fireEvent.pointerDown(ruler(), at(40));
+    fireEvent.pointerUp(ruler(), at(40));
+    expect(onSeek).toHaveBeenCalledWith(31);
+  });
+
+  it("a drag across bars loops them, end exclusive, and does not seek", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(2));
+    fireEvent.pointerMove(ruler(), at(4));
+    fireEvent.pointerMove(ruler(), at(5));
+    fireEvent.pointerUp(ruler(), at(5));
+    expect(onLoop).toHaveBeenCalledTimes(1);
+    expect(onLoop).toHaveBeenCalledWith([2, 6]);
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it("a right-to-left drag gives the same range", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(5));
+    fireEvent.pointerMove(ruler(), at(2));
+    fireEvent.pointerUp(ruler(), at(2));
+    expect(onLoop).toHaveBeenCalledWith([2, 6]);
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it("a drag past the end loops up to the song's last bar", () => {
+    const { onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(28));
+    fireEvent.pointerMove(ruler(), at(50));
+    fireEvent.pointerUp(ruler(), at(50));
+    expect(onLoop).toHaveBeenCalledWith([28, 32]);
+  });
+
+  it("previews the range as a band while dragging, and drops it on release", () => {
+    setup(two());
+    expect(screen.queryByTestId("loop-preview")).toBeNull();
+    fireEvent.pointerDown(ruler(), at(2));
+    fireEvent.pointerMove(ruler(), at(5));
+    const band = screen.getByTestId("loop-preview");
+    expect(band).toHaveAttribute("x", String(2 * 12));
+    expect(band).toHaveAttribute("width", String(4 * 12));
+    fireEvent.pointerUp(ruler(), at(5));
+    expect(screen.queryByTestId("loop-preview")).toBeNull();
+  });
+
+  it("a cancelled drag neither loops nor seeks", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(2));
+    fireEvent.pointerMove(ruler(), at(5));
+    fireEvent.pointerCancel(ruler(), at(5));
+    expect(onLoop).not.toHaveBeenCalled();
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("loop-preview")).toBeNull();
+  });
+
+  it("the playhead's cap is a slider over the song's bars", () => {
+    setup(two(), { playhead: 4.5 });
+    const c = cap();
+    expect(c).toHaveAttribute("aria-valuemin", "1");
+    expect(c).toHaveAttribute("aria-valuemax", "32");
+    expect(c).toHaveAttribute("aria-valuenow", "5");
+    expect(c).toHaveAttribute("tabindex", "0");
+    expect(c).toHaveClass("cursor-ew-resize", "pointer-events-auto");
+  });
+
+  it("dragging the cap moves the playhead bar by bar, ignores ticks, and seeks on release", () => {
+    const { onSeek, onLoop, update } = setup(two(), { playhead: 4.5 });
+    fireEvent.pointerDown(cap(), { clientX: 54, pointerId: 1 });
+    fireEvent.pointerMove(cap(), { clientX: 100, pointerId: 1 });
+    // 100 px is 8.3 bars: the nearest bar line is 8.
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(8 * 12));
+    expect(cap()).toHaveAttribute("aria-valuenow", "9");
+    update({ playhead: 5 });
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(8 * 12));
+    fireEvent.pointerUp(cap(), { clientX: 100, pointerId: 1 });
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek).toHaveBeenCalledWith(8);
+    expect(onLoop).not.toHaveBeenCalled();
+    // Released, it follows the ticks again.
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(5 * 12));
+  });
+
+  it("a press on the cap that does not move leaves the playhead where it is", () => {
+    const { onSeek, onLoop } = setup(two(), { playhead: 4.5 });
+    fireEvent.pointerDown(cap(), { clientX: 54, pointerId: 1 });
+    fireEvent.pointerUp(cap(), { clientX: 54, pointerId: 1 });
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(onLoop).not.toHaveBeenCalled();
+  });
+
+  it("arrow keys on the cap step the playhead a bar, clamped, and leave the sections alone", async () => {
+    const user = userEvent.setup();
+    const { onSeek, onMove, update } = setup(two(), { playhead: 4.5, selected: 0 });
+    act(() => cap().focus());
+    await user.keyboard("{ArrowRight}");
+    expect(onSeek).toHaveBeenLastCalledWith(5);
+    await user.keyboard("{ArrowLeft}");
+    expect(onSeek).toHaveBeenLastCalledWith(3);
+    await user.keyboard("{Alt>}{ArrowRight}{/Alt}");
+    expect(onMove).not.toHaveBeenCalled();
+    update({ playhead: 0 });
+    await user.keyboard("{ArrowLeft}");
+    expect(onSeek).toHaveBeenLastCalledWith(0);
+    update({ playhead: 31.5 });
+    await user.keyboard("{ArrowRight}");
+    expect(onSeek).toHaveBeenLastCalledWith(31);
   });
 });
