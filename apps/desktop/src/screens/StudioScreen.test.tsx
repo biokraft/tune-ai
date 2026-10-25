@@ -3,10 +3,17 @@ import App from "../App";
 import { FakeClient, goldenExternal, stateEvent } from "../client/fakeClient";
 import { createStudioStore } from "../store/studioStore";
 
-function setup() {
+function render303(state = stateEvent()) {
   const client = new FakeClient();
   render(<App store={createStudioStore(client)} />);
-  act(() => client.emit(stateEvent()));
+  act(() => client.emit(state));
+  return client;
+}
+
+/** The studio with the mixer docked. */
+function setup(state = stateEvent()) {
+  const client = render303(state);
+  fireEvent.click(screen.getByRole("button", { name: "Mixer (M)" }));
   return client;
 }
 
@@ -49,9 +56,7 @@ describe("StudioScreen mixer strips", () => {
   });
 
   it("offers no duck knob anywhere without a duck source", () => {
-    const client = new FakeClient();
-    render(<App store={createStudioStore(client)} />);
-    act(() => client.emit(stateEvent((s) => (s.song!.mix.duck_source = null))));
+    setup(stateEvent((s) => (s.song!.mix.duck_source = null)));
     for (const t of ["kick", "acid"]) {
       expect(within(strip(t)).queryByRole("slider", { name: "Duck" })).toBeNull();
       expect(within(strip(t)).getByText("No kick")).toBeInTheDocument();
@@ -73,18 +78,14 @@ describe("StudioScreen mixer strips", () => {
   });
 
   it("badges a send knob that a lane automates in the sounding section", () => {
-    const client = new FakeClient();
-    render(<App store={createStudioStore(client)} />);
-    act(() =>
-      client.emit(
-        stateEvent((s) => {
-          s.song!.sections[0]!.lanes.push({
-            track: "kick",
-            param: "send.delay",
-            points: [[0, 0.5]],
-          });
-        }),
-      ),
+    setup(
+      stateEvent((s) => {
+        s.song!.sections[0]!.lanes.push({
+          track: "kick",
+          param: "send.delay",
+          points: [[0, 0.5]],
+        });
+      }),
     );
     const badge = (track: string) =>
       within(within(strip(track)).getByRole("slider", { name: "Delay" })).queryByTestId(
@@ -94,14 +95,137 @@ describe("StudioScreen mixer strips", () => {
     expect(badge("acid")).toBeNull();
   });
 
-  it("shows the help of a focused send knob in the mixer's help line", () => {
+  it("shows the help of a focused send knob in the dock's help line", () => {
     setup();
     act(() => within(strip("kick")).getByRole("slider", { name: "Delay" }).focus());
-    const mixer = screen.getByRole("complementary", { name: "Mixer" });
+    const dock = screen.getByRole("region", { name: "Dock" });
     expect(
-      within(mixer).getByText(
+      within(dock).getByText(
         "How much of this track goes to the shared dotted-eighth delay. -60 is off.",
       ),
     ).toBeInTheDocument();
+  });
+});
+
+describe("StudioScreen shell", () => {
+  it("fills the window without scrolling it", () => {
+    render303();
+    const shell = screen.getByRole("region", { name: "Song arrangement" }).parentElement!;
+    expect(shell).toHaveClass("h-screen", "overflow-hidden", "min-w-[1280px]");
+    expect(shell.querySelectorAll('.blob[aria-hidden="true"]')).toHaveLength(3);
+  });
+
+  it("stacks the transport, the timeline, the dock and the toast", () => {
+    render303();
+    fireEvent.click(screen.getByRole("button", { name: "Open acid" }));
+    const shell = screen.getByRole("region", { name: "Song arrangement" }).parentElement!;
+    const transport = screen.getByRole("toolbar", { name: "Transport" });
+    const order = [
+      transport.parentElement!,
+      screen.getByRole("region", { name: "Song arrangement" }),
+      screen.getByRole("region", { name: "Dock" }),
+    ];
+    expect(order.map((el) => el.parentElement)).toEqual(order.map(() => shell));
+    const children = [...shell.children];
+    const at = order.map((el) => children.indexOf(el));
+    expect(at).toEqual([...at].sort((a, b) => a - b));
+    // The toast floats from the transport's own box, over the timeline.
+    const toast = screen.getByRole("status", { name: "Song file change" });
+    expect(toast.parentElement).toBe(transport.parentElement);
+    expect([...toast.parentElement!.children].indexOf(toast)).toBeGreaterThan(
+      [...toast.parentElement!.children].indexOf(transport),
+    );
+    expect(screen.getByRole("region", { name: "Song arrangement" })).toHaveClass(
+      "min-h-0",
+      "flex-1",
+    );
+  });
+
+  it("anchors the toast under the transport, below any banner", () => {
+    render303(
+      stateEvent((s) => {
+        s.file_errors = [{ line: 3, column: 1, message: "expected a table" }];
+      }),
+    );
+    const transport = screen.getByRole("toolbar", { name: "Transport" });
+    const toast = screen.getByRole("status", { name: "Song file change" });
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(toast.parentElement).toBe(transport.parentElement);
+    expect(toast).toHaveClass("absolute", "top-full");
+    expect(toast).not.toHaveClass("fixed");
+    expect(toast.className).not.toMatch(/top-\[72px\]/);
+  });
+
+  it("uses blur only on the transport, the timeline and the dock", () => {
+    render303();
+    fireEvent.click(screen.getByRole("button", { name: "Open acid" }));
+    expect(document.querySelectorAll(".glass")).toHaveLength(3);
+    expect(screen.getByRole("status", { name: "Song file change" })).toHaveClass("glass-solid");
+  });
+});
+
+describe("StudioScreen timeline blocks", () => {
+  const dock = () => screen.getByRole("region", { name: "Dock" });
+
+  it("a block opens its track in the dock on its section", () => {
+    render303();
+    fireEvent.click(screen.getByRole("button", { name: "a1 in b" }));
+    expect(within(dock()).getByTestId("dock-track")).toHaveTextContent("acid");
+    expect(within(dock()).getByText("b · bars 3–4")).toBeInTheDocument();
+    expect(screen.getByTestId("section-1")).toHaveAttribute("data-selected", "true");
+  });
+
+  it("a block of the docked track in another section keeps the dock open", () => {
+    render303();
+    fireEvent.click(screen.getByRole("button", { name: "k4 in a" }));
+    expect(within(dock()).getByText("a · bars 1–2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "k4 in b" }));
+    expect(within(dock()).getByTestId("dock-track")).toHaveTextContent("kick");
+    expect(within(dock()).getByText("b · bars 3–4")).toBeInTheDocument();
+    // Its own block again, and an empty cell of the docked track, keep it open too.
+    fireEvent.click(screen.getByRole("button", { name: "k4 in b" }));
+    expect(within(dock()).getByText("b · bars 3–4")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "a1 in b" }));
+    fireEvent.click(screen.getByTestId("empty-0-acid"));
+    expect(within(dock()).getByTestId("dock-track")).toHaveTextContent("acid");
+    expect(within(dock()).getByText("a · bars 1–2")).toBeInTheDocument();
+  });
+
+  it("the docked track's header still closes the dock", () => {
+    render303();
+    fireEvent.click(screen.getByRole("button", { name: "a1 in b" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open acid" }));
+    expect(screen.queryByRole("region", { name: "Dock" })).toBeNull();
+  });
+
+  it("keeps a valid dock header when the selected last section leaves the song", () => {
+    const client = render303();
+    fireEvent.click(screen.getByTestId("section-1"));
+    fireEvent.click(screen.getByRole("button", { name: "Open acid" }));
+    expect(within(dock()).getByText("b · bars 3–4")).toBeInTheDocument();
+    act(() =>
+      client.emit(
+        stateEvent((s) => {
+          s.song!.sections.pop();
+          s.song!.total_bars = 2;
+        }),
+      ),
+    );
+    expect(within(dock()).getByText("a · bars 1–2")).toBeInTheDocument();
+  });
+
+  it("labels lane rows from the track, strip and mix params", () => {
+    render303(
+      stateEvent((s) => {
+        s.song!.sections[0]!.lanes.push(
+          { track: "kick", param: "send.delay", points: [[0, 0.5]] },
+          { track: "mix", param: "reverb.size", points: [[0, 0.2]] },
+        );
+      }),
+    );
+    expect(screen.getByText("↳ Cutoff")).toBeInTheDocument();
+    expect(screen.getByText("↳ Delay")).toBeInTheDocument();
+    expect(screen.getByText("↳ Reverb size")).toBeInTheDocument();
+    expect(screen.getByTestId("mix-header")).toHaveTextContent("Mix");
   });
 });

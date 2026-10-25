@@ -155,14 +155,22 @@ describe("AcidStepSequencer", () => {
         patternId="p"
         steps={steps}
         playingStep={null}
-        highlighted={new Set([2])}
+        highlighted={
+          new Map([
+            [2, "claude"],
+            [3, "external"],
+          ])
+        }
         onChange={() => {}}
       />,
     );
-    expect(container.querySelectorAll("[data-step]")[2]).toHaveAttribute(
-      "data-highlight",
-      "claude",
-    );
+    const cols = container.querySelectorAll("[data-step]");
+    expect(cols[2]).toHaveAttribute("data-highlight", "claude");
+    expect(cols[2]).toHaveClass("outline-agent");
+    expect(cols[3]).toHaveAttribute("data-highlight", "external");
+    expect(cols[3]).toHaveClass("outline-dashed", "outline-ink2");
+    expect(cols[3]!.className).not.toMatch(/agent/);
+    expect(cols[1]).not.toHaveAttribute("data-highlight");
   });
 
   it("handled keys do not reach document listeners", () => {
@@ -203,5 +211,36 @@ describe("AcidStepSequencer", () => {
     );
     fireEvent.keyDown(screen.getByRole("button", { name: "Step 1 note" }), { key: "r" });
     expect(onChange).toHaveBeenLastCalledWith(0, { note: 36, accent: false, slide: false });
+  });
+});
+
+describe("AcidStepSequencer columns", () => {
+  const cols = [
+    { note: 36, accent: true, slide: false },
+    { note: null, accent: false, slide: false },
+  ];
+  it("lights the step light for sounding steps only", () => {
+    const { container } = render(
+      <AcidStepSequencer patternId="c" steps={cols} playingStep={null} onChange={() => {}} />,
+    );
+    const lights = container.querySelectorAll("[data-step-light]");
+    expect(lights[0]).toHaveAttribute("data-step-light", "on");
+    expect(lights[1]).toHaveAttribute("data-step-light", "off");
+  });
+  it("puts a play bar on the playing column", () => {
+    const { container } = render(
+      <AcidStepSequencer patternId="c" steps={cols} playingStep={1} onChange={() => {}} />,
+    );
+    expect(container.querySelectorAll("[data-playhead-bar]")).toHaveLength(1);
+    expect(container.querySelector("[data-step='1'] [data-playhead-bar]")).not.toBeNull();
+  });
+  it("numbers each column, the playing one in the play colour", () => {
+    const { container } = render(
+      <AcidStepSequencer patternId="c" steps={cols} playingStep={1} onChange={() => {}} />,
+    );
+    const nums = container.querySelectorAll("[data-step-number]");
+    expect([...nums].map((n) => n.textContent)).toEqual(["1", "2"]);
+    expect(nums[1]).toHaveClass("text-play");
+    expect(nums[0]).toHaveClass("text-ink3");
   });
 });

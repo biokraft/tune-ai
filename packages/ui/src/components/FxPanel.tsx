@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { cn } from "../lib/utils";
 import type { ParamSpecView } from "../lib/param";
 import { Knob, type Highlight } from "./Knob";
@@ -12,10 +13,16 @@ export type FxPanelProps = {
   highlight?(id: string): Highlight;
   automated?(id: string): boolean;
   onHelp?(spec: ParamSpecView | null): void;
+  /** CSS colour for the knobs' arcs (the track colour). */
+  color?: string;
+  /** The mode slot on the right of the header, e.g. a distortion mode switch. */
+  header?: ReactNode;
+  /** Knob size per param; "sm" when omitted. */
+  sizeOf?(id: string): "md" | "sm";
 };
 
 /**
- * A rack module: a titled row of small knobs, one per param. The knobs stay live when the module
+ * A device card: a titled row of small knobs, one per param. The knobs stay live when the module
  * is dimmed, since a drag is how a bus first gets its signal.
  */
 export function FxPanel({
@@ -26,6 +33,9 @@ export function FxPanel({
   highlight,
   automated,
   onHelp,
+  color,
+  header,
+  sizeOf,
 }: FxPanelProps) {
   const inactive = inactiveNote !== null && inactiveNote !== "";
   return (
@@ -33,27 +43,33 @@ export function FxPanel({
       role="group"
       aria-label={title}
       data-inactive={inactive ? "true" : undefined}
-      className="flex flex-col gap-1 rounded-md border border-silkscreen/30 px-3 pb-2 pt-2"
+      className="flex shrink-0 flex-col rounded-rs border border-line bg-glass2"
     >
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="font-label text-sm leading-none text-silkscreen/80">{title}</span>
-        {inactive && (
-          <span className="font-value text-xs leading-none text-silkscreen/60">{inactiveNote}</span>
-        )}
+      <div className="flex items-center gap-2 border-b border-line px-2.5 py-2">
+        <span className="text-xs font-bold leading-none text-ink">{title}</span>
+        {inactive && <span className="text-[11px] leading-none text-ink3">{inactiveNote}</span>}
+        {header && <div className="ml-auto">{header}</div>}
       </div>
-      <div className={cn("flex items-start gap-1 transition-opacity", inactive && "opacity-50")}>
+      <div
+        className={cn(
+          "flex flex-nowrap items-start gap-1 p-2.5 transition-opacity",
+          inactive && "opacity-50",
+        )}
+      >
         {params.map((p) => (
-          <Knob
-            key={p.id}
-            spec={p}
-            size="sm"
-            value={p.value}
-            highlight={highlight?.(p.id) ?? null}
-            automated={automated?.(p.id) ?? false}
-            onHelp={onHelp}
-            onChange={(v) => onParam(p.id, v, false)}
-            onCommit={(v) => onParam(p.id, v, true)}
-          />
+          <div key={p.id} onPointerEnter={() => onHelp?.(p)} onPointerLeave={() => onHelp?.(null)}>
+            <Knob
+              spec={p}
+              size={sizeOf?.(p.id) ?? "sm"}
+              color={color}
+              value={p.value}
+              highlight={highlight?.(p.id) ?? null}
+              automated={automated?.(p.id) ?? false}
+              onHelp={onHelp}
+              onChange={(v) => onParam(p.id, v, false)}
+              onCommit={(v) => onParam(p.id, v, true)}
+            />
+          </div>
         ))}
       </div>
     </div>

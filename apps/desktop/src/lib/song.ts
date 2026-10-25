@@ -1,6 +1,6 @@
 import type { SectionView } from "@tune/ui";
 import type { PatternView, SongView, StudioState } from "../client/protocol";
-import type { StudioView } from "../store/studioStore";
+import type { HighlightKind, StudioView } from "../store/studioStore";
 
 /** 16ths per bar. */
 export const STEPS_PER_BAR = 16;
@@ -14,6 +14,16 @@ export function sentenceCase(label: string): string {
 export function sectionAtBar(sections: SectionView[], bar: number): number | null {
   const i = sections.findIndex((s) => bar >= s.start_bar && bar < s.start_bar + s.bars);
   return i < 0 ? null : i;
+}
+
+/** Name of the section whose bars equal the half-open `loop`, else null. */
+export function loopSectionName(
+  sections: SectionView[],
+  loop: [number, number] | null,
+): string | null {
+  if (loop === null) return null;
+  const s = sections.find((x) => x.start_bar === loop[0] && x.start_bar + x.bars === loop[1]);
+  return s?.name ?? null;
 }
 
 /** Whether the studio is sounding and the playhead is known. */
@@ -31,29 +41,20 @@ export function currentSection(view: StudioView): number | null {
   return sectionAtBar(song.sections, bar) ?? 0;
 }
 
-/**
- * The section the 303 sequencer shows. Like {@link currentSection}, except that when stopped with
- * nothing selected and the 303 rests at the cursor (an intro, say), it opens on the first section
- * where the shown 303 track (the first acid303 one) plays a pattern. While playing it follows the
- * playhead, rests included.
- */
-export function acidSection(view: StudioView): number | null {
-  const i = currentSection(view);
-  const song = view.state?.song;
-  if (!song || i === null || view.selectedSection !== null || playheadStep(view) !== null) {
-    return i;
-  }
-  const acid = song.tracks.find((t) => t.instrument === "acid303");
-  if (!acid || patternIn(song, i, acid.id)) return i;
-  const first = song.sections.findIndex((_, j) => patternIn(song, j, acid.id) !== null);
-  return first < 0 ? i : first;
-}
-
 /** The pattern `track` plays in section `i`, if any. */
 export function patternIn(song: SongView, i: number | null, track: string): PatternView | null {
   if (i === null) return null;
   const id = song.sections[i]?.play[track];
   return song.patterns.find((p) => p.id === id) ?? null;
+}
+
+/**
+ * A pattern's shape for its timeline block, one value per step: a rest is 0, a hit or a note 0.6
+ * and an accented one 1.
+ */
+export function patternGlyph(p: PatternView): number[] {
+  if (p.kind === "drum") return p.hits.map((h) => (h === "accent" ? 1 : h === "hit" ? 0.6 : 0));
+  return p.steps.map((s) => (s.note === null ? 0 : s.accent ? 1 : 0.6));
 }
 
 /**
@@ -74,12 +75,15 @@ export function stepInPattern(
   return offset % length;
 }
 
-/** The step indices of `pattern` highlighted in `highlights`. */
-export function highlightedSteps(highlights: Map<string, unknown>, pattern: string): Set<number> {
+/** The step indices of `pattern` highlighted in `highlights`, each with who changed it. */
+export function highlightedSteps(
+  highlights: ReadonlyMap<string, HighlightKind>,
+  pattern: string,
+): Map<number, HighlightKind> {
   const prefix = `patterns.${pattern}.steps[`;
-  const out = new Set<number>();
-  for (const key of highlights.keys()) {
-    if (key.startsWith(prefix)) out.add(Number(key.slice(prefix.length, -1)));
+  const out = new Map<number, HighlightKind>();
+  for (const [key, kind] of highlights) {
+    if (key.startsWith(prefix)) out.set(Number(key.slice(prefix.length, -1)), kind);
   }
   return out;
 }
@@ -93,4 +97,13 @@ export function sectionBars(state: StudioState, i: number): [number, number] | n
 /** A number as people read it: at most 4 significant digits, no trailing zeros. */
 export function formatNumber(x: number): string {
   return String(Number(x.toPrecision(4)));
+}
+
+/**
+ * Why `track` gets no duck knob: the duck source would duck itself, and without a source nothing
+ * ducks. Validation refuses both, so a drag would be heard but its release never written.
+ */
+export function whyNoDuck(source: string | null, track: string): string | null {
+  if (source === null) return "No kick";
+  return source === track ? "Duck source" : null;
 }

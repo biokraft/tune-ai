@@ -1,36 +1,26 @@
+import { Arrangement, TransportBar, type ArrangementProps, type TransportBarProps } from "@tune/ui";
+import { memo, useCallback, useEffect, useMemo, useReducer } from "react";
+import type { Command, MixView, SongView, StudioState, TrackView } from "../client/protocol";
 import {
-  Arrangement,
-  DrumGrid,
-  TrackStrip,
-  TransportBar,
-  type ArrangementProps,
-  type DrumRow,
-  type ParamSpecView,
-  type SectionView,
-  type TransportBarProps,
-} from "@tune/ui";
-import { memo, useCallback, useMemo, useState } from "react";
-import type { Command, SongView, StudioState, TrackView } from "../client/protocol";
-import {
-  acidSection,
   currentSection,
   formatNumber,
-  highlightedSteps,
-  patternIn,
+  loopSectionName,
+  patternGlyph,
   playheadStep,
   sectionAtBar,
   sectionBars,
-  stepInPattern,
+  sentenceCase,
   STEPS_PER_BAR,
 } from "../lib/song";
 import { useStudioKeys } from "../lib/useStudioKeys";
-import type { HighlightKind, StudioStore, StudioView } from "../store/studioStore";
+import type { StudioStore, StudioView } from "../store/studioStore";
 import { usePlayheadPosition, usePlayheadStep, useStudioSelector } from "../store/useStudio";
 import { FileErrorBanner, LostBanner, MessageBanner } from "./Banners";
+import { Blobs } from "./Blobs";
 import { ChangeNotice, hasChangeNotice } from "./ChangeNotice";
-import { MixPanel } from "./MixPanel";
-import { Panel303 } from "./Panel303";
-import { useParamDrag } from "./useParamDrag";
+import { dockReducer, dockSection } from "./dock/dockState";
+import { Dock } from "./dock/Dock";
+import { HelpLine, HelpProvider } from "./help";
 
 export type StudioScreenProps = {
   view: StudioView & { state: StudioState & { song: SongView } };
@@ -41,8 +31,9 @@ const sameRange = (a: [number, number] | null, b: [number, number] | null) =>
   a !== null && b !== null && a[0] === b[0] && a[1] === b[1];
 
 /**
- * The studio: transport on top, the arrangement under it, the 303 faceplate with its sequencer
- * beside the mixer, and the drum grid at the bottom.
+ * The studio, filling the window without ever scrolling it: the transport on top, the timeline
+ * under it, the module dock (one track or the mixer) when open, and Claude's change toast floating
+ * top-right, under the transport.
  */
 export function StudioScreen({ view, store }: StudioScreenProps) {
   const { state, highlights, notice, noticeUndoable } = view;
@@ -51,7 +42,6 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
 
   // Numbers that follow the playhead only when it crosses a section boundary.
   const section = useStudioSelector(store, currentSection);
-  const acidShown = useStudioSelector(store, acidSection);
   const automatedIn = useStudioSelector(store, soundingSection);
   const selectedBars =
     view.selectedSection === null ? null : sectionBars(state, view.selectedSection);
@@ -75,23 +65,37 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
     fire({ cmd: "redo" });
   };
 
+  const [dock, dispatch] = useReducer(dockReducer, null);
+  // A track that leaves the song (an external edit, say) takes the dock with it.
+  useEffect(() => dispatch({ type: "prune", tracks: song.tracks.map((t) => t.id) }), [song.tracks]);
+  const toggleMixer = useCallback(() => dispatch({ type: "toggleMixer" }), []);
+
   useStudioKeys({
     playStop: () =>
       fire(state.playing ? { cmd: "stop" } : { cmd: "play", args: { from_bar: null } }),
     undo,
     redo,
     loop: toggleLoop,
+    mixer: toggleMixer,
+    escape: () => dispatch({ type: "close" }),
   });
 
-  const highlightedPaths = useMemo(() => new Set(highlights.keys()), [highlights]);
   const tracks = useMemo(
-    () => song.tracks.map((t) => ({ id: t.id, instrument: t.instrument })),
+    () =>
+      song.tracks.map((t) => ({ id: t.id, instrument: t.instrument, mute: t.mute, solo: t.solo })),
     [song.tracks],
   );
   const patterns = useMemo(
-    () => song.patterns.map((p) => ({ id: p.id, track: p.track })),
+    () =>
+      song.patterns.map((p) => ({
+        id: p.id,
+        track: p.track,
+        kind: p.kind,
+        glyph: patternGlyph(p),
+      })),
     [song.patterns],
   );
+  const laneLabels = useMemo(() => laneLabelsOf(song.tracks, song.mix), [song.tracks, song.mix]);
   const arrangementHandlers = useMemo(
     () => ({
       onSelect: (i: number) => store.select(i),
@@ -107,91 +111,125 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
         fire({ cmd: "delete_section", args: { index } });
         store.select(null);
       },
-      onSetPlay: (sec: number, track: string, pattern: string | null) =>
-        fire({ cmd: "set_section_play", args: { section: sec, track, pattern } }),
+      onMix: (track: string, patch: { mute?: boolean; solo?: boolean }) =>
+        fire({
+          cmd: "set_track_mix",
+          args: {
+            track,
+            gain_db: null,
+            pan: null,
+            mute: patch.mute ?? null,
+            solo: patch.solo ?? null,
+          },
+        }),
+      onOpenTrack: (track: string) => dispatch({ type: "openTrack", track }),
+      onShowTrack: (track: string) => dispatch({ type: "showTrack", track }),
     }),
     [store, fire],
   );
 
   const showNotice = hasChangeNotice(notice, state.offered);
+  const openTrack = dock?.kind === "track" ? dock.track : null;
 
   return (
-    <div className="flex min-h-screen min-w-[1280px] flex-col bg-chassis text-silkscreen">
-      {view.connection === "lost" && <LostBanner />}
-      {state.file_errors.length > 0 && <FileErrorBanner errors={state.file_errors} />}
-      {view.message && <MessageBanner message={view.message} onDismiss={store.dismissMessage} />}
+    <HelpProvider>
+      <div className="relative isolate flex h-screen min-w-[1280px] flex-col gap-2 overflow-hidden bg-bg p-2 text-ink">
+        <Blobs />
+        {view.connection === "lost" && <LostBanner />}
+        {state.file_errors.length > 0 && <FileErrorBanner errors={state.file_errors} />}
+        {view.message && <MessageBanner message={view.message} onDismiss={store.dismissMessage} />}
 
-      {/* Sticky, so play state and Claude's change notice stay in view over the drum grid. */}
-      <header className="sticky top-0 z-30 border-b border-black/40 bg-chassis px-6 py-3">
-        <LiveTransport
-          cursorBar={state.cursor_bar}
-          playing={state.playing}
-          bpm={Number(formatNumber(song.bpm))}
-          loopOn={loop !== null}
-          canLoop={loop !== null || selectedBars !== null}
-          canUndo={state.can_undo}
-          canRedo={state.can_redo}
-          songName={song.name}
-          notice={
-            showNotice ? (
-              <ChangeNotice
-                notice={notice}
-                offered={state.offered}
-                canUndo={noticeUndoable}
-                song={song}
-                onUndo={() => {
-                  store.dismissNotice();
-                  fire({ cmd: "undo" });
-                }}
-                onResolve={(reapply) => {
-                  store.dismissNotice();
-                  fire({ cmd: "resolve_offered", args: { reapply } });
-                }}
-                onDismiss={store.dismissNotice}
-              />
-            ) : undefined
-          }
-          onPlay={() => fire({ cmd: "play", args: { from_bar: null } })}
-          onStop={() => fire({ cmd: "stop" })}
-          onToggleLoop={toggleLoop}
-          onUndo={undo}
-          onRedo={redo}
-        />
-      </header>
+        {/* The toast hangs from the transport's box, so a banner above pushes both down. The box
+            makes no stacking context, so the transport's blur still sees the blobs. */}
+        <div className="relative flex-none">
+          <LiveTransport
+            cursorBar={state.cursor_bar}
+            playing={state.playing}
+            bpm={Number(formatNumber(song.bpm))}
+            loopOn={loop !== null}
+            canLoop={loop !== null || selectedBars !== null}
+            canUndo={state.can_undo}
+            canRedo={state.can_redo}
+            songName={song.name}
+            totalBars={song.total_bars}
+            loopBars={loop}
+            loopName={loopSectionName(song.sections, loop)}
+            mixerOpen={dock?.kind === "mixer"}
+            onToggleMixer={toggleMixer}
+            onPlay={() => fire({ cmd: "play", args: { from_bar: null } })}
+            onStop={() => fire({ cmd: "stop" })}
+            onToggleLoop={toggleLoop}
+            onUndo={undo}
+            onRedo={redo}
+          />
+          {showNotice && (
+            <ChangeNotice
+              notice={notice}
+              offered={state.offered}
+              canUndo={noticeUndoable}
+              song={song}
+              onUndo={undo}
+              onResolve={(reapply) => {
+                store.dismissNotice();
+                fire({ cmd: "resolve_offered", args: { reapply } });
+              }}
+              onDismiss={store.dismissNotice}
+            />
+          )}
+        </div>
 
-      <section aria-label="Song arrangement" className="border-b border-black/40 py-2">
-        <LiveArrangement
-          sections={song.sections}
-          tracks={tracks}
-          patterns={patterns}
-          cursorBar={state.cursor_bar}
-          selected={view.selectedSection}
-          loop={loop}
-          highlighted={highlightedPaths}
-          {...arrangementHandlers}
-        />
-      </section>
+        <section
+          aria-label="Song arrangement"
+          className="glass flex min-h-0 flex-1 flex-col overflow-hidden rounded-r"
+        >
+          <LiveArrangement
+            sections={song.sections}
+            tracks={tracks}
+            patterns={patterns}
+            laneLabels={laneLabels}
+            cursorBar={state.cursor_bar}
+            selected={view.selectedSection}
+            loop={loop}
+            openTrack={openTrack}
+            highlighted={highlights}
+            {...arrangementHandlers}
+          />
+          {dock === null && <HelpLine />}
+        </section>
 
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-6 px-6 py-5">
-        <Panel303
-          song={song}
-          section={acidShown}
-          automatedIn={automatedIn}
-          highlights={highlights}
-          send={store.send}
-        />
-        <Mixer
-          song={song}
-          highlights={highlights}
-          automatedIn={automatedIn}
-          fire={fire}
-          send={store.send}
-        />
+        {dock !== null && (
+          <Dock
+            song={song}
+            dock={dock}
+            section={dockSection(state, view.selectedSection, section)}
+            automatedIn={automatedIn}
+            highlights={highlights}
+            send={store.send}
+            fire={fire}
+            onAction={dispatch}
+          />
+        )}
       </div>
-
-      <DrumSection song={song} section={section} highlights={highlights} fire={fire} />
-    </div>
+    </HelpProvider>
   );
+}
+
+/**
+ * The timeline's lane row labels, keyed `${track}.${param}`: a track's instrument, fx and strip
+ * params, and the mix's under track `"mix"`. Delay and reverb params carry their bus name, since
+ * both buses have a "Low cut" and a "Width".
+ */
+function laneLabelsOf(tracks: TrackView[], mix: MixView): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const t of tracks) {
+    for (const p of [...t.params, ...t.fx.flatMap((f) => f.params), ...t.strip]) {
+      out[`${t.id}.${p.id}`] = sentenceCase(p.label);
+    }
+  }
+  for (const p of mix.delay) out[`mix.${p.id}`] = `Delay ${p.label.toLowerCase()}`;
+  for (const p of mix.reverb) out[`mix.${p.id}`] = `Reverb ${p.label.toLowerCase()}`;
+  for (const p of mix.master_params) out[`mix.${p.id}`] = sentenceCase(p.label);
+  return out;
 }
 
 /** The section under the playhead (or the cursor): where a knob release would land. */
@@ -223,169 +261,3 @@ const LiveArrangement = memo(function LiveArrangement({
   const step = usePlayheadStep();
   return <Arrangement {...rest} playhead={step !== null ? step / STEPS_PER_BAR : cursorBar} />;
 });
-
-type MixerProps = {
-  song: SongView;
-  highlights: Map<string, HighlightKind>;
-  automatedIn: number | null;
-  fire(cmd: Command): void;
-  send(cmd: Command): Promise<unknown>;
-};
-
-/** The channel strips and the effects panel; one help line serves every knob in the column. */
-function Mixer({ song, highlights, automatedIn, fire, send }: MixerProps) {
-  const [help, setHelp] = useState<ParamSpecView | null>(null);
-  const lanes = automatedIn === null ? undefined : song.sections[automatedIn]?.lanes;
-  return (
-    <aside aria-label="Mixer" className="flex flex-col gap-3">
-      <h2 className="font-label text-lg leading-none text-silkscreen/80">Mixer</h2>
-      {song.tracks.map((t) => (
-        <MixerStrip
-          key={t.id}
-          track={t}
-          noDuck={whyNoDuck(song.mix.duck_source, t.id)}
-          fire={fire}
-          send={send}
-          highlights={highlights}
-          lanes={lanes}
-          onHelp={setHelp}
-        />
-      ))}
-      <MixPanel
-        song={song}
-        highlights={highlights}
-        automatedIn={automatedIn}
-        send={send}
-        help={help}
-        onHelp={setHelp}
-      />
-    </aside>
-  );
-}
-
-/**
- * Why `track` gets no duck knob: the duck source would duck itself, and without a source nothing
- * ducks. Validation refuses both, so a drag would be heard but its release never written.
- */
-function whyNoDuck(source: string | null, track: string): string | null {
-  if (source === null) return "No kick";
-  return source === track ? "Duck source" : null;
-}
-
-/** One mixer channel; re-renders only when its track changes. */
-const MixerStrip = memo(function MixerStrip({
-  track,
-  noDuck,
-  fire,
-  send,
-  highlights,
-  lanes,
-  onHelp,
-}: {
-  track: TrackView;
-  noDuck: string | null;
-  fire(cmd: Command): void;
-  send(cmd: Command): Promise<unknown>;
-  highlights: Map<string, HighlightKind>;
-  lanes: SectionView["lanes"] | undefined;
-  onHelp(spec: ParamSpecView | null): void;
-}) {
-  const drag = useParamDrag(track.id, send, track.strip);
-  const strip = track.strip.map((p) => ({ ...p, value: drag.valueOf(p) }));
-  return (
-    <TrackStrip
-      track={track}
-      strip={strip}
-      onParam={(id, v, commit) => (commit ? drag.commit(id, v) : drag.change(id, v))}
-      onHelp={onHelp}
-      noDuck={noDuck}
-      automated={(id) => lanes?.some((l) => l.track === track.id && l.param === id) ?? false}
-      highlight={(id) => highlights.get(`tracks.${track.id}.${id}`) ?? null}
-      onMix={(patch) =>
-        fire({
-          cmd: "set_track_mix",
-          args: {
-            track: track.id,
-            gain_db: patch.gain_db ?? null,
-            pan: patch.pan ?? null,
-            mute: patch.mute ?? null,
-            solo: patch.solo ?? null,
-          },
-        })
-      }
-    />
-  );
-});
-
-type DrumSectionProps = {
-  song: SongView;
-  section: number | null;
-  highlights: Map<string, HighlightKind>;
-  fire(cmd: Command): void;
-};
-
-/** The drum patterns the shown section plays; only the grid follows the playhead. */
-const DrumSection = memo(function DrumSection({
-  song,
-  section,
-  highlights,
-  fire,
-}: DrumSectionProps) {
-  const rows: DrumRow[] = useMemo(
-    () =>
-      song.tracks.flatMap((t) => {
-        const p = patternIn(song, section, t.id);
-        if (p?.kind !== "drum") return [];
-        return [
-          {
-            pattern: p.id,
-            label: t.id,
-            hits: p.hits,
-            highlighted: highlightedSteps(highlights, p.id),
-          },
-        ];
-      }),
-    [song, section, highlights],
-  );
-  const name = section === null ? undefined : song.sections[section]?.name;
-  return (
-    <section aria-label="Drums" className="flex flex-col gap-3 border-t border-black/40 px-6 py-5">
-      <h2 className="font-label text-lg leading-none text-silkscreen/80">
-        Drums{name ? ` in ${name}` : ""}
-      </h2>
-      {rows.length > 0 ? (
-        <div className="overflow-x-auto pb-1">
-          <LiveDrumGrid song={song} section={section} rows={rows} fire={fire} />
-        </div>
-      ) : (
-        <p className="font-value text-sm text-silkscreen/70">
-          This section plays no drum patterns. Pick some in the arrangement.
-        </p>
-      )}
-    </section>
-  );
-});
-
-function LiveDrumGrid({
-  song,
-  section,
-  rows,
-  fire,
-}: {
-  song: SongView;
-  section: number | null;
-  rows: DrumRow[];
-  fire(cmd: Command): void;
-}) {
-  const step = usePlayheadStep();
-  const length = rows[0]?.hits.length ?? 0;
-  // One chase for all rows; rows of different lengths would disagree, so show none then.
-  const same = rows.every((r) => r.hits.length === length);
-  return (
-    <DrumGrid
-      rows={rows}
-      playingStep={same ? stepInPattern(song, section, step, length) : null}
-      onSet={(pattern, index, hit) => fire({ cmd: "set_drum_step", args: { pattern, index, hit } })}
-    />
-  );
-}

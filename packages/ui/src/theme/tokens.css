@@ -1,41 +1,47 @@
-/* Instrument theme: a gunmetal faceplate in a dark club. Dark only.
-   Colour carries meaning: red is sounding now, amber is slide or loop, cyan is Claude. */
-@import "@fontsource/barlow-condensed/latin-600.css";
-@import "@fontsource/barlow/latin-500.css";
+/* Dusk Glass theme. Dark only.
+   Colour carries meaning: cyan (--agent) is only ever "Claude did this". The colour tokens are
+   RGB triplets, used as rgb(var(--x) / alpha). */
+@import "@fontsource/manrope/latin-400.css";
+@import "@fontsource/manrope/latin-500.css";
+@import "@fontsource/manrope/latin-600.css";
+@import "@fontsource/manrope/latin-700.css";
+@import "@fontsource/manrope/latin-800.css";
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-500.css";
+@import "@fontsource/jetbrains-mono/latin-600.css";
 
 :root {
   color-scheme: dark;
 
-  /* Instrument palette (HSL channels, used as hsl(var(--x))). */
-  --chassis: 216 8% 12%; /* #1D1F22 app background */
-  --faceplate: 216 10% 19%; /* #2C3036 panel, top of the brushed gradient */
-  --faceplate-hi: 215 9% 25%; /* #3A3F46 panel, bottom of the gradient */
-  --silkscreen: 44 37% 88%; /* #ECE6D6 labels and values */
-  --led: 5 100% 60%; /* #FF4433 playhead, lit step, accent, value arc */
-  --slide: 39 100% 56%; /* #FFB01F slide flags, loop range */
-  --claude: 188 77% 57%; /* #3FD0E6 changes from Claude */
+  /* Surfaces and text. */
+  --bg: 10 6 18; /* #0A0612 */
+  --ink: 238 233 248; /* #EEE9F8 */
+  --ink2: 181 173 203; /* #B5ADCB */
+  --ink3: 151 144 174; /* #9790AE */
+  --line: rgba(255, 255, 255, 0.085);
+  --line2: rgba(255, 255, 255, 0.16);
+  --glass: rgba(23, 16, 39, 0.56);
+  --glass2: rgba(10, 6, 18, 0.45);
 
-  /* shadcn naming, mapped onto the palette. */
-  --background: var(--chassis);
-  --foreground: var(--silkscreen);
-  --card: var(--faceplate);
-  --card-foreground: var(--silkscreen);
-  --popover: var(--faceplate);
-  --popover-foreground: var(--silkscreen);
-  --primary: var(--led);
-  --primary-foreground: 210 8% 9%;
-  --secondary: var(--faceplate);
-  --secondary-foreground: var(--silkscreen);
-  --muted: 216 9% 16%;
-  --muted-foreground: 216 3% 61%;
-  --accent: var(--faceplate-hi);
-  --accent-foreground: var(--silkscreen);
-  --destructive: var(--led);
-  --destructive-foreground: 210 8% 9%;
-  --border: 214 9% 30%;
-  --input: 214 9% 30%;
-  --ring: var(--silkscreen);
-  --radius: 0.375rem;
+  /* Geometry and effects. */
+  --blur: 22px;
+  --r: 16px;
+  --rs: 9px;
+  --row: 46px;
+  --blobop: 0.55;
+
+  /* Instruments, the agent and the playhead. */
+  --kick: 255 84 112; /* #FF5470 */
+  --clap: 255 181 71; /* #FFB547 */
+  --hat: 94 140 255; /* #5E8CFF */
+  --ohat: 163 192 255; /* #A3C0FF */
+  --ride: 183 156 255; /* #B79CFF */
+  --acid: 168 240 76; /* #A8F04C */
+  --agent: 63 220 235; /* #3FDCEB */
+  --play: 247 242 255; /* #F7F2FF */
+
+  /* Reduced-effects solid fill. */
+  --solid: 22 15 36; /* #160F24 */
 }
 
 @media (prefers-reduced-motion: reduce) {
