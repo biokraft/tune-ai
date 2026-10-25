@@ -173,6 +173,12 @@ describe("Arrangement", () => {
     expect(filled(column)).toBe(true);
   });
 
+  it("scrolls the lanes without rubber-banding or chaining the scroll to the window", () => {
+    setup([sec("a", 0, 16)]);
+    const scroller = screen.getByRole("rowgroup", { name: "Tracks" }).parentElement!.parentElement!;
+    expect(scroller).toHaveClass("overflow-auto", "overscroll-none");
+  });
+
   it("lanes hold flat to the section edges and single points span the section", () => {
     const lanes = [
       {

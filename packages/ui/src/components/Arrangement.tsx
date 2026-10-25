@@ -343,7 +343,7 @@ export function Arrangement(p: ArrangementProps) {
       </div>
       <div
         ref={scroller}
-        className="relative min-h-0 flex-1 select-none overflow-auto"
+        className="relative min-h-0 flex-1 select-none overflow-auto overscroll-none"
         onScroll={onScroll}
       >
         <div className="relative flex" style={{ width: HEADER_W + laneW + PAD_R, height }}>

@@ -80,6 +80,17 @@ describe("Dock", () => {
     expect(within(dock()).queryByRole("tablist")).toBeNull();
   });
 
+  it("scrolls its body without rubber-banding or chaining the scroll to the window", () => {
+    setup();
+    open("acid");
+    expect(within(dock()).getByRole("tabpanel")).toHaveClass("overflow-auto", "overscroll-none");
+    open("kick");
+    // The drum body is the grid between the header and the help line.
+    expect(dock().children[1]).toHaveClass("overflow-auto", "overscroll-none");
+    fireEvent.click(screen.getByRole("button", { name: "Mixer (M)" }));
+    expect(dock().children[1]).toHaveClass("overflow-auto", "overscroll-none");
+  });
+
   it("the open track's header closes it again, another track swaps in", () => {
     setup();
     open("acid");
