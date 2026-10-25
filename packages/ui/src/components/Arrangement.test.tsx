@@ -206,7 +206,10 @@ describe("Arrangement", () => {
 
   it("playhead x", () => {
     setup([sec("a", 0, 16)], { playhead: 4.5 });
-    expect(screen.getByTestId("playhead")).toHaveAttribute("x1", "54");
+    const ph = screen.getByTestId("playhead");
+    expect(ph).toHaveAttribute("data-x", "54");
+    // A 2 px line centred on x: its left edge sits 1 px before it.
+    expect(ph.style.transform).toBe("translateX(53px)");
   });
 
   it("ruler ticks every 8 bars, one-based", () => {
@@ -325,13 +328,25 @@ describe("Arrangement", () => {
   it("the playhead glows and spans the ruler and the rows", () => {
     setup([sec("a", 0, 16)], { playhead: 2 });
     const ph = screen.getByTestId("playhead");
-    expect(ph).toHaveAttribute("stroke", "rgb(var(--play))");
-    expect(ph).toHaveAttribute("y1", "0");
+    expect(ph.tagName).toBe("DIV");
+    expect(ph).toHaveAttribute("aria-hidden", "true");
+    expect(ph).toHaveClass("pointer-events-none", "absolute", "top-0", "left-0", "z-[25]");
+    expect(ph.style.width).toBe("2px");
+    expect(ph.style.background).toBe("rgb(var(--play))");
+    expect(ph.style.boxShadow).toBe("0 0 6px rgb(var(--play) / .8)");
     // Ruler 24 + sections 32 + two 46 px rows.
-    expect(ph).toHaveAttribute("y2", String(24 + 32 + 2 * 46));
-    expect(ph.closest("svg")!.getAttribute("style")).toContain(
-      "drop-shadow(0 0 6px rgb(var(--play) / .8))",
-    );
+    expect(ph.style.height).toBe(`${24 + 32 + 2 * 46}px`);
+  });
+
+  it("draws the playhead without a CSS filter, which WebKit leaves as fog while it moves", () => {
+    setup([sec("a", 0, 16)], { playhead: 2 });
+    const ph = screen.getByTestId("playhead");
+    expect(ph.style.filter).toBe("");
+    expect(ph.getAttribute("style")).not.toMatch(/filter/);
+    expect(ph.style.willChange).toBe("transform");
+    for (let el: HTMLElement | null = ph; el; el = el.parentElement) {
+      expect(el.style.filter).toBe("");
+    }
   });
 
   it("labels the ruler every 8 bars at 12 px per bar", () => {
@@ -526,7 +541,7 @@ describe("Arrangement blocks", () => {
     expect(screen.getByText("↳ send.delay")).toBeInTheDocument();
     // Two lane rows push the drums row down.
     expect(blk("d1 in b").style.top).toBe(`${56 + 46 + 2 * 22 + 3}px`);
-    expect(screen.getByTestId("playhead")).toHaveAttribute("y2", String(56 + 2 * 46 + 2 * 22));
+    expect(screen.getByTestId("playhead").style.height).toBe(`${56 + 2 * 46 + 2 * 22}px`);
     // Each curve sits inside its own lane row.
     const polys = [...container.querySelectorAll('[data-testid="lane-overlay"] polyline')];
     expect(polys).toHaveLength(3);

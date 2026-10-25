@@ -500,23 +500,7 @@ export function Arrangement(p: ArrangementProps) {
               width={laneW}
               height={height}
             />
-            <svg
-              width={laneW}
-              height={height}
-              className="pointer-events-none absolute left-0 top-0 z-[25]"
-              style={{ filter: "drop-shadow(0 0 6px rgb(var(--play) / .8))" }}
-              aria-hidden="true"
-            >
-              <line
-                data-testid="playhead"
-                x1={p.playhead * ppb}
-                x2={p.playhead * ppb}
-                y1={0}
-                y2={height}
-                stroke="rgb(var(--play))"
-                strokeWidth={2}
-              />
-            </svg>
+            <Playhead x={p.playhead * ppb} height={height} />
           </div>
         </div>
       </div>
@@ -559,6 +543,31 @@ function LoopBand({
       <line x1={x0 + 0.5} x2={x0 + 0.5} y1={0} y2={height} stroke={WHITE_EDGE} />
       <line x1={x1 - 0.5} x2={x1 - 0.5} y1={0} y2={height} stroke={WHITE_EDGE} />
     </g>
+  );
+}
+
+/**
+ * The playhead: one 2 px line over the ruler, the sections and the rows, centred on `x`. It
+ * glows with a box-shadow and moves by transform alone. A CSS `filter` here would make WebKit
+ * repaint the full-size filtered layer in tiles on every tick and leave stale glow ("fog")
+ * behind it.
+ */
+function Playhead({ x, height }: { x: number; height: number }) {
+  return (
+    <div
+      data-testid="playhead"
+      data-x={x}
+      aria-hidden="true"
+      className="pointer-events-none absolute left-0 top-0 z-[25]"
+      style={{
+        width: 2,
+        height,
+        background: "rgb(var(--play))",
+        boxShadow: "0 0 6px rgb(var(--play) / .8)",
+        transform: `translateX(${x - 1}px)`,
+        willChange: "transform",
+      }}
+    />
   );
 }
 

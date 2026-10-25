@@ -45,7 +45,7 @@ describe("playhead ticks", () => {
     setup("acid");
     expect(knobRenders.count).toBe(0);
     expect(screen.getByLabelText("Position")).toHaveTextContent("3.3");
-    expect(screen.getByTestId("playhead")).toHaveAttribute("x1", String((42 / 16) * 12));
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String((42 / 16) * 12));
     // a1 has 8 steps: step 42 is its step 2.
     fireEvent.click(screen.getByRole("tab", { name: "Steps" }));
     const playing = document.querySelector('[data-step][data-playing="true"]');
