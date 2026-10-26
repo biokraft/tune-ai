@@ -98,7 +98,26 @@ fn header(doc: &mut DocumentMut) -> Option<()> {
     }
     match song {
         Slot::Table(t) => t.sort_values_by(|a, _, b, _| first(a, b)),
-        Slot::Inline(t) => t.sort_values_by(|a, _, b, _| first(a, b)),
+        Slot::Inline(t) => {
+            // The space before `}` is the last value's suffix: it stays at
+            // the end, and the moved `version` reads `{ version = 2, …`.
+            let closing = t
+                .iter()
+                .last()
+                .and_then(|(_, v)| v.decor().suffix().and_then(|s| s.as_str()))
+                .filter(|s| s.trim().is_empty() && !s.contains('\n'))
+                .map(str::to_owned);
+            t.sort_values_by(|a, _, b, _| first(a, b));
+            if let Some(mut key) = t.key_mut("version") {
+                *key.leaf_decor_mut() = Decor::new(" ", " ");
+            }
+            if let Some(version) = t.get_mut("version") {
+                *version.decor_mut() = Decor::new(" ", "");
+            }
+            if let (Some(closing), Some((_, last))) = (closing, t.iter_mut().last()) {
+                last.decor_mut().set_suffix(closing);
+            }
+        }
     }
     Some(())
 }

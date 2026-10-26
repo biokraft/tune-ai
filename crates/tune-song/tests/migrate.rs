@@ -357,3 +357,21 @@ fn v2_fixtures_are_the_migration_output() {
         assert_eq!(committed, text, "{name}");
     }
 }
+
+#[test]
+fn inline_song_header_keeps_its_spacing() {
+    for song in [
+        r#"song = { name = "c", bpm = 120, version = 1 }"#,
+        r#"song = { name = "c", version = 1, bpm = 120 }"#,
+        r#"song = { name = "c", bpm = 120 }"#,
+    ] {
+        let src = format!(
+            "{song}\n\n[tracks.k]\ninstrument = \"kick\"\n\n[patterns.k4]\ntrack = \"k\"\nsteps = \"x...\"\n\n[[sections]]\nname = \"a\"\nbars = 2\nplay = {{ k = \"k4\" }}\n"
+        );
+        let text = migrated(&src);
+        assert!(
+            text.starts_with("song = { version = 2, name = \"c\", bpm = 120 }\n"),
+            "{song}:\n{text}"
+        );
+    }
+}
