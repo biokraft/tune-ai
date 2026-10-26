@@ -201,7 +201,10 @@ fn render_bars(text: &str, start: u32, end: u32) -> Vec<f32> {
 
 /// The param value the file sets on the acid track.
 fn acid_value(text: &str, param: &str) -> f64 {
-    parse_song(text).expect("valid song").tracks["acid"].params[param]
+    let local = param.strip_prefix("acid303.").expect("an acid303 param");
+    parse_song(text).expect("valid song").tracks["acid"]
+        .instrument
+        .params[local]
 }
 
 /// `mini`, with the acid also playing in section `a` (bars 0..2), where no
@@ -326,7 +329,7 @@ fn release_commits() {
     let start = Instant::now();
     assert_eq!(f.call(knob("acid303.cutoff", 823.456, true)), Value::Null);
     let text = f.disk_until(Duration::from_millis(500), "held 823.5", |t| {
-        parse_song(t).is_ok_and(|s| s.tracks["acid"].params["acid303.cutoff"] == 823.5)
+        parse_song(t).is_ok_and(|s| s.tracks["acid"].instrument.params["cutoff"] == 823.5)
     });
     assert!(start.elapsed() <= Duration::from_millis(500));
     assert_eq!(acid_value(&text, "acid303.resonance"), 70.0);
@@ -435,7 +438,7 @@ fn external_edit_during_drag_keeps_gesture() {
     // Release at bar 0, where nothing automates the cutoff.
     assert_eq!(f.call(knob("acid303.cutoff", 2000.0, true)), Value::Null);
     let text = f.disk_until(WAIT, "held both edits", |t| {
-        parse_song(t).is_ok_and(|s| s.tracks["acid"].params["acid303.cutoff"] == 2000.0)
+        parse_song(t).is_ok_and(|s| s.tracks["acid"].instrument.params["cutoff"] == 2000.0)
     });
     assert_eq!(acid_value(&text, "acid303.resonance"), 90.0);
 
@@ -463,7 +466,7 @@ fn live_value_after_release_is_dropped() {
     // The stale live value from the same gesture, arriving late.
     assert_eq!(f.call(knob("acid303.cutoff", 300.0, false)), Value::Null);
     let text = f.disk_until(WAIT, "held 2000", |t| {
-        parse_song(t).is_ok_and(|s| s.tracks["acid"].params["acid303.cutoff"] == 2000.0)
+        parse_song(t).is_ok_and(|s| s.tracks["acid"].instrument.params["cutoff"] == 2000.0)
     });
 
     // Let the release's swap land, then compare a fresh bar with the file.

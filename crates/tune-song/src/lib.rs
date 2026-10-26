@@ -18,14 +18,21 @@ use std::path::Path;
 
 pub use error::{LoadError, SongError};
 pub use model::{
-    FxSpec, InstrumentKind, Lane, MIX_TRACK_ID, MasterMode, Mix, MixUnit, Pattern, PatternSteps,
-    Section, Song, Track, find_mix_param,
+    Device, Lane, MIX_TRACK_ID, MasterMode, Mix, MixUnit, Pattern, PatternSteps, Section, Song,
+    Track, find_mix_param,
 };
+pub use tune_modules::{ClipKind, ModuleDescriptor, Registry, SettingSpec};
 pub use watch::{RawReload, Reload, SongWatcher};
 
-/// Parses and validates a song file. On failure every problem is returned,
-/// ordered by position.
+/// Parses and validates a song file against the built-in modules. On
+/// failure every problem is returned, ordered by position.
 pub fn parse_song(src: &str) -> Result<Song, Vec<SongError>> {
+    parse_song_with(src, &Registry::builtin())
+}
+
+/// Like [`parse_song`], with the modules of `registry`: an instrument or an
+/// fx `type` must name one of them.
+pub fn parse_song_with(src: &str, registry: &Registry) -> Result<Song, Vec<SongError>> {
     let mut errors = error::Errors::default();
     let doc = match toml::de::DeTable::parse(src) {
         Ok(doc) => doc,
@@ -37,8 +44,8 @@ pub fn parse_song(src: &str) -> Result<Song, Vec<SongError>> {
             return Err(errors.finish(src));
         }
     };
-    let raw = raw::read(&doc, &mut errors);
-    match validate::validate(raw, &mut errors) {
+    let raw = raw::read(&doc, registry, &mut errors);
+    match validate::validate(raw, registry, &mut errors) {
         Some(song) if errors.is_empty() => Ok(song),
         _ => Err(errors.finish(src)),
     }

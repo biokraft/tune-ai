@@ -58,18 +58,16 @@ fn canonical_is_stable() {
 fn numbers_round_trip_exactly() {
     let mut song = parse(MINI);
     let acid = song.tracks.get_mut("acid").unwrap();
-    acid.params.clear();
-    acid.params.insert("acid303.cutoff".into(), 2394.0);
-    acid.params.insert("acid303.resonance".into(), 1.0 / 3.0);
+    acid.instrument.params.clear();
+    acid.instrument.params.insert("cutoff".into(), 2394.0);
+    acid.instrument.params.insert("resonance".into(), 1.0 / 3.0);
     acid.gain_db = 0.1;
     acid.pan = 1e-7;
     let back = parse(&song.to_toml());
+    let got = &back.tracks["acid"].instrument;
+    assert_eq!(got.params["cutoff"].to_bits(), 2394.0_f64.to_bits());
+    assert_eq!(got.params["resonance"].to_bits(), (1.0_f64 / 3.0).to_bits());
     let got = &back.tracks["acid"];
-    assert_eq!(got.params["acid303.cutoff"].to_bits(), 2394.0_f64.to_bits());
-    assert_eq!(
-        got.params["acid303.resonance"].to_bits(),
-        (1.0_f64 / 3.0).to_bits()
-    );
     assert_eq!(got.gain_db.to_bits(), 0.1_f64.to_bits());
     assert_eq!(got.pan.to_bits(), 1e-7_f64.to_bits());
 }
@@ -78,12 +76,9 @@ fn numbers_round_trip_exactly() {
 fn huge_and_tiny_numbers_stay_valid_toml() {
     let mut song = parse(MINI);
     song.bpm = 120.5;
-    song.tracks.get_mut("acid").unwrap().params.clear();
-    song.tracks
-        .get_mut("acid")
-        .unwrap()
-        .params
-        .insert("acid303.cutoff".into(), 1e300);
+    let acid = &mut song.tracks.get_mut("acid").unwrap().instrument;
+    acid.params.clear();
+    acid.params.insert("cutoff".into(), 1e300);
     let text = song.to_toml();
     assert!(text.parse::<toml::Table>().is_ok(), "{text}");
 }
@@ -117,9 +112,8 @@ fn mix_writes_duck_source_and_bare_eq() {
     let mut song = parse(MINI);
     song.mix.duck_source = Some("hat".into());
     if let Some(acid) = song.tracks.get_mut("acid") {
-        acid.fx.push(tune_song::FxSpec::Eq {
-            params: Default::default(),
-        });
+        acid.fx
+            .push(tune_song::Device::new("eq", &tune_modules::EQ));
     }
     let text = song.to_toml();
     assert!(

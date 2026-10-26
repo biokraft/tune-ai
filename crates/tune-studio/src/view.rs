@@ -3,8 +3,8 @@
 
 use indexmap::IndexMap;
 use serde::Serialize;
-use tune_dsp::{Curve, DistortionMode, ParamSpec, STRIP_PARAMS};
-use tune_song::{FxSpec, MasterMode, MixUnit, PatternSteps, Song};
+use tune_dsp::{Curve, ParamSpec, STRIP_PARAMS};
+use tune_song::{Device, MasterMode, MixUnit, PatternSteps, Song};
 
 use crate::command::DrumHitDto;
 use crate::diff::Change;
@@ -150,12 +150,8 @@ pub struct LaneView {
     pub points: Vec<[f64; 2]>,
 }
 
-/// Every distortion mode, in the order the UI offers them.
-const DIST_MODES: [DistortionMode; 3] = [
-    DistortionMode::Soft,
-    DistortionMode::Hard,
-    DistortionMode::Overdrive,
-];
+/// The device setting an [`FxView`] shows as its `mode`.
+const MODE: &str = "mode";
 
 impl From<&Song> for SongView {
     fn from(song: &Song) -> Self {
@@ -169,13 +165,13 @@ impl From<&Song> for SongView {
                 .iter()
                 .map(|(id, t)| TrackView {
                     id: id.clone(),
-                    instrument: t.instrument.name().to_owned(),
+                    instrument: t.instrument.module.name.to_owned(),
                     gain_db: t.gain_db,
                     pan: t.pan,
                     mute: t.mute,
                     solo: t.solo,
-                    params: param_views(t.instrument.params(), &t.params),
-                    strip: param_views(STRIP_PARAMS, &t.params),
+                    params: device_param_views(&t.instrument),
+                    strip: param_views(STRIP_PARAMS, &t.strip),
                     fx: t.fx.iter().map(fx_view).collect(),
                 })
                 .collect(),
@@ -245,44 +241,61 @@ fn mix_view(song: &Song) -> MixView {
     }
 }
 
-fn fx_view(fx: &FxSpec) -> FxView {
-    match fx {
-        FxSpec::Distortion { mode, params } => FxView {
-            kind: fx.type_name().to_owned(),
-            mode: mode.name().to_owned(),
-            modes: DIST_MODES.iter().map(|m| m.name().to_owned()).collect(),
-            params: param_views(fx.params_table(), params),
-        },
-        FxSpec::Eq { params } => FxView {
-            kind: fx.type_name().to_owned(),
-            mode: String::new(),
-            modes: Vec::new(),
-            params: param_views(fx.params_table(), params),
-        },
+fn fx_view(fx: &Device) -> FxView {
+    let modes = fx
+        .module
+        .setting(MODE)
+        .map_or(&[][..], |(_, spec)| spec.values);
+    FxView {
+        kind: fx.module.name.to_owned(),
+        mode: fx.setting(MODE).unwrap_or_default().to_owned(),
+        modes: modes.iter().map(|m| (*m).to_owned()).collect(),
+        params: device_param_views(fx),
     }
 }
 
+/// A device's params, with track-relative ids (`<device id>.<param>`).
+fn device_param_views(device: &Device) -> Vec<ParamView> {
+    let module = device.module;
+    module
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, spec)| {
+            let local = module.local_name(i);
+            param_view(
+                spec,
+                device.param_id(local),
+                device.params.get(local).copied(),
+            )
+        })
+        .collect()
+}
+
+/// A table's params by full id (`send.delay`, `reverb.size`).
 fn param_views(table: &[ParamSpec], explicit: &IndexMap<String, f64>) -> Vec<ParamView> {
     table
         .iter()
-        .map(|spec| {
-            let set = explicit.get(spec.id).copied();
-            ParamView {
-                id: spec.id.to_owned(),
-                label: spec.label.to_owned(),
-                unit: spec.unit.to_owned(),
-                min: spec.min,
-                max: spec.max,
-                curve: match spec.curve {
-                    Curve::Linear => "linear",
-                    Curve::Exponential => "exponential",
-                }
-                .to_owned(),
-                default: spec.default,
-                help: spec.help.to_owned(),
-                value: set.unwrap_or(spec.default),
-                explicit: set.is_some(),
-            }
-        })
+        .map(|spec| param_view(spec, spec.id.to_owned(), explicit.get(spec.id).copied()))
         .collect()
+}
+
+/// `spec` under `id`, with the file's value `set` if any.
+fn param_view(spec: &ParamSpec, id: String, set: Option<f64>) -> ParamView {
+    ParamView {
+        id,
+        label: spec.label.to_owned(),
+        unit: spec.unit.to_owned(),
+        min: spec.min,
+        max: spec.max,
+        curve: match spec.curve {
+            Curve::Linear => "linear",
+            Curve::Exponential => "exponential",
+        }
+        .to_owned(),
+        default: spec.default,
+        help: spec.help.to_owned(),
+        value: set.unwrap_or(spec.default),
+        explicit: set.is_some(),
+    }
 }

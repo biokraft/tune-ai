@@ -2,8 +2,6 @@
 //! moves.
 
 use serde_json::{Value, json};
-use tune_dsp::DistortionMode;
-use tune_song::FxSpec;
 use tune_studio::{EditError, SongDoc, SongPath};
 
 const COMMENTED: &str = include_str!("fixtures/commented.toml");
@@ -103,7 +101,7 @@ fn set_param_preserves_comments() {
     for c in COMMENTS {
         assert!(text.contains(c), "lost `{c}`:\n{text}");
     }
-    assert_eq!(d.song().tracks["acid"].params["acid303.cutoff"], 820.0);
+    assert_eq!(d.song().tracks["acid"].instrument.params["cutoff"], 820.0);
 }
 
 #[test]
@@ -121,7 +119,7 @@ fn set_keeps_trailing_comment() {
 fn set_param_inserts_missing_key() {
     let mut d = doc();
     d.set(&path("tracks.kick.kick.tune"), &json!(60)).unwrap();
-    assert_eq!(d.song().tracks["kick"].params["kick.tune"], 60.0);
+    assert_eq!(d.song().tracks["kick"].instrument.params["tune"], 60.0);
     assert!(
         d.text().contains("params = { \"kick.tune\" = 60 }"),
         "{}",
@@ -129,8 +127,8 @@ fn set_param_inserts_missing_key() {
     );
     // A second param lands in the same inline table.
     d.set(&path("tracks.kick.kick.decay"), &json!(300)).unwrap();
-    assert_eq!(d.song().tracks["kick"].params["kick.decay"], 300.0);
-    assert_eq!(d.song().tracks["kick"].params["kick.tune"], 60.0);
+    assert_eq!(d.song().tracks["kick"].instrument.params["decay"], 300.0);
+    assert_eq!(d.song().tracks["kick"].instrument.params["tune"], 60.0);
     for c in COMMENTS {
         assert!(d.text().contains(c), "lost `{c}`:\n{}", d.text());
     }
@@ -140,15 +138,9 @@ fn set_param_inserts_missing_key() {
 fn set_fx_param() {
     let mut d = doc();
     d.set(&path("tracks.acid.dist.drive"), &json!(20)).unwrap();
-    let FxSpec::Distortion { params, .. } = &d.song().tracks["acid"].fx[0] else {
-        panic!("expected distortion")
-    };
-    assert_eq!(params["dist.drive"], 20.0);
+    assert_eq!(d.song().tracks["acid"].fx[0].params["drive"], 20.0);
     d.set(&path("tracks.acid.dist.mix"), &json!(0.5)).unwrap();
-    let FxSpec::Distortion { params, .. } = &d.song().tracks["acid"].fx[0] else {
-        panic!("expected distortion")
-    };
-    assert_eq!(params["dist.mix"], 0.5);
+    assert_eq!(d.song().tracks["acid"].fx[0].params["mix"], 0.5);
 }
 
 #[test]
@@ -165,7 +157,7 @@ fn set_rejects_invalid() {
         other => panic!("expected Invalid, got {other:?}"),
     }
     assert_eq!(d.text(), COMMENTED);
-    assert_eq!(d.song().tracks["acid"].params["acid303.cutoff"], 500.0);
+    assert_eq!(d.song().tracks["acid"].instrument.params["cutoff"], 500.0);
 }
 
 #[test]
@@ -306,10 +298,7 @@ fn bars_and_mode() {
     assert_eq!(d.song().total_bars(), 10);
     d.set(&path("tracks.acid.dist.mode"), &json!("hard"))
         .unwrap();
-    let FxSpec::Distortion { mode, .. } = &d.song().tracks["acid"].fx[0] else {
-        panic!("expected distortion")
-    };
-    assert_eq!(*mode, DistortionMode::Hard);
+    assert_eq!(d.song().tracks["acid"].fx[0].setting("mode"), Some("hard"));
     assert!(matches!(
         d.set(&path("sections[0].bars"), &json!(2.5)),
         Err(EditError::BadValue { .. })
@@ -385,7 +374,7 @@ fn get_effective() {
     );
     assert_eq!(
         d.get(&path("tracks.acid")),
-        Some(json!({ "instrument": "acid303" }))
+        Some(json!({ "instrument": "acid303", "fx": [{ "id": "dist", "type": "distortion" }] }))
     );
     assert_eq!(d.get(&path("tracks.kick.dist.drive")), None);
     assert_eq!(d.get(&path("tracks.clap.gain_db")), None);
@@ -590,7 +579,7 @@ fn set_strip_param_on_track_without_params() {
             1
         )
     );
-    assert_eq!(d.song().tracks["hat"].params["send.delay"], -14.0);
+    assert_eq!(d.song().tracks["hat"].strip["send.delay"], -14.0);
     assert_eq!(d.get(&path("tracks.hat.send.delay")), Some(json!(-14)));
     assert_eq!(d.get(&path("tracks.hat.send.reverb")), Some(json!(-60)));
     assert_canonical_round_trip(&d);
@@ -603,7 +592,7 @@ fn set_strip_param_on_track_without_params() {
         "{}",
         d.text()
     );
-    assert_eq!(d.song().tracks["acid"].params["duck.depth"], 6.0);
+    assert_eq!(d.song().tracks["acid"].strip["duck.depth"], 6.0);
     for c in COMMENTS {
         assert!(d.text().contains(c), "lost `{c}`:\n{}", d.text());
     }
@@ -618,10 +607,7 @@ fn set_eq_param() {
         d.text(),
         MIXED.replacen("\"eq.low_cut\" = 85", "\"eq.low_cut\" = 120", 1)
     );
-    let FxSpec::Eq { params } = &d.song().tracks["acid"].fx[1] else {
-        panic!("expected eq")
-    };
-    assert_eq!(params["eq.low_cut"], 120.0);
+    assert_eq!(d.song().tracks["acid"].fx[1].params["low_cut"], 120.0);
     assert_eq!(d.get(&path("tracks.acid.eq.low_cut")), Some(json!(120)));
     // An eq id the file leaves out is inserted into the eq entry.
     d.set(&path("tracks.acid.eq.high_cut"), &json!(9000))
@@ -687,4 +673,27 @@ fn clear_duck_source() {
         d.set(&path("mix.duck_source"), &json!(3)),
         Err(EditError::BadValue { .. })
     ));
+}
+
+/// A device setting is addressed like a param: `tracks.<t>.<device>.<setting>`.
+#[test]
+fn fx_setting_path_is_generic() {
+    let mut d = mixed();
+    let before = d.text();
+    d.set(&path("tracks.acid.dist.mode"), &json!("hard"))
+        .unwrap();
+    assert_eq!(
+        d.text(),
+        before.replacen("mode = \"soft\"", "mode = \"hard\"", 1)
+    );
+    assert_eq!(d.get(&path("tracks.acid.dist.mode")), Some(json!("hard")));
+    assert_eq!(d.song().tracks["acid"].fx[0].settings, ["hard"]);
+
+    let before = d.text();
+    let err = d
+        .set(&path("tracks.acid.eq.mode"), &json!("hard"))
+        .unwrap_err();
+    assert!(matches!(err, EditError::UnknownParam { .. }), "{err:?}");
+    assert_eq!(d.get(&path("tracks.acid.eq.mode")), None);
+    assert_eq!(d.text(), before);
 }

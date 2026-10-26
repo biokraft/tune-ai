@@ -41,6 +41,8 @@ pub enum Command {
         value: f64,
         commit: bool,
     },
+    /// Sets the `mode` setting of the track's first fx device that has one
+    /// (`tracks.<t>.<device>.mode`).
     SetFxMode {
         track: String,
         mode: String,

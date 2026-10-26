@@ -66,7 +66,7 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
             text.push_str("\ntracks:");
             let mut tracks = Vec::new();
             for (id, t) in &song.tracks {
-                let fx: Vec<&str> = t.fx.iter().map(|f| f.type_name()).collect();
+                let fx: Vec<&str> = t.fx.iter().map(|d| d.module.name).collect();
                 let mut flags = String::new();
                 if t.mute {
                     flags.push_str("  muted");
@@ -78,7 +78,7 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
                     text,
                     "\n  {:<10} {}  gain {} dB  pan {}  fx: {}{flags}",
                     id,
-                    t.instrument.name(),
+                    t.instrument.module.name,
                     t.gain_db,
                     t.pan,
                     if fx.is_empty() {
@@ -89,7 +89,7 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
                 );
                 tracks.push(json!({
                     "id": id,
-                    "instrument": t.instrument.name(),
+                    "instrument": t.instrument.module.name,
                     "gain_db": t.gain_db,
                     "pan": t.pan,
                     "mute": t.mute,

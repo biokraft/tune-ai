@@ -4,13 +4,13 @@
 
 use tune_dsp::acid303::math::db2amp;
 use tune_dsp::{DrumHit, ParamSpec, STRIP_PARAMS, find_spec};
+use tune_modules::{Cell, ModuleDescriptor};
 use tune_song::{
-    FxSpec, InstrumentKind, MIX_TRACK_ID, MasterMode, MixUnit, PatternSteps, Song, find_mix_param,
+    Device, MIX_TRACK_ID, MasterMode, MixUnit, PatternSteps, Song, Track, find_mix_param,
 };
 
 use crate::clock::{Clock, track_seed};
 use crate::mixer::pan_gains;
-use tune_modules::Cell;
 
 /// A song ready to play. Tracks, patterns and sections keep song-file order.
 #[derive(Clone, Debug)]
@@ -49,13 +49,12 @@ pub struct CompiledMix {
 #[derive(Clone, Debug)]
 pub struct CompiledTrack {
     pub id: String,
-    pub kind: InstrumentKind,
-    /// The full instrument param table in plain units, defaults filled in.
-    pub params: Vec<f64>,
+    pub instrument: CompiledDevice,
     /// The full strip param table (`STRIP_PARAMS`: sends and ducking) in
     /// plain units, defaults filled in.
     pub strip: Vec<f64>,
-    pub fx: Vec<CompiledFx>,
+    /// The fx chain in slot order.
+    pub fx: Vec<CompiledDevice>,
     /// Linear gain (`db2amp(gain_db)`).
     pub gain: f64,
     /// Constant-power `(left, right)` gains of the track's pan.
@@ -66,12 +65,44 @@ pub struct CompiledTrack {
     pub seed: u64,
 }
 
-/// One effect slot.
+/// One device: the instrument or an fx slot.
 #[derive(Clone, Debug)]
-pub struct CompiledFx {
-    pub spec: FxSpec,
-    /// The full fx param table in plain units, defaults filled in.
+pub struct CompiledDevice {
+    /// Unique within the track; the prefix of its param ids.
+    pub id: String,
+    pub module: &'static ModuleDescriptor,
+    /// Every setting, in `module.settings` order: what the factory takes.
+    pub settings: Vec<&'static str>,
+    /// The full param table (`module.params`) in plain units, defaults
+    /// filled in.
     pub params: Vec<f64>,
+}
+
+impl CompiledDevice {
+    fn new(device: &Device) -> Self {
+        let module = device.module;
+        let mut params: Vec<f64> = module.params.iter().map(|s| s.default).collect();
+        for (local, &v) in &device.params {
+            let (index, _) = module.param(local).unwrap_or_else(|| {
+                panic!(
+                    "unknown param `{local}` of `{}` in a validated song",
+                    module.name
+                )
+            });
+            params[index] = v;
+        }
+        Self {
+            id: device.id.clone(),
+            module,
+            settings: device.settings.clone(),
+            params,
+        }
+    }
+
+    /// Resolves the param with local name `local`.
+    fn param(&self, local: &str) -> Option<(usize, &'static ParamSpec)> {
+        self.module.param(local)
+    }
 }
 
 /// A stretch of the arrangement.
@@ -119,36 +150,7 @@ impl CompiledSong {
         let tracks: Vec<CompiledTrack> = song
             .tracks
             .iter()
-            .map(|(id, t)| CompiledTrack {
-                id: id.clone(),
-                kind: t.instrument,
-                // Strip params (`send.*`, `duck.*`) share the track's map.
-                params: fill(
-                    t.instrument.params(),
-                    t.params
-                        .iter()
-                        .filter(|(id, _)| !is_strip_only(t.instrument.params(), id)),
-                ),
-                strip: fill(
-                    STRIP_PARAMS,
-                    t.params
-                        .iter()
-                        .filter(|(id, _)| is_strip_only(t.instrument.params(), id)),
-                ),
-                fx: t
-                    .fx
-                    .iter()
-                    .map(|fx| CompiledFx {
-                        spec: fx.clone(),
-                        params: fill(fx.params_table(), fx.params().iter()),
-                    })
-                    .collect(),
-                gain: db2amp(t.gain_db),
-                pan_gains: pan_gains(t.pan),
-                mute: t.mute,
-                solo: t.solo,
-                seed: track_seed(song.seed, id),
-            })
+            .map(|(id, t)| compile_track(id, t, song.seed))
             .collect();
 
         let patterns = song
@@ -243,9 +245,9 @@ impl CompiledSong {
         self.tracks.iter().position(|t| t.id == id)
     }
 
-    /// Resolves `param_id` on track `track` against the instrument table,
-    /// the strip table, then each fx table in slot order. `None` for an
-    /// unknown track or id.
+    /// Resolves `param_id` (`<device id>.<param>`, or a strip id) on track
+    /// `track`: the instrument, the strip, then each fx in slot order. `None`
+    /// for an unknown track or id.
     pub fn param_target(
         &self,
         track: usize,
@@ -277,10 +279,26 @@ impl CompiledSong {
     }
 }
 
-/// The full `table` in plain units, with the explicit `values` set.
+/// Track `id` of a song seeded with `song_seed`, every table filled in.
+fn compile_track(id: &str, t: &Track, song_seed: u64) -> CompiledTrack {
+    CompiledTrack {
+        id: id.to_owned(),
+        instrument: CompiledDevice::new(&t.instrument),
+        strip: fill(STRIP_PARAMS, &t.strip),
+        fx: t.fx.iter().map(CompiledDevice::new).collect(),
+        gain: db2amp(t.gain_db),
+        pan_gains: pan_gains(t.pan),
+        mute: t.mute,
+        solo: t.solo,
+        seed: track_seed(song_seed, id),
+    }
+}
+
+/// The full `table` in plain units, with the explicit `values` (by full id)
+/// set.
 fn fill<'a>(
     table: &'static [ParamSpec],
-    values: impl Iterator<Item = (&'a String, &'a f64)>,
+    values: impl IntoIterator<Item = (&'a String, &'a f64)>,
 ) -> Vec<f64> {
     let mut params: Vec<f64> = table.iter().map(|s| s.default).collect();
     for (id, &v) in values {
@@ -291,26 +309,21 @@ fn fill<'a>(
     params
 }
 
-/// Whether `id` is a strip param that `table` does not also have. Any other
-/// id still has to be in `table` (see [`fill`]).
-fn is_strip_only(table: &'static [ParamSpec], id: &str) -> bool {
-    find_spec(STRIP_PARAMS, id).is_ok() && find_spec(table, id).is_err()
-}
-
-/// Resolves a param id against the instrument table, the strip table, then
-/// each fx table in slot order (the order validation checks them in).
+/// Resolves a track-relative param id. It splits at the first `.`: the
+/// instrument's id gives its param, a strip id (`send.delay`) the strip's,
+/// and an fx device's id that device's param.
 fn resolve(track: &CompiledTrack, id: &str) -> Option<(ParamTarget, &'static ParamSpec)> {
-    if let Ok((index, spec)) = find_spec(track.kind.params(), id) {
+    let (device, local) = id.split_once('.')?;
+    if device == track.instrument.id {
+        let (index, spec) = track.instrument.param(local)?;
         return Some((ParamTarget::Instrument(index), spec));
     }
     if let Ok((index, spec)) = find_spec(STRIP_PARAMS, id) {
         return Some((ParamTarget::Strip(index), spec));
     }
-    track.fx.iter().enumerate().find_map(|(slot, fx)| {
-        find_spec(fx.spec.params_table(), id)
-            .ok()
-            .map(|(index, spec)| (ParamTarget::Fx { slot, index }, spec))
-    })
+    let slot = track.fx.iter().position(|fx| fx.id == device)?;
+    let (index, spec) = track.fx[slot].param(local)?;
+    Some((ParamTarget::Fx { slot, index }, spec))
 }
 
 /// Resolves a mix param id (`reverb.size`, `master.gain`).
@@ -367,15 +380,17 @@ mod tests {
         assert_eq!(s.track_index("nope"), None);
 
         let kick = &s.tracks[0];
-        assert_eq!(kick.kind, InstrumentKind::Kick);
+        assert_eq!(kick.instrument.module.name, "kick");
+        assert_eq!(kick.instrument.id, "kick");
         assert_eq!(kick.gain, db2amp(-3.0));
         assert_eq!(kick.pan_gains, pan_gains(0.0));
         assert_eq!(kick.seed, track_seed(7, "kick"));
         assert!(kick.fx.is_empty());
 
         let acid = &s.tracks[1];
-        assert_eq!(acid.params.len(), ACID303_PARAMS.len());
-        assert_eq!(acid.params[2], 500.0);
+        let params = &acid.instrument.params;
+        assert_eq!(params.len(), ACID303_PARAMS.len());
+        assert_eq!(params[2], 500.0);
         let set = [
             "acid303.cutoff",
             "acid303.resonance",
@@ -385,17 +400,44 @@ mod tests {
         ];
         for (i, spec) in ACID303_PARAMS.iter().enumerate() {
             if !set.contains(&spec.id) {
-                assert_eq!(acid.params[i], spec.default, "{}", spec.id);
+                assert_eq!(params[i], spec.default, "{}", spec.id);
             }
         }
         assert_eq!(acid.gain, 1.0);
         assert_eq!(acid.fx.len(), 1);
+        assert_eq!(acid.fx[0].id, "dist");
+        assert_eq!(acid.fx[0].settings, ["soft"]);
         assert_eq!(acid.fx[0].params, vec![12.0, 1.0, -6.0]);
         assert_eq!(acid.fx[0].params.len(), DIST_PARAMS.len());
 
         let hat = &s.tracks[2];
         assert_eq!(hat.pan_gains, pan_gains(0.3));
         assert!(!hat.mute && !hat.solo);
+    }
+
+    #[test]
+    fn resolve_param_by_device_id() {
+        const MIXED: &str = include_str!("../../tune-song/tests/fixtures/mixed.toml");
+        let s = CompiledSong::new(&tune_song::parse_song(MIXED).unwrap(), 48_000);
+        let target = |param: &str| {
+            s.resolve_param("acid", param)
+                .map(|(t, target, _)| (t, target))
+        };
+        assert_eq!(
+            target("dist.drive"),
+            Some((1, ParamTarget::Fx { slot: 0, index: 0 }))
+        );
+        assert_eq!(
+            target("eq.low_cut"),
+            Some((1, ParamTarget::Fx { slot: 1, index: 0 }))
+        );
+        assert_eq!(
+            target("acid303.cutoff"),
+            Some((1, ParamTarget::Instrument(2)))
+        );
+        assert_eq!(target("send.delay"), Some((1, ParamTarget::Strip(0))));
+        assert_eq!(target("eq.nope"), None);
+        assert_eq!(target("kick.tune"), None);
     }
 
     #[test]

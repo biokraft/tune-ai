@@ -12,9 +12,10 @@ use std::ops::RangeInclusive;
 
 use indexmap::IndexMap;
 use tune_dsp::{ParamSpec, STRIP_DUCK_DEPTH, STRIP_PARAMS};
+use tune_modules::{ClipKind, ModuleDescriptor, Registry};
 
 use crate::error::Errors;
-use crate::model::{InstrumentKind, MIX_TRACK_ID, MasterMode, Mix, MixUnit, Song};
+use crate::model::{MIX_TRACK_ID, MasterMode, Mix, MixUnit, Song};
 use crate::raw::{At, RawMix, RawSong};
 
 use arrange::{pattern, section};
@@ -26,7 +27,7 @@ const SAMPLE_RATE: RangeInclusive<i64> = 8_000..=384_000;
 const MAX_SECONDS: f64 = 30.0 * 60.0;
 
 /// Builds the song, or returns `None` when anything was recorded in `errors`.
-pub(crate) fn validate(raw: RawSong, errors: &mut Errors) -> Option<Song> {
+pub(crate) fn validate(raw: RawSong, registry: &Registry, errors: &mut Errors) -> Option<Song> {
     let header = raw.song.as_ref();
     let name = header
         .and_then(|h| h.name.as_ref())
@@ -60,7 +61,7 @@ pub(crate) fn validate(raw: RawSong, errors: &mut Errors) -> Option<Song> {
     let shapes: IndexMap<&str, TrackShape> = raw
         .tracks
         .iter()
-        .map(|(id, t)| (id.value.as_str(), TrackShape::of(t)))
+        .map(|(id, t)| (id.value.as_str(), TrackShape::of(t, registry)))
         .collect();
     let pattern_owner: IndexMap<&str, Option<&str>> = raw
         .patterns
@@ -78,7 +79,7 @@ pub(crate) fn validate(raw: RawSong, errors: &mut Errors) -> Option<Song> {
     let mut tracks = IndexMap::new();
     for (id, t) in &raw.tracks {
         check_id(id, "track", errors);
-        if let Some(track) = track(id, t, errors) {
+        if let Some(track) = track(id, t, registry, errors) {
             tracks.insert(id.value.clone(), track);
         }
     }
@@ -176,7 +177,7 @@ fn mix(
                 None
             }
             // An unknown instrument already has its own error.
-            Some(shape) if shape.kind.is_some_and(|k| !k.is_drum()) => {
+            Some(shape) if shape.instrument.is_some_and(|m| !plays_drums(m)) => {
                 errors.at(
                     &src.span,
                     format!(
@@ -216,14 +217,14 @@ impl<'a> Duck<'a> {
             Some(src) => Self::Explicit(
                 shapes
                     .get(src.value.as_str())
-                    .and_then(|s| s.kind)
-                    .is_some_and(InstrumentKind::is_drum)
+                    .and_then(|s| s.instrument)
+                    .is_some_and(plays_drums)
                     .then_some(src.value.as_str()),
             ),
             None => Self::FirstKick(
                 shapes
                     .iter()
-                    .find(|(_, s)| s.kind == Some(InstrumentKind::Kick))
+                    .find(|(_, s)| s.instrument.is_some_and(|m| m.default_duck_source()))
                     .map(|(id, _)| *id),
             ),
         }
@@ -294,6 +295,11 @@ fn check_id(id: &At<String>, what: &str, errors: &mut Errors) {
             "track id `mix` is reserved (`mix.wav` is the master render)".to_owned(),
         );
     }
+}
+
+/// Ducking follows hits, so a duck source must play drum clips.
+fn plays_drums(module: &ModuleDescriptor) -> bool {
+    module.plays(ClipKind::Drum)
 }
 
 fn unknown_track(id: &str) -> String {

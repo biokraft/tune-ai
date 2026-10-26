@@ -14,8 +14,8 @@ pub mod wav;
 
 pub use clock::{Clock, hit_seed, track_seed};
 pub use compile::{
-    CompiledFx, CompiledLane, CompiledMix, CompiledSection, CompiledSong, CompiledTrack, MIX_TRACK,
-    ParamTarget,
+    CompiledDevice, CompiledLane, CompiledMix, CompiledSection, CompiledSong, CompiledTrack,
+    MIX_TRACK, ParamTarget,
 };
 pub use engine::{Engine, TrackRuntime};
 pub use live::{AudioOut, LiveController, LiveError, LiveProcessor, SongUpdate, live};
