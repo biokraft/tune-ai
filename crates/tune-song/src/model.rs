@@ -91,10 +91,13 @@ impl Song {
         span == self.section_bars(section)
     }
 
-    /// What track `track` plays in section `section`: nothing, one clip over
-    /// the whole section, or anything else (the placements that overlap
-    /// it, in time order). An unknown track is silent. Panics when there is
-    /// no such section.
+    /// What track `track` plays in section `section`: nothing, one clip from
+    /// its first step over the whole section (one placement that starts at
+    /// the section start with offset 0 and covers it), or anything else (the
+    /// placements that overlap it, in time order). A placement that starts
+    /// before the section or has an offset is `Other`, so a change of only
+    /// its phase is a change of what the section plays. An unknown track is
+    /// silent. Panics when there is no such section.
     pub fn section_play(&self, section: usize, track: &str) -> SectionPlay<'_> {
         let bars = self.section_bars(section);
         let Some(t) = self.tracks.get(track) else {
@@ -107,7 +110,7 @@ impl Song {
             .collect();
         match overlapping.as_slice() {
             [] => SectionPlay::Silent,
-            [p] if p.start_bar <= bars.start && p.span().end >= bars.end => {
+            [p] if p.start_bar == bars.start && p.offset_bars == 0 && p.span().end >= bars.end => {
                 SectionPlay::Clip(&p.clip)
             }
             _ => SectionPlay::Other(overlapping),
@@ -376,7 +379,8 @@ pub fn section_bars_error(bars: i64) -> String {
 pub enum SectionPlay<'a> {
     /// No placement overlaps the section.
     Silent,
-    /// Exactly one placement overlaps the section and covers all of it.
+    /// Exactly one placement overlaps the section: it starts at the section
+    /// start with offset 0 and covers all of the section.
     Clip(&'a str),
     /// Any other arrangement: the overlapping placements, in time order.
     Other(Vec<&'a Placement>),

@@ -143,7 +143,7 @@ fn device_json(d: &Device) -> Value {
 
 /// What each track plays in section `section`, in track order, as text
 /// (`t=clip`, or `t=clip@<bar>+<bars>` per placement for anything but one
-/// clip over the whole section, with `(offset=<bars>)` after a non-zero
+/// clip from its first step over the whole section, with `(offset=<bars>)` after a non-zero
 /// offset; bars 1-based) and as JSON (the clip id, or `[{at, clip, bars,
 /// offset}]`). Silent tracks are left out.
 fn section_play(song: &Song, section: usize) -> (Vec<String>, Map<String, Value>) {

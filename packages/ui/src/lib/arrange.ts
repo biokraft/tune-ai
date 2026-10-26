@@ -13,7 +13,10 @@ export type SectionView = {
   name: string;
   start_bar: number;
   bars: number;
-  /** Track id to clip id, for each track that plays one clip over the whole section. */
+  /**
+   * Track id to clip id, for each track that plays one clip over the whole section: one placement
+   * that starts at the section start from the clip's first step (offset 0).
+   */
   play: Record<string, string>;
   /** The stretches that overlap the section. */
   lanes: LaneView[];
@@ -33,23 +36,17 @@ export type PlacementView = {
 
 /**
  * The bars of placement `p` that no section's block shows, as half-open `[start, end)` ranges: all
- * of it when no section shows it, else what sticks out past the sections it covers whole.
+ * of it when no section shows it, else what runs past the end of the one section that does. A
+ * section shows a placement only when it starts there from the clip's first step, so the part of a
+ * placement inside any later section is loose.
  */
 export function loosePieces(p: PlacementView, sections: SectionView[]): [number, number][] {
   const start = p.start_bar;
   const end = p.start_bar + p.bars;
-  const covered =
-    p.in_section === null
-      ? []
-      : sections.filter((s) => s.start_bar >= start && s.start_bar + s.bars <= end);
-  const first = covered[0];
-  const last = covered[covered.length - 1];
-  if (!first || !last) return [[start, end]];
-  const pieces: [number, number][] = [
-    [start, first.start_bar],
-    [last.start_bar + last.bars, end],
-  ];
-  return pieces.filter(([a, b]) => b > a);
+  const shown = p.in_section === null ? undefined : sections[p.in_section];
+  if (!shown) return [[start, end]];
+  const from = shown.start_bar + shown.bars;
+  return from < end ? [[from, end]] : [];
 }
 
 /** Bar width when nothing is measured (jsdom, first paint). */
