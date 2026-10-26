@@ -1,5 +1,6 @@
 import {
   memo,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -669,6 +670,10 @@ const Ruler = memo(function Ruler({ laneW, ppb, step, loop, total, onSeek, onLoo
     release(e);
     set(null);
   };
+  // The browser took the pointer away (a system gesture, say): drop the press, loop nothing.
+  const lost = () => {
+    if (pressRef.current) set(null);
+  };
 
   const preview: [number, number] | null =
     press?.drag === true
@@ -692,6 +697,7 @@ const Ruler = memo(function Ruler({ laneW, ppb, step, loop, total, onSeek, onLoo
       onPointerMove={move}
       onPointerUp={up}
       onPointerCancel={cancel}
+      onLostPointerCapture={lost}
     >
       {preview ? (
         <LoopBand loop={preview} ppb={ppb} height={RULER_H} testId="loop-preview" />
@@ -761,6 +767,10 @@ type PlayheadCapProps = {
 function PlayheadCap({ x, bar, total, barAt, onDrag, onSeek }: PlayheadCapProps) {
   /** Where the drag started and the bar it has reached, if it has moved. */
   const drag = useRef<{ x0: number; bar: number | null } | null>(null);
+  const onDragRef = useRef(onDrag);
+  onDragRef.current = onDrag;
+  // Unmounted mid-drag (the song emptied, say): let go, or the playhead stays frozen.
+  useEffect(() => () => onDragRef.current(null), []);
   const down = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     // The ruler under the cap must not start a loop drag.
@@ -792,6 +802,12 @@ function PlayheadCap({ x, bar, total, barAt, onDrag, onSeek }: PlayheadCapProps)
     drag.current = null;
     onDrag(null);
   };
+  // Capture lost mid-drag: end the drag without seeking, so the playhead follows ticks again.
+  const lost = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    onDrag(null);
+  };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     // The frame's Alt+arrow moves the selected section; on the cap, arrows move the playhead only.
@@ -817,6 +833,7 @@ function PlayheadCap({ x, bar, total, barAt, onDrag, onSeek }: PlayheadCapProps)
       onPointerMove={move}
       onPointerUp={up}
       onPointerCancel={cancel}
+      onLostPointerCapture={lost}
       onKeyDown={onKeyDown}
     >
       <span

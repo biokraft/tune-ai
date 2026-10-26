@@ -758,6 +758,42 @@ describe("Arrangement ruler", () => {
     expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(5 * 12));
   });
 
+  it("a lost pointer capture mid cap-drag ends the drag: the playhead follows ticks again", () => {
+    const { onSeek, update } = setup(two(), { playhead: 4.5 });
+    fireEvent.pointerDown(cap(), { clientX: 54, pointerId: 1 });
+    fireEvent.pointerMove(cap(), { clientX: 100, pointerId: 1 });
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(8 * 12));
+    fireEvent.lostPointerCapture(cap(), { pointerId: 1 });
+    update({ playhead: 6 });
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(6 * 12));
+    fireEvent.pointerUp(cap(), { clientX: 100, pointerId: 1 });
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it("a cap that unmounts mid-drag lets go of the playhead", () => {
+    const { onSeek, update } = setup(two(), { playhead: 4.5 });
+    fireEvent.pointerDown(cap(), { clientX: 54, pointerId: 1 });
+    fireEvent.pointerMove(cap(), { clientX: 100, pointerId: 1 });
+    // An empty song has no cap.
+    update({ sections: [] });
+    expect(screen.queryByRole("slider", { name: "Playhead" })).toBeNull();
+    update({ sections: two(), playhead: 6 });
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(6 * 12));
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it("a lost pointer capture mid ruler-drag drops the preview and loops nothing", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(2));
+    fireEvent.pointerMove(ruler(), at(5));
+    expect(screen.getByTestId("loop-preview")).toBeInTheDocument();
+    fireEvent.lostPointerCapture(ruler(), { pointerId: 1 });
+    expect(screen.queryByTestId("loop-preview")).toBeNull();
+    fireEvent.pointerUp(ruler(), at(5));
+    expect(onLoop).not.toHaveBeenCalled();
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
   it("a press on the cap that does not move leaves the playhead where it is", () => {
     const { onSeek, onLoop } = setup(two(), { playhead: 4.5 });
     fireEvent.pointerDown(cap(), { clientX: 54, pointerId: 1 });
