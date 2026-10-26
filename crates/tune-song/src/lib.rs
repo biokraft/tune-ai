@@ -5,10 +5,12 @@
 //! the app) and Claude (as text) edit, so [`parse`] reports every mistake
 //! at once, each with a 1-based `line:column`. It reads format versions 1
 //! and 2; [`Song::to_toml`] writes version 2, and [`migrate`] rewrites a
-//! version 1 file as version 2, keeping its comments.
+//! version 1 file as version 2, keeping its comments. [`move_section`] and its
+//! siblings edit the arrangement one section at a time.
 
 #![forbid(unsafe_code)]
 
+mod arrange;
 mod error;
 mod migrate;
 mod model;
@@ -20,6 +22,10 @@ mod write;
 
 use std::path::Path;
 
+pub use arrange::{
+    ArrangeError, Arranged, LaneOrigin, delete_section, duplicate_section, move_section,
+    resize_section, set_section_play,
+};
 pub use error::{LoadError, SongError};
 pub use migrate::{Migration, migrate};
 pub use model::{
