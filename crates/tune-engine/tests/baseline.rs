@@ -7,23 +7,18 @@
 
 mod common;
 
-use common::{MINI, MIXED, compiled};
+use common::{MINI, compiled};
 use tune_engine::{RenderOptions, render};
-use tune_song::{Migration, migrate};
 
 /// `songs/first-acid` as it was before the mixer existed, frozen so the pin
 /// guards the engine while the live song keeps changing.
 const FIRST_ACID: &str = include_str!("../../tune-song/tests/fixtures/first-acid-v1.toml");
 
-/// `first-acid` with the Plan 5 mixer, frozen like [`FIRST_ACID`].
-const FIRST_ACID_MIXED: &str = include_str!("../../tune-song/tests/fixtures/first-acid-mixed.toml");
-
-/// The committed v2 copies of the fixtures (the migration's output).
+/// The committed v2 copies of the two pinned fixtures. tune-song's migrate
+/// tests prove each is byte for byte the migration of its v1 file and the
+/// same song in the same order, so rendering the copies covers the migration.
 const MINI_V2: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
-const MIXED_V2: &str = include_str!("../../tune-song/tests/fixtures/v2/mixed.toml");
 const FIRST_ACID_V2: &str = include_str!("../../tune-song/tests/fixtures/v2/first-acid-v1.toml");
-const FIRST_ACID_MIXED_V2: &str =
-    include_str!("../../tune-song/tests/fixtures/v2/first-acid-mixed.toml");
 
 /// What a whole-song render with stems is pinned by.
 #[derive(Debug, PartialEq)]
@@ -127,26 +122,10 @@ fn first_acid_renders_as_before() {
     );
 }
 
-/// [`fingerprint`] of each of `srcs`, rendered side by side (a debug-build
-/// render of first-acid takes about 20 s).
-fn fingerprints<const N: usize>(srcs: [&str; N]) -> [Fingerprint; N] {
-    std::thread::scope(|s| {
-        srcs.map(|src| s.spawn(move || fingerprint(src)))
-            .map(|h| h.join().expect("render thread"))
-    })
-}
-
-/// `src` (a v1 file) migrated to v2 in memory.
-fn migrated(src: &str) -> String {
-    match migrate(src) {
-        Ok(Migration::Migrated { text, .. }) => text,
-        other => panic!("expected a v1 file to migrate, got {other:?}"),
-    }
-}
-
 #[test]
-fn mini_v2_and_migrated_render_as_before() {
-    let pinned = || {
+fn mini_v2_renders_as_before() {
+    assert_eq!(
+        fingerprint(MINI_V2),
         Fingerprint::pinned(
             0x3cb4_018b_5885_1398,
             &[
@@ -158,15 +137,13 @@ fn mini_v2_and_migrated_render_as_before() {
             0x3fe9_d80b_0101_da26,
             8440,
         )
-    };
-    let [copy, in_memory] = fingerprints([MINI_V2, &migrated(MINI)]);
-    assert_eq!(copy, pinned(), "v2 copy");
-    assert_eq!(in_memory, pinned(), "migrated");
+    );
 }
 
 #[test]
-fn first_acid_v2_and_migrated_render_as_before() {
-    let pinned = || {
+fn first_acid_v2_renders_as_before() {
+    assert_eq!(
+        fingerprint(FIRST_ACID_V2),
         Fingerprint::pinned(
             0xcc4f_9320_a2f2_d1ff,
             &[
@@ -180,20 +157,5 @@ fn first_acid_v2_and_migrated_render_as_before() {
             0x3fe9_1f17_6fea_b576,
             70718,
         )
-    };
-    let [copy, in_memory] = fingerprints([FIRST_ACID_V2, &migrated(FIRST_ACID)]);
-    assert_eq!(copy, pinned(), "v2 copy");
-    assert_eq!(in_memory, pinned(), "migrated");
-}
-
-#[test]
-fn mixed_fixtures_render_alike_in_v1_and_v2() {
-    for (name, v1, v2) in [
-        ("mixed", MIXED, MIXED_V2),
-        ("first-acid-mixed", FIRST_ACID_MIXED, FIRST_ACID_MIXED_V2),
-    ] {
-        let [want, copy, in_memory] = fingerprints([v1, v2, &migrated(v1)]);
-        assert_eq!(copy, want, "{name}: v2 copy");
-        assert_eq!(in_memory, want, "{name}: migrated");
-    }
+    );
 }
