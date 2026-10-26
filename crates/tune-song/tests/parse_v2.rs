@@ -437,3 +437,49 @@ fn empty_sections_report_only_the_missing_section() {
         messages(&errors)
     );
 }
+
+const V2_HINT: &str = "this looks like a version 2 song: add `version = 2` to [song]";
+
+#[test]
+fn v2_shapes_in_a_v1_file_say_to_add_the_version() {
+    fails_at(
+        &swap_in(
+            MINI,
+            "instrument = \"kick\"",
+            "instrument = \"kick\"\nplay = []",
+        ),
+        "play = []",
+        0,
+        V2_HINT,
+    );
+    fails_at(
+        &format!("{MINI}\n[clips.k4]\nkind = \"drum\"\nsteps = \"x...\"\n"),
+        "clips",
+        0,
+        V2_HINT,
+    );
+    fails_at(
+        &format!("{MINI}\n[[automation]]\nparam = \"a.b\"\n"),
+        "[[automation]]",
+        2,
+        V2_HINT,
+    );
+}
+
+#[test]
+fn other_unknown_fields_in_a_v1_file_keep_their_message() {
+    let errors = parse(&swap_in(
+        MINI,
+        "instrument = \"kick\"",
+        "instrument = \"kick\"\nplays = []",
+    ))
+    .expect_err("must fail");
+    assert_eq!(errors.len(), 1);
+    assert!(
+        errors[0]
+            .message
+            .starts_with("unknown field `plays` in [tracks.kick], expected one of"),
+        "{}",
+        messages(&errors)
+    );
+}
