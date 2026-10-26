@@ -860,6 +860,28 @@ fn swap_reordering_fx_keeps_both_devices() {
 }
 
 #[test]
+fn fx_override_follows_its_device_through_a_reorder() {
+    let a = compiled(MIXED);
+    let b = reordered_mixed();
+    let (mut e, _, fx) = probe_engine_slots(&a, "acid", &[0, 1]);
+    let (dist, eq) = (&fx[0], &fx[1]);
+    // `dist.drive`, in slot 0 before the swap and slot 1 after it.
+    let drive = 23.25;
+    e.set_override(ACID, ParamTarget::Fx { slot: 0, index: 0 }, Some(drive));
+    run(&mut e, BAR);
+    assert!(e.queue_swap(SongUpdate::new(b)).is_none());
+    run(&mut e, BAR);
+    assert_eq!(e.swaps_applied(), 1);
+    assert_eq!(e.overrides_active(), 1);
+    // Bar 1 has no lanes: past the swap's step, only the override is set,
+    // every sample, and only on the distortion.
+    for n in [BAR + 1, BAR + STEP / 2, 2 * BAR - 1] {
+        assert_eq!(params_at(dist, n), [(0, drive)], "sample {n}");
+        assert!(params_at(eq, n).is_empty(), "sample {n}");
+    }
+}
+
+#[test]
 fn swap_changing_the_mode_rebuilds_only_that_device() {
     let a = compiled(MIXED);
     let hard = mixed_with(|s| s.tracks.get_mut("acid").unwrap().fx[0].settings[0] = "hard");
