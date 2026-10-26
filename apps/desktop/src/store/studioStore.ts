@@ -48,6 +48,21 @@ function highlightKeys(path: string, old: unknown, next: unknown): string[] {
   return [path];
 }
 
+/** The format version the studio writes. */
+const FORMAT_VERSION = 2;
+
+/** The notice for a song file upgraded from format `from` on open, as one change on disk. */
+function migrationChange(from: number): ExternalChange {
+  return {
+    source: "external",
+    changes: [{ path: "song.version", old: from, new: FORMAT_VERSION }],
+    replaced: false,
+    merged: [],
+    offered: [],
+    errors: [],
+  };
+}
+
 /** The studio as the UI sees it, fed by one client's events; read via useSyncExternalStore. */
 export function createStudioStore(client: StudioClient): StudioStore {
   let view: StudioView = {
@@ -93,8 +108,32 @@ export function createStudioStore(client: StudioClient): StudioStore {
     set({ highlights: next });
   };
 
-  const adopt = (state: StudioState) =>
-    set({ state, selectedSection: clampSelection(state, view.selectedSection) });
+  /** The song path the last state named: a different one is a newly opened song. */
+  let openPath: string | null = null;
+  /** The notice that says the open song was migrated, while it stands. */
+  let migrationNotice: ExternalChange | null = null;
+
+  const adopt = (state: StudioState) => {
+    const patch: Partial<StudioView> = {
+      state,
+      selectedSection: clampSelection(state, view.selectedSection),
+    };
+    const opened = state.path !== openPath;
+    openPath = state.path;
+    if (opened && state.migrated_from !== null) {
+      // Opening upgraded the file: say so once, with an Undo while one undo reverts it.
+      migrationNotice = migrationChange(state.migrated_from);
+      patch.notice = migrationNotice;
+      patch.noticeUndoable = true;
+    } else if (
+      state.migrated_from === null &&
+      migrationNotice !== null &&
+      view.notice === migrationNotice
+    ) {
+      patch.noticeUndoable = false;
+    }
+    set(patch);
+  };
 
   /** State events seen; a `get_state` result older than one of them is dropped. */
   let stateEvents = 0;
