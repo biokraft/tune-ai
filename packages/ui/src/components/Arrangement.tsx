@@ -1,5 +1,6 @@
 import {
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -228,6 +229,23 @@ export function Arrangement(p: ArrangementProps) {
 
   /** The bar the playhead's cap is being dragged to; the playhead is drawn there, not at ticks. */
   const [capBar, setCapBar] = useState<number | null>(null);
+  /** The cap was dropped and seeked: hold the dropped bar until the next tick moves the playhead. */
+  const capHeld = useRef(false);
+  const capDrag = useCallback((bar: number | null) => {
+    capHeld.current = false;
+    setCapBar(bar);
+  }, []);
+  const capDrop = useCallback((bar: number) => {
+    capHeld.current = true;
+    setCapBar(bar);
+  }, []);
+  // A new playhead after a drop is the backend's answer to the seek: follow the ticks again.
+  // Without the hold the playhead would flash back to its stale position until that tick.
+  useEffect(() => {
+    if (!capHeld.current) return;
+    capHeld.current = false;
+    setCapBar(null);
+  }, [p.playhead]);
   /** The sticky band over the lanes: its left edge is bar 0 on screen. */
   const band = useRef<HTMLDivElement>(null);
 
@@ -395,7 +413,8 @@ export function Arrangement(p: ArrangementProps) {
                   bar={clampBar(Math.floor(playhead), total)}
                   total={total}
                   barAt={capBarAt}
-                  onDrag={setCapBar}
+                  onDrag={capDrag}
+                  onDrop={capDrop}
                   onSeek={p.onSeek}
                 />
               )}
@@ -761,8 +780,10 @@ type PlayheadCapProps = {
   total: number;
   /** The bar at a pointer's clientX: the nearest bar line, or the bar under it. */
   barAt(clientX: number, snap: CapSnap): number;
-  /** The bar the cap is dragged to, or null when the drag ends. */
+  /** The bar the cap is dragged to, or null when the drag ends without a seek. */
   onDrag(bar: number | null): void;
+  /** The drag ended on `bar`, which is about to be seeked: keep drawing the playhead there. */
+  onDrop(bar: number): void;
   onSeek(bar: number): void;
 };
 
@@ -771,7 +792,7 @@ type PlayheadCapProps = {
  * seeks on release), or focus it and step a bar with the arrow keys. A click on it seeks to the
  * bar under the pointer, as the ruler beneath it would.
  */
-function PlayheadCap({ x, bar, total, barAt, onDrag, onSeek }: PlayheadCapProps) {
+function PlayheadCap({ x, bar, total, barAt, onDrag, onDrop, onSeek }: PlayheadCapProps) {
   /** Where the drag started and the bar it has reached, if it has moved. */
   const drag = useRef<{ x0: number; bar: number | null } | null>(null);
   const onDragRef = useRef(onDrag);
@@ -800,9 +821,14 @@ function PlayheadCap({ x, bar, total, barAt, onDrag, onSeek }: PlayheadCapProps)
     e.stopPropagation();
     release(e);
     drag.current = null;
-    onDrag(null);
+    if (d.bar !== null) {
+      onDrop(d.bar);
+      onSeek(d.bar);
+      return;
+    }
     // A press that never became a drag is a click on the ruler under the cap: seek there.
-    onSeek(d.bar ?? barAt(e.clientX, "under"));
+    onDrag(null);
+    onSeek(barAt(e.clientX, "under"));
   };
   const cancel = (e: PointerEvent<HTMLDivElement>) => {
     if (!drag.current) return;

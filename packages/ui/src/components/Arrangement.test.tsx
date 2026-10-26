@@ -754,8 +754,13 @@ describe("Arrangement ruler", () => {
     expect(onSeek).toHaveBeenCalledTimes(1);
     expect(onSeek).toHaveBeenCalledWith(8);
     expect(onLoop).not.toHaveBeenCalled();
-    // Released, it follows the ticks again.
-    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(5 * 12));
+    // Released, it stays on the dropped bar until the next tick, with no flash back to bar 5...
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(8 * 12));
+    // ...then follows the ticks again.
+    update({ playhead: 8.0625 });
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(8.0625 * 12));
+    update({ playhead: 9 });
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(9 * 12));
   });
 
   it("a lost pointer capture mid cap-drag ends the drag: the playhead follows ticks again", () => {
