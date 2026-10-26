@@ -79,7 +79,7 @@ impl Song {
 
     /// The 0-based bar range of section `section`. Panics when there is no
     /// such section.
-    fn section_bars(&self, section: usize) -> Range<u32> {
+    pub(crate) fn section_bars(&self, section: usize) -> Range<u32> {
         let start = self.sections[..section].iter().map(|s| s.bars).sum::<u32>();
         start..start + self.sections[section].bars
     }
