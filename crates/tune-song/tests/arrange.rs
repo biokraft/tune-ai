@@ -3,7 +3,7 @@
 //! edited section plays as before.
 
 use tune_song::{
-    ArrangeError, Arranged, Clip, LaneOrigin, Song, delete_section, duplicate_section,
+    ArrangeError, Arranged, Clip, LaneOrigin, Song, delete_section, duplicate_section, lane_value,
     move_section, parse_song, resize_section, set_section_play,
 };
 
@@ -478,16 +478,62 @@ fn step_of(song: &Song, track: &str, step: u64) -> Option<(String, u64)> {
     Some((p.clip.clone(), offset % len))
 }
 
+/// The value the lane of `param` on `track` has at 0-based song bar `x`, as
+/// the engine finds it: from the stretch that covers `x`, at `x`'s offset
+/// into it; `None` outside every stretch (the static value plays).
+fn value_at(song: &Song, track: &str, param: &str, x: f64) -> Option<f64> {
+    let lane = song.automation.iter().find(|l| {
+        l.track == track
+            && l.param == param
+            && f64::from(l.start_bar) <= x
+            && x < f64::from(l.start_bar + l.bars)
+    })?;
+    Some(lane_value(&lane.points, x - f64::from(lane.start_bar)))
+}
+
 /// Asserts that every old bar `b` that `map` sends to new bars plays the
-/// same clip steps there, on every track.
-fn assert_steps_kept(op: &str, old: &Song, new: &Arranged, map: impl Fn(u32) -> Vec<u32>) {
-    for track in old.tracks.keys() {
-        for bar in 0..old.total_bars() {
-            for to in map(bar) {
+/// same clip steps and lane values there, on every track and lane, and that
+/// every stretch comes from a stretch of the same param.
+fn assert_kept(op: &str, old: &Song, new: &Arranged, map: impl Fn(u32) -> Vec<u32>) {
+    assert_eq!(new.lanes.len(), new.song.automation.len(), "{op}");
+    for (lane, &origin) in new.song.automation.iter().zip(&new.lanes) {
+        let (Kept(i) | Split(i) | Copy(i)) = origin;
+        let from = &old.automation[i];
+        assert_eq!(
+            (&lane.track, &lane.param),
+            (&from.track, &from.param),
+            "{op}: {origin:?}"
+        );
+    }
+    let mut params: Vec<(&str, &str)> = old
+        .automation
+        .iter()
+        .map(|l| (l.track.as_str(), l.param.as_str()))
+        .collect();
+    params.sort_unstable();
+    params.dedup();
+    for bar in 0..old.total_bars() {
+        for to in map(bar) {
+            for track in old.tracks.keys() {
                 for i in 0..16 {
                     let before = step_of(old, track, 16 * u64::from(bar) + i);
                     let after = step_of(&new.song, track, 16 * u64::from(to) + i);
                     assert_eq!(before, after, "{op}: {track} bar {bar} -> {to}, step {i}");
+                }
+            }
+            for &(track, param) in &params {
+                for q in 0..8 {
+                    let f = f64::from(q) / 8.0;
+                    let before = value_at(old, track, param, f64::from(bar) + f);
+                    let after = value_at(&new.song, track, param, f64::from(to) + f);
+                    let same = match (before, after) {
+                        (Some(a), Some(b)) => (a - b).abs() < 1e-9,
+                        (a, b) => a == b,
+                    };
+                    assert!(
+                        same,
+                        "{op}: {track}.{param} at bar {bar} + {f} -> {to}: {before:?} vs {after:?}"
+                    );
                 }
             }
         }
@@ -496,7 +542,10 @@ fn assert_steps_kept(op: &str, old: &Song, new: &Arranged, map: impl Fn(u32) -> 
 
 #[test]
 fn ops_keep_steps_outside_the_edit() {
-    // Placements that cross section edges, with offsets.
+    // Placements and stretches that cross section edges (bars 2, 5 and 6):
+    // placements with offsets, a stretch with jumps (two points on one bar)
+    // on the edge at bar 2 and inside at bar 4, another stretch touching it,
+    // and one over the whole song on a second param.
     let sections = [2, 3, 1, 2];
     let s = song(
         &sections,
@@ -504,7 +553,25 @@ fn ops_keep_steps_outside_the_edit() {
             &[(0, 3, "c", 1), (3, 4, "c", 2), (7, 1, "d", 0)],
             &[(1, 6, "c", 3)],
         ),
-        "",
+        &(lane(
+            "kick.kick.tune",
+            1,
+            5,
+            &[
+                (0.0, 0.1),
+                (1.0, 0.4),
+                (1.0, 0.8),
+                (3.0, 0.6),
+                (3.0, 0.3),
+                (5.0, 0.2),
+            ],
+        ) + &lane("kick.kick.tune", 6, 2, &[(0.0, 0.5), (2.0, 0.9)])
+            + &lane(
+                "hat.hat_closed.decay",
+                0,
+                8,
+                &[(0.0, 0.0), (4.0, 0.9), (8.0, 0.1)],
+            )),
     );
     let n = sections.len();
     let starts = s.section_start_bars();
@@ -520,7 +587,7 @@ fn ops_keep_steps_outside_the_edit() {
                 let pos = order.iter().position(|&o| o == j).unwrap();
                 order[..pos].iter().map(|&o| sections[o]).sum()
             };
-            assert_steps_kept(&format!("move {from} {to}"), &s, &a, |bar| {
+            assert_kept(&format!("move {from} {to}"), &s, &a, |bar| {
                 let j = (0..n).find(|&j| range(j).contains(&bar)).unwrap();
                 vec![new_start(j) + bar - starts[j]]
             });
@@ -531,7 +598,7 @@ fn ops_keep_steps_outside_the_edit() {
         let r = range(i);
 
         let a = duplicate_section(&s, i).unwrap();
-        assert_steps_kept(&format!("duplicate {i}"), &s, &a, |bar| {
+        assert_kept(&format!("duplicate {i}"), &s, &a, |bar| {
             if bar < r.start {
                 vec![bar]
             } else if r.contains(&bar) {
@@ -542,7 +609,7 @@ fn ops_keep_steps_outside_the_edit() {
         });
 
         let a = delete_section(&s, i).unwrap();
-        assert_steps_kept(&format!("delete {i}"), &s, &a, |bar| {
+        assert_kept(&format!("delete {i}"), &s, &a, |bar| {
             if bar < r.start {
                 vec![bar]
             } else if r.contains(&bar) {
@@ -554,7 +621,7 @@ fn ops_keep_steps_outside_the_edit() {
 
         for new in 1..=5 {
             let a = resize_section(&s, i, new).unwrap();
-            assert_steps_kept(&format!("resize {i} to {new}"), &s, &a, |bar| {
+            assert_kept(&format!("resize {i} to {new}"), &s, &a, |bar| {
                 if bar < r.start + new.min(len) {
                     vec![bar]
                 } else if r.contains(&bar) {
@@ -567,14 +634,14 @@ fn ops_keep_steps_outside_the_edit() {
 
         for clip in [Some("d"), None] {
             let a = set_section_play(&s, i, "kick", clip).unwrap();
-            assert_steps_kept(&format!("play {i} {clip:?}"), &s, &a, |bar| {
+            assert_kept(&format!("play {i} {clip:?}"), &s, &a, |bar| {
                 if r.contains(&bar) { vec![] } else { vec![bar] }
             });
         }
     }
 }
 
-/// Every op at every place in `src`, each with a name.
+/// Every op at every place in `s`, each with a name.
 fn every_op(s: &Song) -> Vec<(String, Arranged)> {
     let n = s.sections.len();
     let mut out = Vec::new();
