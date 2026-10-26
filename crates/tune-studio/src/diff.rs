@@ -28,7 +28,8 @@ pub struct Change {
 ///
 /// A changed section count or order gives one `sections` change. Otherwise
 /// sections are compared field by field (`bars`, `name`, `play.<t>`,
-/// `lanes`). A track that appears or disappears gives one `tracks.<t>`
+/// `lanes`); a section's lanes are compared relative to its start, so they
+/// count as changed only when they changed within the section. A track that appears or disappears gives one `tracks.<t>`
 /// change with `null` on the missing side; a track in both songs whose
 /// devices differ (a module, an id, the fx order) gives a `tracks.<t>`
 /// change first, then its param and setting changes.
@@ -130,9 +131,13 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
                 let (a, b) = both(&p);
                 push(p, a, b);
             }
-            let p = SongPath::SectionLanes(i);
-            let (a, b) = both(&p);
-            push(p, a, b);
+            // Compared relative to the section's start: a section that only
+            // moved (an earlier one was resized or moved) has the same lanes.
+            if relative_lanes(old, i) != relative_lanes(new, i) {
+                let p = SongPath::SectionLanes(i);
+                let (a, b) = both(&p);
+                push(p, a, b);
+            }
         }
     }
     out
@@ -169,6 +174,31 @@ fn param_ids(track: &Track) -> Vec<String> {
         ids.extend(d.module.settings.iter().map(|s| d.param_id(s.name)));
     }
     ids
+}
+
+/// One lane stretch overlapping a section, `at` counted from the section's
+/// start (negative for a stretch that starts before it).
+type RelativeLane<'s> = (&'s str, &'s str, i64, u32, &'s [(f64, f64)]);
+
+/// The stretches overlapping section `i` relative to its start, or `None`
+/// when the song has no such section.
+fn relative_lanes(song: &Song, i: usize) -> Option<Vec<RelativeLane<'_>>> {
+    let start = i64::from(*song.section_start_bars().get(i)?);
+    Some(
+        song.lanes_in(i)
+            .into_iter()
+            .map(|l| {
+                let at = i64::from(l.start_bar) - start;
+                (
+                    l.track.as_str(),
+                    l.param.as_str(),
+                    at,
+                    l.bars,
+                    &l.points[..],
+                )
+            })
+            .collect(),
+    )
 }
 
 /// Whether the section list changed in count, or holds the same sections

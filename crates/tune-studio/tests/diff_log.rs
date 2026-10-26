@@ -81,22 +81,47 @@ fn diff_sections_reorder() {
 #[test]
 fn diff_bars_only() {
     let text = MINI.replacen("bars = 2", "bars = 4", 1);
-    let lane = |at: u32| {
-        json!([{
-            "track": "acid",
-            "param": "acid303.cutoff",
-            "at": at,
-            "bars": 2,
-            "points": [[0, 0.1], [2, 0.8]]
-        }])
-    };
-    // Section `b` and its lane stretch move back with it: only the
-    // stretch's `at` changes.
+    // Section `b` and its lane stretch move back with it; within `b` the
+    // lane is the same, so only the bars changed.
     assert_eq!(
         diff_songs(&song(MINI), &song(&text)),
+        vec![change("sections[0].bars", json!(2), json!(4))]
+    );
+}
+
+const MINI_V2: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
+
+/// Resizing a section moves the stretches after it (their `at` is
+/// absolute), which is not an edit of those sections' lanes. A real edit of
+/// a later section's lane still is.
+#[test]
+fn shifted_lanes_are_not_lane_changes() {
+    let old = song(MINI_V2);
+    assert_eq!(
+        old.lanes_in(1).len(),
+        1,
+        "the fixture has a lane in section 1"
+    );
+    let resized = tune_song::resize_section(&old, 0, 3).unwrap().song;
+    assert_eq!(resized.automation[0].start_bar, 3);
+    assert_eq!(
+        diff_songs(&old, &resized),
+        vec![change("sections[0].bars", json!(2), json!(3))]
+    );
+
+    let mut edited = resized.clone();
+    edited.automation[0].points[1].1 = 0.9;
+    let lane =
+        |song: &tune_song::Song| tune_studio::effective_value(song, &path("sections[1].lanes"));
+    assert_eq!(
+        diff_songs(&old, &edited),
         vec![
-            change("sections[0].bars", json!(2), json!(4)),
-            change("sections[1].lanes", lane(3), lane(5)),
+            change("sections[0].bars", json!(2), json!(3)),
+            Change {
+                path: path("sections[1].lanes"),
+                old: lane(&old).unwrap(),
+                new: lane(&edited).unwrap(),
+            },
         ]
     );
 }
