@@ -132,6 +132,47 @@ fn info_text_has_rows() {
 }
 
 #[test]
+fn info_v2_shows_placement_offsets() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.toml");
+    std::fs::write(
+        &path,
+        r#"[song]
+version = 2
+name = "v2"
+bpm = 120
+
+[tracks.acid]
+instrument = "acid303"
+play = [{ at = 2, clip = "a1", bars = 1, offset = 1 }]
+
+[clips.a1]
+kind = "acid"
+steps = "C2 C3"
+
+[[sections]]
+name = "a"
+bars = 2
+"#,
+    )
+    .unwrap();
+    let out = tune().arg("info").arg(&path).assert().success();
+    let s = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(s.contains("play: acid=a1@2+1(offset=1)"), "{s}");
+    let out = tune()
+        .arg("info")
+        .arg(&path)
+        .arg("--json")
+        .assert()
+        .success();
+    let v = json_of(&out.get_output().stdout);
+    assert_eq!(
+        v["sections"][0]["play"]["acid"],
+        json!([{ "at": 2, "clip": "a1", "bars": 1, "offset": 1 }])
+    );
+}
+
+#[test]
 fn params_json_lists_tables() {
     let out = tune().args(["params", "--json"]).assert().success();
     let v = json_of(&out.get_output().stdout);

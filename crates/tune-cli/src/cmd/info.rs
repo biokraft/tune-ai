@@ -120,8 +120,9 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
 
 /// What each track plays in section `section`, in track order, as text
 /// (`t=clip`, or `t=clip@<bar>+<bars>` per placement for anything but one
-/// clip over the whole section; bars 1-based) and as JSON (the clip id, or
-/// `[{at, clip, bars, offset}]`). Silent tracks are left out.
+/// clip over the whole section, with `(offset=<bars>)` after a non-zero
+/// offset; bars 1-based) and as JSON (the clip id, or `[{at, clip, bars,
+/// offset}]`). Silent tracks are left out.
 fn section_play(song: &Song, section: usize) -> (Vec<String>, Map<String, Value>) {
     let mut text = Vec::new();
     let mut json = Map::new();
@@ -135,7 +136,13 @@ fn section_play(song: &Song, section: usize) -> (Vec<String>, Map<String, Value>
             SectionPlay::Other(placements) => {
                 let parts: Vec<String> = placements
                     .iter()
-                    .map(|p| format!("{}@{}+{}", p.clip, p.start_bar + 1, p.bars))
+                    .map(|p| {
+                        let mut part = format!("{}@{}+{}", p.clip, p.start_bar + 1, p.bars);
+                        if p.offset_bars != 0 {
+                            let _ = write!(part, "(offset={})", p.offset_bars);
+                        }
+                        part
+                    })
                     .collect();
                 text.push(format!("{t}={}", parts.join(",")));
                 let list = placements.into_iter().map(placement_json).collect();
