@@ -1118,3 +1118,144 @@ fn a_numbered_device_id_the_track_lacks_is_no_such_target() {
         Err(EditError::UnknownParam { .. })
     ));
 }
+
+fn view_of(text: &str) -> Value {
+    let d = SongDoc::parse(text).expect("song parses");
+    serde_json::to_value(tune_studio::SongView::from(d.song())).unwrap()
+}
+
+/// Review Focus 3: every device in the views carries its id, and a second
+/// eq's params carry that id, so the UI can tell the two apart.
+#[test]
+fn views_carry_device_ids() {
+    let view = view_of(V2);
+    let acid = &view["tracks"][1];
+    assert_eq!(acid["id"], "acid");
+    assert_eq!(acid["instrument"], "acid303");
+    assert_eq!(acid["instrument_id"], "acid303");
+    let fx = acid["fx"].as_array().unwrap();
+    assert_eq!(fx[0]["id"], "eq");
+    assert_eq!(fx[1]["id"], "eq2");
+    assert_eq!(fx[1]["kind"], "eq");
+    let ids: Vec<&str> = fx[1]["params"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    assert!(!ids.is_empty());
+    assert!(ids.iter().all(|id| id.starts_with("eq2.")), "{ids:?}");
+    // A table-form instrument keeps its own id.
+    let named = V2.replacen(
+        "instrument = \"acid303\"",
+        "instrument = { type = \"acid303\", id = \"bass\" }",
+        1,
+    );
+    let acid = &view_of(&named)["tracks"][1];
+    assert_eq!(acid["instrument"], "acid303");
+    assert_eq!(acid["instrument_id"], "bass");
+    assert!(
+        acid["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|p| p["id"].as_str().unwrap().starts_with("bass.")),
+        "{acid}"
+    );
+}
+
+/// A placement that covers only half of section `b` is not what any
+/// section plays; the aligned ones name their section.
+#[test]
+fn loose_placements_have_no_section() {
+    let from = "play = [{ at = 3, clip = \"a1\", bars = 2 }]";
+    assert!(COMMENTED.contains(from));
+    let text = COMMENTED.replacen(
+        from,
+        "play = [{ at = 4, clip = \"a1\", bars = 1, offset = 1 }]",
+        1,
+    );
+    let view = view_of(&text);
+    assert_eq!(
+        view["tracks"][1]["placements"],
+        json!([{ "start_bar": 3, "bars": 1, "clip": "a1", "offset": 1, "in_section": null }])
+    );
+    assert_eq!(
+        view["tracks"][0]["placements"],
+        json!([
+            { "start_bar": 0, "bars": 2, "clip": "k4", "offset": 0, "in_section": 0 },
+            { "start_bar": 2, "bars": 2, "clip": "k4", "offset": 0, "in_section": 1 },
+        ])
+    );
+    assert!(view["sections"][1]["play"].get("acid").is_none());
+    // One placement over both sections is shown by the first.
+    let text = COMMENTED.replacen(from, "play = [{ at = 1, clip = \"a1\", bars = 4 }]", 1);
+    let view = view_of(&text);
+    assert_eq!(view["tracks"][1]["placements"][0]["in_section"], 0);
+    assert_eq!(view["sections"][1]["play"]["acid"], "a1");
+}
+
+/// A song with one 4-bar section, then another, and one cutoff stretch.
+fn four_bar_sections(at: u32, bars: u32) -> String {
+    format!(
+        r#"[song]
+version = 2
+name = "lanes"
+bpm = 120
+
+[tracks.acid]
+instrument = "acid303"
+play = [{{ at = 1, clip = "a1", bars = 8 }}]
+
+[clips.a1]
+kind = "acid"
+steps = "C2 C3"
+
+[[sections]]
+name = "a"
+bars = 4
+
+[[sections]]
+name = "b"
+bars = 4
+
+[[automation]]
+param = "acid.acid303.cutoff"
+at = {at}
+bars = {bars}
+points = [[0, 0.1], [2, 0.8]]
+"#
+    )
+}
+
+/// Every stretch that overlaps a section is listed there, its points
+/// shifted to the section start and its part of the section in `from`/`to`.
+#[test]
+fn lane_views_carry_their_extent() {
+    // The second half of section `a`.
+    let view = view_of(&four_bar_sections(3, 2));
+    assert_eq!(
+        view["sections"][0]["lanes"],
+        json!([{
+            "track": "acid",
+            "param": "acid303.cutoff",
+            "points": [[2.0, 0.1], [4.0, 0.8]],
+            "from": 2.0,
+            "to": 4.0,
+        }])
+    );
+    assert_eq!(view["sections"][1]["lanes"], json!([]));
+    // Across the edge: each section shows its part.
+    let view = view_of(&four_bar_sections(3, 4));
+    let lanes = |i: usize| view["sections"][i]["lanes"][0].clone();
+    assert_eq!(lanes(0)["points"], json!([[2.0, 0.1], [4.0, 0.8]]));
+    assert_eq!(
+        (lanes(0)["from"].clone(), lanes(0)["to"].clone()),
+        (json!(2.0), json!(4.0))
+    );
+    assert_eq!(lanes(1)["points"], json!([[-2.0, 0.1], [0.0, 0.8]]));
+    assert_eq!(
+        (lanes(1)["from"].clone(), lanes(1)["to"].clone()),
+        (json!(0.0), json!(2.0))
+    );
+}

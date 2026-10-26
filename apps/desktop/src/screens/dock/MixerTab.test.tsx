@@ -96,6 +96,8 @@ describe("MixerTab", () => {
         track: "mix",
         param: "delay.feedback",
         points: [[0, 0.5]],
+        from: 0,
+        to: 2,
       });
     }).song!;
     setup(song, new Map(), 0);
