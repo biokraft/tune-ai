@@ -34,7 +34,7 @@ const tabId = (tab: DockTab) => `dock-tab-${tab}`;
  * The body: scrolls inside itself. Its tab never shrinks below its content, so a dock shorter than
  * the tab scrolls instead of clipping it.
  */
-const scroller = "flex min-h-0 flex-1 flex-col overflow-auto [&>*]:shrink-0";
+const scroller = "flex min-h-0 flex-1 flex-col overflow-auto overscroll-none [&>*]:shrink-0";
 const cell = "flex flex-col [&>*]:shrink-0";
 
 const head = "flex h-[46px] flex-none items-center gap-2.5 border-b border-line pl-3.5 pr-2.5";
@@ -262,7 +262,7 @@ function TrackBody({
     );
   }
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] overflow-auto">
+    <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] overflow-auto overscroll-none">
       <div className={cn(cell, "min-w-0")}>{sound}</div>
       <div className={cn(cell, "min-w-0 border-l border-line")}>{steps}</div>
     </div>

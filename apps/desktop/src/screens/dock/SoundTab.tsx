@@ -79,7 +79,7 @@ export const SoundTab = memo(function SoundTab({
   const strip = track.strip.map((p) => ({ ...p, value: drag.valueOf(p) }));
 
   return (
-    <div className="flex min-h-0 flex-1 items-stretch gap-3 overflow-x-auto overflow-y-hidden p-3">
+    <div className="flex min-h-0 flex-1 items-stretch gap-3 overflow-x-auto overflow-y-hidden overscroll-none p-3">
       <FxPanel
         title={instrumentTitle(track.instrument)}
         params={live(instrumentParams)}
