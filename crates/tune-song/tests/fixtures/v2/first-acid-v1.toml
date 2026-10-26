@@ -1,0 +1,300 @@
+# first-acid: our first full track, peak-time acid techno.
+#
+# Hand-written: these comments are the notes for the producer. `tune` itself
+# drops comments if it ever rewrites the file, so keep edits by hand.
+#
+# The big idea of acid techno: the song is the filter. One 16-step 303 line
+# plays almost the whole track, and the energy comes from slowly opening the
+# filter cutoff, pushing the resonance and hitting accents, not from chord
+# changes. Every section below is a multiple of 8 bars, because DJs and
+# dancers feel music in 8-bar phrases; changes that land on 8/16/32 bars feel
+# "right", changes anywhere else feel like a mistake.
+#
+# Map (bars are 1-based, as `tune info` prints them):
+#   1-16    intro         kick + closed hats only (DJ mixing room)
+#   17-32   intro_acid    the 303 creeps in, almost fully closed
+#   33-64   build         claps + open hats join, the filter opens up
+#   65-80   breakdown     kick out, resonance up: the 303 squeals alone
+#   81-96   drop          everything back in, filter wide, env mod up
+#   97-112  drop_peak     octave-jumping variation, filter nearly open
+#   113-128 outro         filter closes back down
+#   129-144 outro_drums   kick + closed hats only (DJ mixing room again)
+#
+# Levels: see the note at the end of the file.
+
+[song]
+version = 2
+name = "first-acid"
+# 145 BPM sits in the middle of the London/peak-time acid range (140-150):
+# fast enough to drive, slow enough that each 303 squelch has room to breathe.
+bpm = 145
+# All noise (hats, clap) is seeded from this, so every render is identical.
+seed = 1
+sample_rate = 48000
+
+# ---------------------------------------------------------------- tracks ----
+
+[tracks.kick]
+instrument = "kick"
+# The kick is the loudest thing in the mix; everything else sits around it.
+gain_db = -3
+# 49 Hz is G1, the fifth of our root note C. A kick tuned to the key (root or
+# fifth) blends with the bassline instead of fighting it in the low end.
+params = { "kick.tune" = 49 }
+play = [
+  { at = 1, clip = "kick4", bars = 16 },
+  { at = 17, clip = "kick4", bars = 16 },
+  { at = 33, clip = "kick4", bars = 32 },
+  { at = 81, clip = "kick4", bars = 16 },
+  { at = 97, clip = "kick4", bars = 16 },
+  { at = 113, clip = "kick4", bars = 16 },
+  { at = 129, clip = "kick4", bars = 16 },
+]
+
+[tracks.clap]
+instrument = "clap"
+gain_db = -9
+play = [
+  { at = 33, clip = "clap24", bars = 32 },
+  { at = 81, clip = "clap24", bars = 16 },
+  { at = 97, clip = "clap24", bars = 16 },
+  { at = 113, clip = "clap24", bars = 16 },
+]
+
+[tracks.hat_closed]
+instrument = "hat_closed"
+gain_db = -12
+# The two hats sit slightly left and right of centre so the top end feels
+# wide while the kick and the 303 stay solid in the middle.
+pan = -0.15
+play = [
+  { at = 1, clip = "hats8", bars = 16 },
+  { at = 17, clip = "hats8", bars = 16 },
+  { at = 33, clip = "hats8", bars = 32 },
+  { at = 65, clip = "hats8", bars = 16 },
+  { at = 81, clip = "hats8", bars = 16 },
+  { at = 97, clip = "hats8", bars = 16 },
+  { at = 113, clip = "hats8", bars = 16 },
+  { at = 129, clip = "hats8", bars = 16 },
+]
+
+[tracks.hat_open]
+instrument = "hat_open"
+gain_db = -11
+pan = 0.15
+play = [
+  { at = 33, clip = "open_off", bars = 32 },
+  { at = 81, clip = "open_off", bars = 16 },
+  { at = 97, clip = "open_off", bars = 16 },
+  { at = 113, clip = "open_off", bars = 16 },
+]
+
+[tracks.acid]
+instrument = "acid303"
+gain_db = -2
+# The voicing from the demo the producer liked:
+# - cutoff: only a fallback here. Every section the 303 plays in has its own
+#   cutoff automation below, and that wins. 350 Hz is "nearly closed".
+# - resonance 85 %: the whistling, rubbery peak that makes acid sound acid.
+#   Sections can push it higher (the breakdown does).
+# - env_mod 60 %: how far the filter jumps open on each note, the "wow".
+# - decay 400 ms: how fast that "wow" closes again. Short enough that each
+#   squelch finishes before the next kick, long enough to smear a little.
+# - accent 55 %: accented notes (the `!` steps) hit harder and brighter, and
+#   accents close together stack into a rising squelch.
+params = { "acid303.cutoff" = 350, "acid303.resonance" = 85, "acid303.env_mod" = 60, "acid303.decay" = 400, "acid303.accent" = 55 }
+# Soft distortion after the 303 adds grit and sustain, the harder 90s sound
+# (acid records often push the 303 through distortion). Drive 12 dB is "warm", not "fuzz".
+fx = [{ type = "distortion", mode = "soft", params = { "dist.drive" = 12 } }]
+play = [
+  { at = 17, clip = "acid_main", bars = 16 },
+  { at = 33, clip = "acid_main", bars = 32 },
+  { at = 65, clip = "acid_main", bars = 16 },
+  { at = 81, clip = "acid_main", bars = 16 },
+  { at = 97, clip = "acid_jump", bars = 16 },
+  { at = 113, clip = "acid_main", bars = 16 },
+]
+
+# -------------------------------------------------------------- patterns ----
+# Drum notation: `x` hit, `X` accented hit, `.` rest, one character per 16th.
+
+[clips.kick4]
+kind = "drum"
+# Four on the floor: one kick on every beat. The heartbeat of techno.
+steps = "x...x...x...x..."
+
+[clips.hats8]
+kind = "drum"
+# Closed hats on every 8th note, accented on the offbeats (the "and" between
+# kicks). The accents make the hats push and pull against the kick: the groove.
+steps = "x.X.x.X.x.X.x.X."
+
+[clips.open_off]
+kind = "drum"
+# Open hat exactly between the kicks: the classic "tss" offbeat that makes
+# people move. It fills the gap the kick leaves.
+steps = "..x...x...x...x."
+
+[clips.clap24]
+kind = "drum"
+# Claps on beats 2 and 4, the backbeat.
+steps = "....x.......x..."
+
+[clips.acid_main]
+kind = "acid"
+# The main 303 line (the demo line from `task demo`), in C minor. One token per 16th:
+# `!` accent, `~` slide into the next step, `.` rest.
+# - It keeps coming back to C2, the root, so the ear always knows "home".
+# - C3~ after an accented C2: an octave jump with a slide is the signature
+#   acid "bwow" bend.
+# - D#2, G2, A#1, F2 are notes of C minor; they add colour without harmony.
+# - The last step, F2~, slides into the next bar's first C2, so the loop
+#   glides into itself instead of starting over.
+steps = "C2 C2! C3~ C2 . D#2 C2~ G2! . C2 C3 C2~ A#1 C2! . F2~"
+
+[clips.acid_jump]
+kind = "acid"
+# The peak variation: nearly the same skeleton (still C2 on beat 1, the same
+# gaps on steps 5 and 9, F2~ at the end) but many notes jump up an octave.
+# Two slides go from high to low (D#3~ D#2, A#2~ A#1): long falling bends
+# that sound like the 303 is talking. The last gap (step 15) is filled with
+# an accented C3 (not a slide; the slide is the F2~ on step 16), so there are 4 accents
+# instead of 3 for more bite. Keeping the skeleton means the crowd hears
+# "the same tune, but it went off".
+steps = "C2 C3! C2~ C3 . D#3~ D#2 G2! . C2 C3! C2~ A#2~ A#1 C3! F2~"
+
+# -------------------------------------------------------------- sections ----
+# Automation points are [bar offset from the section start, normalized 0..1].
+# For cutoff, 0 is 314 Hz and 1 is 2394 Hz on an exponential curve, so
+# 0.12 ~ 400 Hz, 0.55 ~ 960 Hz, 0.80 ~ 1600 Hz, 0.95 ~ 2160 Hz.
+# Between points the value moves in a straight line. A section without a lane
+# for a knob falls back to the track's own value above.
+
+[[sections]]
+# 16 bars of just drums: a DJ needs a stretch with no bassline to beatmatch
+# and blend this track into the previous one without the two 303s clashing.
+name = "intro"
+bars = 16
+
+[[sections]]
+# The 303 sneaks in almost closed: you feel the rhythm and the squelch before
+# you hear the notes. Opening it only a little over 16 bars builds tension.
+name = "intro_acid"
+bars = 16
+
+[[automation]]
+param = "acid.acid303.cutoff"
+at = 17
+bars = 16
+points = [[0, 0.02], [16, 0.12]]
+
+[[automation]]
+# Held at 80 % so the resonance does not dip when the build starts at 0.80.
+param = "acid.acid303.resonance"
+at = 17
+bars = 16
+points = [[0, 0.80]]
+
+[[sections]]
+# The long build: claps and open hats arrive, and over 32 bars the cutoff
+# opens from ~400 Hz to ~960 Hz. This slow ramp IS the song: listen for the
+# line getting brighter and more aggressive bar by bar. Resonance creeps up
+# with it so the squelch gets sharper as it opens.
+name = "build"
+bars = 32
+
+[[automation]]
+param = "acid.acid303.cutoff"
+at = 33
+bars = 32
+points = [[0, 0.12], [32, 0.55]]
+
+[[automation]]
+param = "acid.acid303.resonance"
+at = 33
+bars = 32
+points = [[0, 0.80], [32, 0.85]]
+
+[[sections]]
+# Breakdown: the kick leaves, so the room suddenly feels empty. The cutoff
+# pulls back and closes slowly while resonance goes up to 95 %: the 303
+# whistles and squeals on its own. Taking the kick away makes the drop hit
+# twice as hard when it comes back.
+name = "breakdown"
+bars = 16
+
+[[automation]]
+param = "acid.acid303.cutoff"
+at = 65
+bars = 16
+points = [[0, 0.35], [16, 0.25]]
+
+[[automation]]
+param = "acid.acid303.resonance"
+at = 65
+bars = 16
+points = [[0, 0.95]]
+
+[[sections]]
+# The drop: everything back at once, and the filter jumps open to where the
+# build left off, then keeps opening. Env mod rises too, so every note's
+# "wow" gets bigger.
+name = "drop"
+bars = 16
+
+[[automation]]
+param = "acid.acid303.cutoff"
+at = 81
+bars = 16
+points = [[0, 0.55], [16, 0.80]]
+
+[[automation]]
+param = "acid.acid303.env_mod"
+at = 81
+bars = 16
+points = [[0, 0.60], [16, 0.70]]
+
+[[sections]]
+# The peak: the octave-jumping variation takes over and the filter opens
+# nearly all the way. This is the "hands in the air" moment of the track.
+name = "drop_peak"
+bars = 16
+
+[[automation]]
+param = "acid.acid303.cutoff"
+at = 97
+bars = 16
+points = [[0, 0.80], [16, 0.95]]
+
+[[automation]]
+# Holds the drop's final env mod (70 %) so the peak does not lose its "wow".
+param = "acid.acid303.env_mod"
+at = 97
+bars = 16
+points = [[0, 0.70]]
+
+[[sections]]
+# Outro: the main line comes back and the filter closes over 16 bars, from
+# bright to nearly shut: the build in reverse, so the energy winds down
+# smoothly for the DJ's next track.
+name = "outro"
+bars = 16
+
+[[automation]]
+param = "acid.acid303.cutoff"
+at = 113
+bars = 16
+points = [[0, 0.60], [16, 0.05]]
+
+[[sections]]
+# 16 bars of just drums again, the mirror of the intro, so a DJ can mix out.
+name = "outro_drums"
+bars = 16
+
+# Levels: measured at commit time on the full render (bars 1-144, 11 440 552 frames):
+# peak_dbfs = -2.57 and pre_clip_peak_dbfs = -2.10 with the starting gains
+# above (kick -3, clap -9, hat_closed -12, hat_open -11, acid -2), so no gain
+# change was needed. "Pre-clip" is the level before the master safety
+# clipper; keeping it below 0 dBFS means the clipper is not squashing the mix.
+# (The clipper starts rounding peaks gently above -6 dBFS; here that touches
+# about 0.3 % of samples, the tops of kick + 303 hits, which is harmless.)
