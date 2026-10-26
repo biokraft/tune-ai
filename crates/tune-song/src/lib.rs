@@ -4,11 +4,13 @@
 //! A song file is the shared source of truth that both the producer (through
 //! the app) and Claude (as text) edit, so [`parse`] reports every mistake
 //! at once, each with a 1-based `line:column`. It reads format versions 1
-//! and 2; [`Song::to_toml`] writes version 2.
+//! and 2; [`Song::to_toml`] writes version 2, and [`migrate`] rewrites a
+//! version 1 file as version 2, keeping its comments.
 
 #![forbid(unsafe_code)]
 
 mod error;
+mod migrate;
 mod model;
 mod raw;
 pub mod toml_doc;
@@ -19,6 +21,7 @@ mod write;
 use std::path::Path;
 
 pub use error::{LoadError, SongError};
+pub use migrate::{Migration, migrate};
 pub use model::{
     Clip, Device, Lane, MIX_TRACK_ID, MasterMode, Mix, MixUnit, Placement, Section, SectionPlay,
     Song, Track, find_mix_param, lane_value,
