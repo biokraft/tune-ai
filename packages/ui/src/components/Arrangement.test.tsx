@@ -794,12 +794,37 @@ describe("Arrangement ruler", () => {
     expect(onSeek).not.toHaveBeenCalled();
   });
 
-  it("a press on the cap that does not move leaves the playhead where it is", () => {
-    const { onSeek, onLoop } = setup(two(), { playhead: 4.5 });
-    fireEvent.pointerDown(cap(), { clientX: 54, pointerId: 1 });
-    fireEvent.pointerUp(cap(), { clientX: 54, pointerId: 1 });
-    expect(onSeek).not.toHaveBeenCalled();
+  it("a press on the cap that does not move seeks to the bar under the pointer, like the ruler", () => {
+    const { onSeek, onLoop } = setup(two(), { playhead: 4 });
+    // The cap's hit box straddles the bar line at 48 px: its left half lies in bar 3.
+    fireEvent.pointerDown(cap(), { clientX: 46, pointerId: 1 });
+    fireEvent.pointerUp(cap(), { clientX: 46, pointerId: 1 });
+    expect(onSeek).toHaveBeenLastCalledWith(3);
+    fireEvent.pointerDown(cap(), { clientX: 50, pointerId: 1 });
+    fireEvent.pointerMove(cap(), { clientX: 52, pointerId: 1 });
+    fireEvent.pointerUp(cap(), { clientX: 52, pointerId: 1 });
+    expect(onSeek).toHaveBeenLastCalledWith(4);
+    expect(onSeek).toHaveBeenCalledTimes(2);
     expect(onLoop).not.toHaveBeenCalled();
+  });
+
+  it("a still press on the cap measures from the ruler's left edge, so a scrolled timeline hits", () => {
+    const { onSeek } = setup(two(), { playhead: 10 });
+    const band = ruler().parentElement!;
+    vi.spyOn(band, "getBoundingClientRect").mockReturnValue({
+      left: -120,
+      top: 0,
+      right: 0,
+      bottom: 56,
+      width: 384,
+      height: 56,
+      x: -120,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    fireEvent.pointerDown(cap(), { clientX: 2, pointerId: 1 });
+    fireEvent.pointerUp(cap(), { clientX: 2, pointerId: 1 });
+    expect(onSeek).toHaveBeenCalledWith(10);
   });
 
   it("arrow keys on the cap step the playhead a bar, clamped, and leave the sections alone", async () => {

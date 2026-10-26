@@ -263,10 +263,13 @@ export function Arrangement(p: ArrangementProps) {
   const height = TOP + rowsH;
   const step = rulerStep(ppb);
   const playhead = capBar ?? p.playhead;
-  /** The bar line nearest the pointer, on the song's bars. */
-  const capBarAt = (clientX: number) => {
-    const left = band.current?.getBoundingClientRect().left ?? 0;
-    return clampBar(Math.round((clientX - left) / ppb), total);
+  /**
+   * The bar at a pointer's clientX, on the song's bars: the nearest bar line while dragging the
+   * playhead, or the bar under the pointer (as the ruler picks it) for a still press.
+   */
+  const capBarAt = (clientX: number, snap: CapSnap) => {
+    const bars = (clientX - (band.current?.getBoundingClientRect().left ?? 0)) / ppb;
+    return clampBar(snap === "nearest" ? Math.round(bars) : Math.floor(bars), total);
   };
 
   const bodyDown = (i: number, e: PointerEvent<SVGRectElement>) => {
@@ -743,6 +746,9 @@ const Ruler = memo(function Ruler({ laneW, ppb, step, loop, total, onSeek, onLoo
   );
 });
 
+/** How the cap turns a pointer into a bar: the nearest bar line, or the bar under it. */
+type CapSnap = "nearest" | "under";
+
 /** The cap's hit area, centred on the playhead; the visible tab inside it is smaller. */
 const CAP_W = 16;
 const CAP_TAB = 12;
@@ -753,8 +759,8 @@ type PlayheadCapProps = {
   /** The zero-based bar the playhead is in. */
   bar: number;
   total: number;
-  /** The bar line nearest a pointer's clientX. */
-  barAt(clientX: number): number;
+  /** The bar at a pointer's clientX: the nearest bar line, or the bar under it. */
+  barAt(clientX: number, snap: CapSnap): number;
   /** The bar the cap is dragged to, or null when the drag ends. */
   onDrag(bar: number | null): void;
   onSeek(bar: number): void;
@@ -762,7 +768,8 @@ type PlayheadCapProps = {
 
 /**
  * A grab tab on the playhead's top, in the ruler: drag it to move the playhead bar by bar (it
- * seeks on release), or focus it and step a bar with the arrow keys.
+ * seeks on release), or focus it and step a bar with the arrow keys. A click on it seeks to the
+ * bar under the pointer, as the ruler beneath it would.
  */
 function PlayheadCap({ x, bar, total, barAt, onDrag, onSeek }: PlayheadCapProps) {
   /** Where the drag started and the bar it has reached, if it has moved. */
@@ -782,7 +789,7 @@ function PlayheadCap({ x, bar, total, barAt, onDrag, onSeek }: PlayheadCapProps)
     const d = drag.current;
     if (!d) return;
     if (d.bar === null && Math.abs(e.clientX - d.x0) < DRAG_SLOP) return;
-    const next = barAt(e.clientX);
+    const next = barAt(e.clientX, "nearest");
     if (next === d.bar) return;
     d.bar = next;
     onDrag(next);
@@ -794,7 +801,8 @@ function PlayheadCap({ x, bar, total, barAt, onDrag, onSeek }: PlayheadCapProps)
     release(e);
     drag.current = null;
     onDrag(null);
-    if (d.bar !== null) onSeek(d.bar);
+    // A press that never became a drag is a click on the ruler under the cap: seek there.
+    onSeek(d.bar ?? barAt(e.clientX, "under"));
   };
   const cancel = (e: PointerEvent<HTMLDivElement>) => {
     if (!drag.current) return;
