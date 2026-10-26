@@ -10,8 +10,9 @@ and lock-free live playback) driven through the `tune` CLI.
   MCP, `cc` or `open303-ref` dependencies (`open303-ref` only as a dev-dependency).
 - `crates/tune-modules` - instrument and effect traits, today's modules and
   the registry; depends only on tune-dsp.
-- `crates/tune-song` - song file model: parse, validate (positional errors),
-  canonical write, file watcher. Headless.
+- `crates/tune-song` - song file model (format v2): parse, validate
+  (positional errors), canonical write, the comment-keeping migration of v1
+  files to v2, section operations, file watcher. Headless.
 - `crates/tune-engine` - compiles a song and renders it: offline (`render`) or
   live (`live`, lock-free swap for hot reload). Headless.
 - `crates/tune-studio` - the studio core: in-place song edits by path
@@ -61,22 +62,41 @@ Notation:
 - Acid pattern: one token per 16th. `C2` note, `.` rest, `!` accent,
   `~` slide into the next step (same pitch ties), e.g. `C2 C2! C3~ . D#2`.
 - Drum pattern: `x` hit, `X` accent, `.` rest, e.g. `x...x...x...X...`.
-- A section plays patterns per track (`play = { kick = "k4" }`); bars are
-  1-based and ranges inclusive in CLI flags.
-- Automation: `[[sections.automation]]` with `param = "<track>.<param id>"` and
-  `points = [[bar_offset, normalized_0_to_1], ...]`; offset 0 is the section
-  start.
+- Song format v2 (`version = 2` in `[song]`; a file without it is v1). Bars
+  are 1-based and ranges inclusive in CLI flags.
+- Clips: `[clips.<id>]` with `kind = "acid" | "drum"` and `steps`. An acid
+  clip plays on an instrument that plays acid, a drum clip on a drum module.
+- Placements: the track's `play = [{ at, clip, bars, offset }]`. `at` is the
+  1-based start bar, `offset` the bars into the clip (default 0). Keep them in
+  time order and never overlapping. Two placements whose offsets differ by a
+  clip length play the same but count as a change.
+- Sections: `[[sections]]` with `name` and `bars` (1 to 1024), laid end to end
+  from bar 1. They set the song length and hold no content.
+- Devices: a track's `instrument` (a module name, or a table with `type` and
+  optional `id`) and `fx` entries (`type`, optional `id`, settings such as
+  `mode`, `params`). The device id defaults to the module's prefix; a second
+  instance of a module needs an explicit `id`, e.g. `id = "eq2"`. Params are
+  keyed `<device id>.<param>`, e.g. `"eq2.low_cut"`.
+- Automation: `[[automation]]` with `param = "<track>.<device>.<param>"` (or
+  `<track>.send.delay`, `mix.<param id>`), `at`, `bars` and
+  `points = [[bar_offset, normalized_0_to_1], ...]`; offsets are relative to
+  `at`. Outside every stretch of a param, its static value plays.
+- `tune migrate <song>` rewrites a v1 file as v2, keeping comments. Every
+  other command reads a v1 file in memory and prints a `note:`. Migrating a
+  CRLF file produces LF line endings.
 - `tune params --json` is the source of param ids, ranges and units.
 
 ### Mixing
 
-Signal flow, fixed: instrument -> fx (distortion, eq) -> duck -> gain/pan ->
-sends -> delay and reverb buses -> master gain -> clip or limit.
+Signal flow: instrument -> fx chain (any effects, in order) -> duck ->
+gain/pan -> sends -> delay and reverb buses -> master gain -> clip or limit.
 
 - Strip params live in the track's `params` table: `send.delay`, `send.reverb`
   (dB, -60 = off), `duck.depth` (dB), `duck.release` (ms). EQ is an fx entry:
   `fx = [{ type = "eq", params = { "eq.low_cut" = 85 } }]`
-  (`eq.{low_cut,mid_freq,mid_gain,mid_q,high_gain,high_cut}`).
+  (`eq.{low_cut,mid_freq,mid_gain,mid_q,high_gain,high_cut}`). A second EQ
+  needs its own id and prefixes its params with it:
+  `fx = [{ type = "eq", params = { "eq.low_cut" = 85 } }, { type = "eq", id = "eq2", params = { "eq2.low_cut" = 120 } }]`.
 - `[mix]` holds the master mode, the duck source and the shared bus params
   (`delay.*`, `reverb.*`, `master.*`):
 
@@ -87,7 +107,7 @@ sends -> delay and reverb buses -> master gain -> clip or limit.
   params = { "delay.feedback" = 40, "reverb.size" = 30, "master.gain" = 6 }
   ```
 
-- Lanes: `<track>.send.delay` (delay throws), `<track>.duck.depth`,
+- Lane params: `<track>.<device>.<param>`, `<track>.send.delay` (delay throws), `<track>.duck.depth`,
   `mix.<param id>` (e.g. `param = "mix.reverb.size"`).
 - A delay/reverb bus is built only if some track sets `send.delay` /
   `send.reverb` explicitly (even at -60) or a lane drives it. Ducking follows
@@ -194,17 +214,21 @@ The producer may have the studio (app or browser) open on the same song.
   | --- | --- |
   | `song.bpm` | number |
   | `tracks.<t>.gain_db` / `pan` / `mute` / `solo` | dB / -1 to 1 / bool / bool |
-  | `tracks.<t>.<param id>` | plain value in the param's unit, e.g. `tracks.acid.acid303.cutoff=820`, `tracks.acid.dist.drive=18` |
-  | `tracks.<t>.dist.mode` | `soft`, `hard` or `overdrive` |
+  | `tracks.<t>.<device>.<param>` | plain value in the param's unit, e.g. `tracks.acid.acid303.cutoff=820`, `tracks.acid.dist.drive=18`, `tracks.acid.eq2.low_cut=200` |
+  | `tracks.<t>.<device>.mode` | a device setting, e.g. `tracks.acid.dist.mode`: `soft`, `hard` or `overdrive` |
   | `tracks.<t>.send.delay` / `send.reverb` / `duck.depth` / `duck.release` | dB / dB / dB / ms |
-  | `tracks.<t>.eq.<name>` | `low_cut`, `mid_freq`, `mid_gain`, `mid_q`, `high_gain`, `high_cut`; the track needs an `eq` fx entry |
+  | `tracks.<t>.eq.<name>` | `low_cut`, `mid_freq`, `mid_gain`, `mid_q`, `high_gain`, `high_cut`; the track needs an `eq` fx entry (a second one: `eq2.<name>`) |
   | `mix.<param id>` | `delay.*`, `reverb.*`, `master.gain` / `ceiling` / `release`, e.g. `mix.master.gain=6` |
   | `mix.master` | `clip` or `limit` |
   | `mix.duck_source` | track id; empty = first kick |
-  | `patterns.<p>.steps` | the pattern in notation, quoted |
-  | `sections[<i>].bars` / `name` | integer / string; `<i>` is 0-based |
-  | `sections[<i>].play.<t>` | pattern id, or empty to stop that track there |
-  | `tracks.<t>`, `sections`, `sections[<i>].lanes` | read-only (appear in `tune changes`) |
+  | `clips.<c>.steps` | the clip in notation, quoted (`patterns.<c>.steps` is still accepted) |
+  | `sections[<i>].name` | string; `<i>` is 0-based |
+  | `sections[<i>].bars` | integer, 1 to 1024; resizes the section: placements and stretches that ran to its end run to the new end (grow) or are cut at it (shrink), later ones move |
+  | `sections[<i>].play.<t>` | clip id: replaces what the track plays inside the section with one placement covering it; empty removes them |
+  | `tracks.<t>`, `sections`, `sections[<i>].lanes`, `song.version` | read-only (appear in `tune changes`) |
+
+  Section operations (`play`, `bars`) rewrite a track's `play` list and drop
+  the comments inside it.
 
 - To see the UI: `tune serve <song> --device null --port 4580` (in the
   background; `task ui:build` first), then drive Chrome with the
