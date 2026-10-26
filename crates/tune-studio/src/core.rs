@@ -483,19 +483,14 @@ impl StudioCore {
         }
     }
 
-    /// Whether `bar` (0-based) lies in a section with a lane for this
+    /// Whether `bar` (0-based) lies in a stretch of the lane for this
     /// track's `param`.
     pub fn is_automated(&self, track: &str, param: &str, bar: u32) -> bool {
-        let song = self.doc.song();
-        song.sections
+        self.doc
+            .song()
+            .automation
             .iter()
-            .zip(song.section_start_bars())
-            .find(|(s, start)| (*start..*start + s.bars).contains(&bar))
-            .is_some_and(|(s, _)| {
-                s.automation
-                    .iter()
-                    .any(|l| l.track == track && l.param == param)
-            })
+            .any(|l| l.track == track && l.param == param && l.span().contains(&bar))
     }
 
     /// The current song, pending edits included.

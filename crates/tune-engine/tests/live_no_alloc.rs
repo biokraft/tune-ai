@@ -17,7 +17,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Arc;
 
-use common::{MINI, MIXED, compile_song, compiled, song, variant_of};
+use common::{MINI, MIXED, compile_song, compiled, keep_sections, song, variant_of};
 use tune_dsp::{MASTER_GAIN, STRIP_SEND_DELAY};
 use tune_engine::{CompiledSong, Engine, LiveProcessor, MIX_TRACK, ParamTarget, SongUpdate, live};
 use tune_modules::{CLAP, EQ, KICK, ModuleDescriptor};
@@ -127,9 +127,6 @@ fn process_never_allocates_or_frees() {
     let mut b = song(MINI);
     b.tracks.shift_remove("hat");
     b.clips.shift_remove("h");
-    for s in &mut b.sections {
-        s.play.shift_remove("hat");
-    }
     b.tracks.get_mut("kick").unwrap().mute = true;
     b.tracks.get_mut("acid").unwrap().fx[0].settings[0] = "hard";
     b.tracks.insert(
@@ -142,7 +139,7 @@ fn process_never_allocates_or_frees() {
     let b = compile_song(&b);
     let a = compiled(MINI);
     let mut two_bars = song(MINI);
-    two_bars.sections.truncate(1);
+    keep_sections(&mut two_bars, 1);
     let two_bars = compile_song(&two_bars);
 
     let (mut ctl, mut p) = live(a.clone(), 0, None);

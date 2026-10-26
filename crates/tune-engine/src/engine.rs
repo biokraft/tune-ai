@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use tune_dsp::{ParamSpec, STRIP_PARAMS};
 use tune_modules::{Cell, Effect, Instrument, StepCtx};
+use tune_song::lane_value;
 
 use crate::clock::hit_seed;
 use crate::compile::{CompiledDevice, CompiledSong, CompiledTrack, MIX_TRACK, ParamTarget};
@@ -229,10 +230,10 @@ pub struct Engine {
     pos: u64,
     /// The next step to fire.
     step: u64,
-    /// Section of the last step fired.
-    section: usize,
+    /// Region of the last step fired.
+    region: usize,
     /// Set by `new`, `seek` and swaps: the next step re-applies static params
-    /// even if the section stays the same.
+    /// even if the region stays the same.
     needs_static: bool,
     /// Loop as half-open step range.
     looping: Option<(u64, u64)>,
@@ -284,7 +285,7 @@ impl Engine {
             tracks,
             pos: 0,
             step: 0,
-            section: 0,
+            region: 0,
             needs_static: true,
             looping: None,
             finished: false,
@@ -461,7 +462,7 @@ impl Engine {
         self.mix.reset();
         self.step = 16 * u64::from(bar);
         self.pos = self.song.clock.step_start(self.step);
-        self.section = section_of(&self.song, self.step);
+        self.region = region_of(&self.song, self.step);
         self.needs_static = true;
         self.finished = false;
     }
@@ -486,11 +487,11 @@ impl Engine {
     /// 1. When finished, write silence.
     /// 2. At a step boundary: wrap at the loop end (nothing is reset); finish
     ///    at the song end; re-apply static params (tracks, strips and mix) on
-    ///    a section change (or the first step after `new`/`seek`); apply the
-    ///    section's lanes for this sample; apply the knob overrides; fire
+    ///    a region change (or the first step after `new`/`seek`); apply the
+    ///    region's lanes for this sample; apply the knob overrides; fire
     ///    `on_step` on every track in order; if the duck source's cell at
     ///    this step is a hit (muted or not), trigger every track's ducker;
-    ///    advance the step. Elsewhere: apply the section's lanes, then the
+    ///    advance the step. Elsewhere: apply the region's lanes, then the
     ///    overrides, for this sample. Lanes and overrides run exactly once
     ///    per sample (overrides only when one is set), always before the
     ///    tracks' `on_step`, so a hit reads the overridden value.
@@ -555,16 +556,16 @@ impl Engine {
                 self.finished = true;
                 return self.silence(&mut stem);
             }
-            let section = section_of(song, self.step);
-            if section != self.section || self.needs_static {
+            let region = region_of(song, self.step);
+            if region != self.region || self.needs_static {
                 for (rt, track) in self.tracks.iter_mut().zip(&song.tracks) {
                     rt.apply_static(track);
                 }
                 self.mix.apply_static(&song.mix);
-                self.section = section;
+                self.region = region;
                 self.needs_static = false;
             }
-            apply_lanes(song, section, self.pos, &mut self.tracks, &mut self.mix);
+            apply_lanes(song, region, self.pos, &mut self.tracks, &mut self.mix);
             if self.overrides_active > 0 {
                 apply_overrides(&mut self.tracks, &mut self.mix);
             }
@@ -574,19 +575,19 @@ impl Engine {
                 Some((start, end)) if step + 1 == end => start,
                 _ => step + 1,
             };
-            let next_section = section_of(song, next_step);
+            let next_region = region_of(song, next_step);
             for (t, (rt, track)) in self.tracks.iter_mut().zip(&song.tracks).enumerate() {
-                let next = cell_at(song, next_section, t, next_step);
+                let next = cell_at(song, next_region, t, next_step);
                 let ctx = StepCtx {
                     step,
                     next_has_gate: matches!(next, Cell::Note(n) if n.note.is_some()),
                     gate_samples: self.gate_samples,
                     seed: hit_seed(track.seed, step),
                 };
-                rt.instrument.on_step(cell_at(song, section, t, step), &ctx);
+                rt.instrument.on_step(cell_at(song, region, t, step), &ctx);
             }
             if let Some(source) = song.mix.duck_source
-                && matches!(cell_at(song, section, source, step), Cell::Hit { .. })
+                && matches!(cell_at(song, region, source, step), Cell::Hit { .. })
             {
                 for rt in &mut self.tracks {
                     rt.strip.trigger_duck();
@@ -594,13 +595,7 @@ impl Engine {
             }
             self.step += 1;
         } else {
-            apply_lanes(
-                song,
-                self.section,
-                self.pos,
-                &mut self.tracks,
-                &mut self.mix,
-            );
+            apply_lanes(song, self.region, self.pos, &mut self.tracks, &mut self.mix);
             if self.overrides_active > 0 {
                 apply_overrides(&mut self.tracks, &mut self.mix);
             }
@@ -717,7 +712,7 @@ impl Engine {
             }
         }
         self.pos = song.clock.step_start(self.step);
-        self.section = section_of(song, self.step);
+        self.region = region_of(song, self.step);
     }
 
     fn silence(&self, stem: &mut impl FnMut(usize, f64, f64)) -> (f32, f32) {
@@ -758,28 +753,27 @@ impl Engine {
     }
 }
 
-/// Index of the section containing `step` (the last one for steps past the
-/// end), by binary search on section start steps.
-fn section_of(song: &CompiledSong, step: u64) -> usize {
-    song.sections
-        .partition_point(|s| 16 * u64::from(s.start_bar) <= step)
+/// Index of the region containing `step` (the last one for steps past the
+/// end), by binary search on region start steps.
+fn region_of(song: &CompiledSong, step: u64) -> usize {
+    song.regions
+        .partition_point(|r| 16 * u64::from(r.start_bar) <= step)
         .saturating_sub(1)
 }
 
-/// The cell track `t` plays at `step` in `section`: `Rest` when the section
-/// does not play the track or the step lies past the end; otherwise the
-/// pattern restarted at the section start.
-fn cell_at(song: &CompiledSong, section: usize, t: usize, step: u64) -> &Cell {
+/// The cell track `t` plays at `step` in `region`: `Rest` when no placement
+/// of the track covers the region or the step lies past the end; otherwise
+/// the clip looped from the placement's start, `offset_steps` in.
+fn cell_at(song: &CompiledSong, region: usize, t: usize, step: u64) -> &Cell {
     if step >= 16 * u64::from(song.total_bars) {
         return &REST;
     }
-    let s = &song.sections[section];
-    match s.play[t] {
+    match song.regions[region].cells[t] {
         None => &REST,
-        Some(p) => {
-            let pattern = &song.clips[p];
-            let offset = step - 16 * u64::from(s.start_bar);
-            &pattern[(offset % pattern.len() as u64) as usize]
+        Some(source) => {
+            let clip = &song.clips[source.clip];
+            let offset = step - source.start_step + source.offset_steps;
+            &clip[(offset % clip.len() as u64) as usize]
         }
     }
 }
@@ -792,21 +786,21 @@ fn apply_overrides(tracks: &mut [TrackRuntime], mix: &mut MixRuntime) {
     mix.apply_overrides();
 }
 
-/// Applies every lane of `section` at song sample `pos`.
+/// Applies every lane of `region` at song sample `pos`, each at its bar
+/// offset from its own stretch's start.
 fn apply_lanes(
     song: &CompiledSong,
-    section: usize,
+    region: usize,
     pos: u64,
     tracks: &mut [TrackRuntime],
     mix: &mut MixRuntime,
 ) {
-    let s = &song.sections[section];
-    if s.lanes.is_empty() {
+    let r = &song.regions[region];
+    if r.lanes.is_empty() {
         return;
     }
-    let start = song.clock.bar_start(s.start_bar);
-    let x = pos.saturating_sub(start) as f64 / (16.0 * song.clock.samples_per_step);
-    for lane in &s.lanes {
+    for lane in &r.lanes {
+        let x = pos.saturating_sub(lane.start_sample) as f64 / (16.0 * song.clock.samples_per_step);
         let plain = lane.spec.to_plain(lane_value(&lane.points, x));
         match lane.target {
             ParamTarget::Mix { unit, index } => mix.set_target(unit, index, plain),
@@ -815,42 +809,9 @@ fn apply_lanes(
     }
 }
 
-/// The normalized lane value at bar offset `x`: the first point's value
-/// before it, linear between points, the last point's value after it, and
-/// the later point where two share a bar.
-fn lane_value(points: &[(f64, f64)], x: f64) -> f64 {
-    let i = points.partition_point(|&(bar, _)| bar <= x);
-    if i == 0 {
-        return points[0].1;
-    }
-    if i == points.len() {
-        return points[i - 1].1;
-    }
-    let (b0, v0) = points[i - 1];
-    let (b1, v1) = points[i];
-    v0 + (v1 - v0) * (x - b0) / (b1 - b0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn lane_value_shapes() {
-        let ramp = [(0.0, 0.0), (1.0, 1.0)];
-        assert_eq!(lane_value(&ramp, 0.0), 0.0);
-        assert_eq!(lane_value(&ramp, 0.5), 0.5);
-        assert_eq!(lane_value(&ramp, 1.0), 1.0);
-        assert_eq!(lane_value(&ramp, 1.7), 1.0);
-        let single = [(0.5, 0.3)];
-        assert_eq!(lane_value(&single, 0.0), 0.3);
-        assert_eq!(lane_value(&single, 0.9), 0.3);
-        let jump = [(1.0, 0.2), (1.0, 0.9), (2.0, 0.5)];
-        assert_eq!(lane_value(&jump, 0.99), 0.2);
-        assert_eq!(lane_value(&jump, 1.0), 0.9);
-        assert!((lane_value(&jump, 1.5) - 0.7).abs() < 1e-15);
-        assert_eq!(lane_value(&jump, 3.0), 0.5);
-    }
 
     #[test]
     fn engine_is_send() {

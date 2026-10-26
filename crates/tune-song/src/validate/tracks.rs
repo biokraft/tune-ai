@@ -93,6 +93,8 @@ pub(super) fn track(
         pan: pan?,
         mute: t.mute.as_ref().is_some_and(|m| m.value),
         solo: t.solo.as_ref().is_some_and(|s| s.value),
+        // Filled in from the sections.
+        play: Vec::new(),
     })
 }
 

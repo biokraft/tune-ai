@@ -284,8 +284,12 @@ fn conflict_and_merge_together() {
 
     let ext = core.on_disk_text(text).expect("a change");
     assert_eq!(ext.offered.len(), 1);
-    assert_eq!(ext.merged.len(), 1);
-    assert_eq!(ext.merged[0].path, SongPath::SectionBars(0));
+    // The resize also moves section 1's lane stretch (its `at`).
+    let merged: Vec<&SongPath> = ext.merged.iter().map(|c| &c.path).collect();
+    assert_eq!(
+        merged,
+        [&SongPath::SectionBars(0), &SongPath::SectionLanes(1)]
+    );
     let now = disk(&s);
     assert!(
         now.contains("\"acid303.cutoff\" = 700") && now.contains("bars = 4"),

@@ -6,8 +6,8 @@ use tune_dsp::acid303::AcidPattern;
 use tune_dsp::drums::DrumPattern;
 use tune_modules::{ACID303, EQ, HAT_CLOSED, KICK, RIDE};
 use tune_song::{
-    Clip, ClipKind, Device, LoadError, MasterMode, Mix, MixUnit, Registry, Song, SongError,
-    load_song, parse_song, parse_song_with,
+    Clip, ClipKind, Device, Lane, LoadError, MasterMode, Mix, MixUnit, Placement, Registry,
+    SectionPlay, Song, SongError, lane_value, load_song, parse_song, parse_song_with,
 };
 
 const MINI: &str = include_str!("fixtures/mini.toml");
@@ -100,33 +100,101 @@ fn parses_mini() {
         Clip::Drum(DrumPattern::parse("..x...x...x...x.").unwrap())
     );
 
-    assert_eq!(song.sections.len(), 2);
-    let a = &song.sections[0];
-    assert_eq!((a.name.as_str(), a.bars), ("a", 2));
-    let play: Vec<(&str, &str)> = a
-        .play
+    let sections: Vec<(&str, u32)> = song
+        .sections
         .iter()
-        .map(|(t, p)| (t.as_str(), p.as_str()))
+        .map(|s| (s.name.as_str(), s.bars))
         .collect();
-    assert_eq!(play, [("kick", "k4"), ("hat", "h")]);
-    assert!(a.automation.is_empty());
-
-    let b = &song.sections[1];
-    assert_eq!((b.name.as_str(), b.bars), ("b", 2));
-    let play: Vec<(&str, &str)> = b
-        .play
-        .iter()
-        .map(|(t, p)| (t.as_str(), p.as_str()))
-        .collect();
-    assert_eq!(play, [("kick", "k4"), ("acid", "a1"), ("hat", "h")]);
-    assert_eq!(b.automation.len(), 1);
-    let lane = &b.automation[0];
-    assert_eq!(lane.track, "acid");
-    assert_eq!(lane.param, "acid303.cutoff");
-    assert_eq!(lane.points, [(0.0, 0.1), (2.0, 0.8)]);
+    assert_eq!(sections, [("a", 2), ("b", 2)]);
+    assert_eq!(song.section_play(0, "acid"), SectionPlay::Silent);
+    assert_eq!(song.section_play(1, "acid"), SectionPlay::Clip("a1"));
+    assert_eq!(song.section_play(0, "kick"), SectionPlay::Clip("k4"));
+    assert!(song.lanes_in(0).is_empty());
+    let lanes = song.lanes_in(1);
+    assert_eq!(lanes.len(), 1);
+    assert_eq!(lanes[0].track, "acid");
+    assert_eq!(lanes[0].param, "acid303.cutoff");
+    assert_eq!(lanes[0].points, [(0.0, 0.1), (2.0, 0.8)]);
 
     assert_eq!(song.total_bars(), 4);
     assert_eq!(song.section_start_bars(), [0, 2]);
+}
+
+#[test]
+fn v1_play_becomes_placements_and_lane_stretches() {
+    let song = mini();
+    let p = |start_bar, bars, clip: &str| Placement {
+        start_bar,
+        bars,
+        clip: clip.to_owned(),
+        offset_bars: 0,
+    };
+    assert_eq!(song.tracks["kick"].play, [p(0, 2, "k4"), p(2, 2, "k4")]);
+    assert_eq!(song.tracks["acid"].play, [p(2, 2, "a1")]);
+    assert_eq!(song.tracks["hat"].play, [p(0, 2, "h"), p(2, 2, "h")]);
+    assert_eq!(
+        song.automation,
+        [Lane {
+            track: "acid".into(),
+            param: "acid303.cutoff".into(),
+            start_bar: 2,
+            bars: 2,
+            points: vec![(0.0, 0.1), (2.0, 0.8)],
+        }]
+    );
+}
+
+#[test]
+fn section_play_and_lanes_derive_from_the_arrangement() {
+    let mut song = mini();
+    let acid = song.tracks.get_mut("acid").unwrap();
+    // Bar 3 only (inside section `b`, bars 2..4).
+    acid.play = vec![Placement {
+        start_bar: 2,
+        bars: 1,
+        clip: "a1".into(),
+        offset_bars: 0,
+    }];
+    match song.section_play(1, "acid") {
+        SectionPlay::Other(ps) => assert_eq!(ps, [&song.tracks["acid"].play[0]]),
+        other => panic!("expected Other, got {other:?}"),
+    }
+    assert_eq!(song.section_play(0, "acid"), SectionPlay::Silent);
+    // One placement over the whole song covers both sections.
+    song.tracks.get_mut("acid").unwrap().play = vec![Placement {
+        start_bar: 0,
+        bars: 4,
+        clip: "a1".into(),
+        offset_bars: 0,
+    }];
+    assert_eq!(song.section_play(0, "acid"), SectionPlay::Clip("a1"));
+    assert_eq!(song.section_play(1, "acid"), SectionPlay::Clip("a1"));
+    assert_eq!(song.section_play(1, "nope"), SectionPlay::Silent);
+
+    // A stretch over bars 1..3 overlaps both sections.
+    song.automation[0].start_bar = 1;
+    assert_eq!(song.lanes_in(0).len(), 1);
+    assert_eq!(song.lanes_in(1).len(), 1);
+    song.automation[0].start_bar = 0;
+    assert_eq!(song.lanes_in(0).len(), 1);
+    assert!(song.lanes_in(1).is_empty());
+}
+
+#[test]
+fn lane_value_shapes() {
+    let ramp = [(0.0, 0.0), (1.0, 1.0)];
+    assert_eq!(lane_value(&ramp, 0.0), 0.0);
+    assert_eq!(lane_value(&ramp, 0.5), 0.5);
+    assert_eq!(lane_value(&ramp, 1.0), 1.0);
+    assert_eq!(lane_value(&ramp, 1.7), 1.0);
+    let single = [(0.5, 0.3)];
+    assert_eq!(lane_value(&single, 0.0), 0.3);
+    assert_eq!(lane_value(&single, 0.9), 0.3);
+    let jump = [(1.0, 0.2), (1.0, 0.9), (2.0, 0.5)];
+    assert_eq!(lane_value(&jump, 0.99), 0.2);
+    assert_eq!(lane_value(&jump, 1.0), 0.9);
+    assert!((lane_value(&jump, 1.5) - 0.7).abs() < 1e-15);
+    assert_eq!(lane_value(&jump, 3.0), 0.5);
 }
 
 #[test]
@@ -170,7 +238,7 @@ fn lane_on_fx_param_resolves() {
         "param = \"acid.dist.drive\"",
     );
     let song = parse_song(&src).unwrap();
-    assert_eq!(song.sections[1].automation[0].param, "dist.drive");
+    assert_eq!(song.automation[0].param, "dist.drive");
 }
 
 /// Review Focus 5: many mistakes in one file (an unknown key typo, an error
@@ -443,7 +511,7 @@ fn mixed_fixture_parses() {
     assert_eq!(song.tracks["hat"].strip["send.reverb"], -20.0);
     assert_eq!(song.tracks["ride"].instrument.module, &RIDE);
 
-    let lanes: Vec<(&str, &str)> = song.sections[1]
+    let lanes: Vec<(&str, &str)> = song
         .automation
         .iter()
         .map(|l| (l.track.as_str(), l.param.as_str()))
@@ -502,7 +570,7 @@ fn lane_only_send_is_active() {
     );
     let song = must_parse(&src);
     assert!(!song.tracks["acid"].strip.contains_key("send.delay"));
-    assert_eq!(song.sections[1].automation[0].param, "send.delay");
+    assert_eq!(song.automation[0].param, "send.delay");
     assert!(song.bus_active(MixUnit::Delay));
     assert!(!song.bus_active(MixUnit::Reverb));
 }
@@ -713,7 +781,7 @@ fn second_eq_is_rejected() {
     );
     let song = must_parse(&lane);
     assert_eq!(song.tracks["acid"].fx, [Device::new("eq", &EQ)]);
-    assert_eq!(song.sections[1].automation[0].param, "eq.mid_gain");
+    assert_eq!(song.automation[0].param, "eq.mid_gain");
 }
 
 /// Review Focus 3: a lane on the duck source's own `duck.depth` would make

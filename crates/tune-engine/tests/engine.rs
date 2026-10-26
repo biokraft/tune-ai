@@ -391,7 +391,7 @@ param = "acid.acid303.cutoff"
 points = [[0, 0.5]]
 "#,
     );
-    let lanes = &s.sections[0].lanes;
+    let lanes = &s.regions[0].lanes;
     assert_eq!(lanes[0].track, 0);
     assert_eq!(lanes[0].target, ParamTarget::Fx { slot: 0, index: 0 });
     assert_eq!(lanes[0].spec.id, "dist.drive");
@@ -440,9 +440,6 @@ fn mute_and_solo() {
     let mut removed = base.clone();
     removed.tracks.shift_remove("kick");
     removed.clips.shift_remove("k4");
-    for section in &mut removed.sections {
-        section.play.shift_remove("kick");
-    }
     let s = compile_song(&removed);
     assert_eq!(s.track_index("kick"), None);
     let reference = run(&mut Engine::new(s), frames);

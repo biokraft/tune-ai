@@ -119,12 +119,14 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
                 let (a, b) = both(&p);
                 push(p, a, b);
             }
-            let plays = union(old.sections[i].play.keys(), new.sections[i].play.keys());
+            // Tracks in both songs, in the new song's order; one that is
+            // silent in both compares equal and is left out.
+            let plays = new.tracks.keys().filter(|t| old.tracks.contains_key(*t));
             for track in plays {
-                if !old.tracks.contains_key(&track) || !new.tracks.contains_key(&track) {
-                    continue;
-                }
-                let p = SongPath::SectionPlay { section: i, track };
+                let p = SongPath::SectionPlay {
+                    section: i,
+                    track: track.clone(),
+                };
                 let (a, b) = both(&p);
                 push(p, a, b);
             }

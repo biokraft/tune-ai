@@ -1,5 +1,7 @@
 //! The validated song model. Every map keeps song-file order.
 
+use std::ops::Range;
+
 use indexmap::IndexMap;
 use tune_dsp::acid303::AcidPattern;
 use tune_dsp::{
@@ -20,7 +22,10 @@ pub struct Song {
     pub tracks: IndexMap<String, Track>,
     /// The clip pool, in song-file order.
     pub clips: IndexMap<String, Clip>,
+    /// Named stretches laid end to end from bar 0; they set the song length.
     pub sections: Vec<Section>,
+    /// Every lane stretch, in song-file order.
+    pub automation: Vec<Lane>,
     /// The `[mix]` table: master mode, duck source and bus params.
     pub mix: Mix,
 }
@@ -66,12 +71,56 @@ impl Song {
             MixUnit::Master => return true,
         };
         self.tracks.values().any(|t| t.strip.contains_key(send))
-            || self.sections.iter().any(|s| {
-                s.automation
-                    .iter()
-                    .any(|l| l.track != MIX_TRACK_ID && l.param == send)
-            })
+            || self
+                .automation
+                .iter()
+                .any(|l| l.track != MIX_TRACK_ID && l.param == send)
     }
+
+    /// The 0-based bar range of section `section`. Panics when there is no
+    /// such section.
+    fn section_bars(&self, section: usize) -> Range<u32> {
+        let start = self.sections[..section].iter().map(|s| s.bars).sum::<u32>();
+        start..start + self.sections[section].bars
+    }
+
+    /// What track `track` plays in section `section`: nothing, one clip over
+    /// the whole section, or anything else (the placements that overlap
+    /// it, in time order). An unknown track is silent. Panics when there is
+    /// no such section.
+    pub fn section_play(&self, section: usize, track: &str) -> SectionPlay<'_> {
+        let bars = self.section_bars(section);
+        let Some(t) = self.tracks.get(track) else {
+            return SectionPlay::Silent;
+        };
+        let overlapping: Vec<&Placement> = t
+            .play
+            .iter()
+            .filter(|p| overlaps(&p.span(), &bars))
+            .collect();
+        match overlapping.as_slice() {
+            [] => SectionPlay::Silent,
+            [p] if p.start_bar <= bars.start && p.span().end >= bars.end => {
+                SectionPlay::Clip(&p.clip)
+            }
+            _ => SectionPlay::Other(overlapping),
+        }
+    }
+
+    /// The lane stretches that overlap section `section`, in file order.
+    /// Panics when there is no such section.
+    pub fn lanes_in(&self, section: usize) -> Vec<&Lane> {
+        let bars = self.section_bars(section);
+        self.automation
+            .iter()
+            .filter(|l| overlaps(&l.span(), &bars))
+            .collect()
+    }
+}
+
+/// Whether two half-open bar ranges share a bar.
+fn overlaps(a: &Range<u32>, b: &Range<u32>) -> bool {
+    a.start < b.end && b.start < a.end
 }
 
 /// The pseudo-track id that addresses the `[mix]` table (in lanes and paths).
@@ -214,6 +263,8 @@ pub struct Track {
     pub pan: f64,
     pub mute: bool,
     pub solo: bool,
+    /// Where the track plays which clip: in time order, never overlapping.
+    pub play: Vec<Placement>,
 }
 
 impl Track {
@@ -266,17 +317,45 @@ impl Clip {
     }
 }
 
-/// A stretch of the arrangement.
+/// One clip played on one track over a stretch of bars.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Placement {
+    /// 0-based.
+    pub start_bar: u32,
+    pub bars: u32,
+    pub clip: String,
+    /// Bars into the clip at which the placement starts playing it.
+    pub offset_bars: u32,
+}
+
+impl Placement {
+    /// The 0-based bars the placement covers.
+    pub fn span(&self) -> Range<u32> {
+        self.start_bar..self.start_bar + self.bars
+    }
+}
+
+/// A named stretch of the arrangement. Sections hold no content: they lay
+/// out the song's bars.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Section {
     pub name: String,
     pub bars: u32,
-    /// Track id to pattern id. A track missing here is silent in the section.
-    pub play: IndexMap<String, String>,
-    pub automation: Vec<Lane>,
 }
 
-/// A breakpoint line for one parameter within one section.
+/// What one track plays in one section (see [`Song::section_play`]).
+#[derive(Clone, Debug, PartialEq)]
+pub enum SectionPlay<'a> {
+    /// No placement overlaps the section.
+    Silent,
+    /// Exactly one placement overlaps the section and covers all of it.
+    Clip(&'a str),
+    /// Any other arrangement: the overlapping placements, in time order.
+    Other(Vec<&'a Placement>),
+}
+
+/// One stretch of one param's lane. Outside every stretch of its param the
+/// param has its static value.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Lane {
     /// A track id, or [`MIX_TRACK_ID`] for a mix param.
@@ -284,7 +363,34 @@ pub struct Lane {
     /// Full param id of the instrument, the strip or one of the track's fx;
     /// for the `mix` pseudo-track, a mix param id (`reverb.size`).
     pub param: String,
-    /// `(bar offset from the section start, normalized 0..=1 value)`, with
-    /// bar offsets that never decrease. Two equal bars form a jump.
+    /// 0-based.
+    pub start_bar: u32,
+    pub bars: u32,
+    /// `(bar offset from start_bar, normalized 0..=1 value)`, with bar
+    /// offsets that never decrease. Two equal bars form a jump.
     pub points: Vec<(f64, f64)>,
+}
+
+impl Lane {
+    /// The 0-based bars the stretch covers.
+    pub fn span(&self) -> Range<u32> {
+        self.start_bar..self.start_bar + self.bars
+    }
+}
+
+/// The normalized lane value at bar offset `x` of breakpoints `points`
+/// (bars never decreasing, at least one point): the first point's value
+/// before it, linear between points, the last point's value after it, and
+/// the later point where two share a bar.
+pub fn lane_value(points: &[(f64, f64)], x: f64) -> f64 {
+    let i = points.partition_point(|&(bar, _)| bar <= x);
+    if i == 0 {
+        return points[0].1;
+    }
+    if i == points.len() {
+        return points[i - 1].1;
+    }
+    let (b0, v0) = points[i - 1];
+    let (b1, v1) = points[i];
+    v0 + (v1 - v0) * (x - b0) / (b1 - b0)
 }
