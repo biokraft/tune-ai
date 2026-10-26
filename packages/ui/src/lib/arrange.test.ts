@@ -162,16 +162,15 @@ describe("loosePieces", () => {
     expect(loosePieces(at(18, 4, null), sections)).toEqual([[18, 22]]);
     expect(loosePieces(at(8, 16, null), sections)).toEqual([[8, 24]]);
   });
-  it("is nothing for a placement its sections show whole", () => {
+  it("is nothing for a placement its section shows whole", () => {
     expect(loosePieces(at(0, 16, 0), sections)).toEqual([]);
-    expect(loosePieces(at(0, 32, 0), sections)).toEqual([]);
+    expect(loosePieces(at(16, 16, 1), sections)).toEqual([]);
   });
-  it("is what sticks out past the sections that show it", () => {
+  it("is what runs past the end of the section that shows it", () => {
     expect(loosePieces(at(0, 20, 0), sections)).toEqual([[16, 20]]);
-    expect(loosePieces(at(12, 24, 1), sections)).toEqual([
-      [12, 16],
-      [32, 36],
-    ]);
+    // A later section plays it mid-clip, so it shows none of it.
+    expect(loosePieces(at(0, 32, 0), sections)).toEqual([[16, 32]]);
+    expect(loosePieces(at(16, 24, 1), sections)).toEqual([[32, 40]]);
   });
 });
 
