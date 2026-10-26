@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <title>TuneAI</title>
+  <defs>
+    <linearGradient id="tuneai-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2B1A4F"/>
+      <stop offset="1" stop-color="#0E0819"/>
+    </linearGradient>
+    <radialGradient id="tuneai-glow" cx=".25" cy=".15" r=".9">
+      <stop offset="0" stop-color="#7B3FD0" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#7B3FD0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="120" height="120" rx="28" fill="url(#tuneai-bg)"/>
+  <rect width="120" height="120" rx="28" fill="url(#tuneai-glow)"/>
+  <rect x=".5" y=".5" width="119" height="119" rx="27.5" fill="none" stroke="#FFFFFF" stroke-opacity=".12"/>
+  <g fill="#FFFFFF" fill-opacity=".08">
+    <rect x="19" y="41" width="16" height="16" rx="4"/>
+    <rect x="85" y="41" width="16" height="16" rx="4"/>
+    <rect x="19" y="63" width="16" height="16" rx="4"/>
+    <rect x="85" y="63" width="16" height="16" rx="4"/>
+    <rect x="19" y="85" width="16" height="16" rx="4"/>
+    <rect x="85" y="85" width="16" height="16" rx="4"/>
+  </g>
+  <g fill="#A8F04C">
+    <rect x="19" y="19" width="16" height="16" rx="4"/>
+    <rect x="41" y="19" width="16" height="16" rx="4"/>
+    <rect x="63" y="19" width="16" height="16" rx="4"/>
+    <rect x="41" y="41" width="16" height="16" rx="4"/>
+    <rect x="63" y="41" width="16" height="16" rx="4"/>
+    <rect x="41" y="63" width="16" height="16" rx="4"/>
+    <rect x="63" y="63" width="16" height="16" rx="4"/>
+    <rect x="41" y="85" width="16" height="16" rx="4"/>
+    <rect x="63" y="85" width="16" height="16" rx="4"/>
+  </g>
+  <rect x="85" y="19" width="16" height="16" rx="4" fill="#3FDCEB"/>
+</svg>
