@@ -31,6 +31,27 @@ export type PlacementView = {
   in_section: number | null;
 };
 
+/**
+ * The bars of placement `p` that no section's block shows, as half-open `[start, end)` ranges: all
+ * of it when no section shows it, else what sticks out past the sections it covers whole.
+ */
+export function loosePieces(p: PlacementView, sections: SectionView[]): [number, number][] {
+  const start = p.start_bar;
+  const end = p.start_bar + p.bars;
+  const covered =
+    p.in_section === null
+      ? []
+      : sections.filter((s) => s.start_bar >= start && s.start_bar + s.bars <= end);
+  const first = covered[0];
+  const last = covered[covered.length - 1];
+  if (!first || !last) return [[start, end]];
+  const pieces: [number, number][] = [
+    [start, first.start_bar],
+    [last.start_bar + last.bars, end],
+  ];
+  return pieces.filter(([a, b]) => b > a);
+}
+
 /** Bar width when nothing is measured (jsdom, first paint). */
 export const PX_PER_BAR = 12;
 /** Fit-to-width limits: long songs scroll below the floor, short ones stop growing at the cap. */
@@ -89,16 +110,32 @@ export function formatTime(bar: number, beat: number, bpm: number): string {
 }
 
 /**
- * Lane points as drawn: x clamped to the section, held flat from the section
- * start to the first point and from the last point to the section end, like
- * the engine. A single point becomes a flat line across the section.
+ * The lane's value at bar `x` of `points` (bars never decreasing), as the engine reads it: the
+ * first point's value before it, linear between points, the last point's value after it, and the
+ * later point where two share a bar.
  */
-export function holdPoints(points: [number, number][], bars: number): [number, number][] {
-  if (points.length === 0) return [];
-  const pts = points.map(([x, v]): [number, number] => [Math.min(bars, Math.max(0, x)), v]);
-  const first = pts[0]!;
-  const last = pts[pts.length - 1]!;
-  if (first[0] > 0) pts.unshift([0, first[1]]);
-  if (last[0] < bars) pts.push([bars, last[1]]);
-  return pts;
+export function laneValue(points: [number, number][], x: number): number {
+  let i = 0;
+  while (i < points.length && points[i]![0] <= x) i += 1;
+  if (i === 0) return points[0]![1];
+  if (i === points.length) return points[i - 1]![1];
+  const [b0, v0] = points[i - 1]!;
+  const [b1, v1] = points[i]!;
+  return v0 + ((v1 - v0) * (x - b0)) / (b1 - b0);
+}
+
+/**
+ * Lane points as drawn over a stretch's part of a section, `[from, to]` in bars from the section
+ * start: the value at `from`, the points strictly inside, then the value at `to`. Before the
+ * first point and after the last the value holds flat, like the engine, so a single point is a
+ * flat line across the part.
+ */
+export function holdPoints(
+  points: [number, number][],
+  from: number,
+  to: number,
+): [number, number][] {
+  if (points.length === 0 || !(to > from)) return [];
+  const inside = points.filter(([x]) => x > from && x < to);
+  return [[from, laneValue(points, from)], ...inside, [to, laneValue(points, to)]];
 }

@@ -16,8 +16,10 @@ import {
   gridBars,
   HEADER_W,
   holdPoints,
+  loosePieces,
   rulerStep,
   snapBars,
+  type PlacementView,
   type SectionView,
 } from "../lib/arrange";
 import { instrumentTitle, trackColor, trackColorVar } from "../lib/instruments";
@@ -26,7 +28,14 @@ import { MuteSolo } from "./MuteSolo";
 
 export type { SectionView } from "../lib/arrange";
 
-export type ArrangementTrack = { id: string; instrument: string; mute: boolean; solo: boolean };
+export type ArrangementTrack = {
+  id: string;
+  instrument: string;
+  mute: boolean;
+  solo: boolean;
+  /** What the track plays; the bars no section's block shows draw as plain read-only blocks. */
+  placements?: PlacementView[];
+};
 
 /** A pattern as its block draws it: one glyph value per step (rest 0, hit or note 0.6, accent 1). */
 export type ArrangementPattern = {
@@ -1015,7 +1024,9 @@ type BlocksProps = Pick<
 /**
  * A block per section and track that plays a pattern: the track colour, the pattern's glyph, its
  * id and a `×N` badge when N sections play it. An empty cell shows a dashed outline on hover.
- * Both show the track in the dock on that section, never closing it. Memoised away from the
+ * Both show the track in the dock on that section, never closing it. The bars of a placement that
+ * no section shows (it does not line up with sections) are plain read-only blocks over the empty
+ * cells, labelled with the clip id; clicks pass through them to the cells. Memoised away from the
  * playhead.
  */
 const Blocks = memo(function Blocks({
@@ -1040,7 +1051,30 @@ const Blocks = memo(function Blocks({
         if (r.kind !== "track") return null;
         const t = r.track;
         const c = trackColorVar(t.instrument);
-        return sections.map((s, i) => {
+        const loose = (t.placements ?? []).flatMap((pl) =>
+          loosePieces(pl, sections).map(([from, to]) => (
+            <div
+              key={`loose:${from}:${t.id}`}
+              role="img"
+              aria-label={`${pl.clip}, bars ${from + 1}–${to}, read only`}
+              title={pl.clip}
+              className="pointer-events-none absolute overflow-hidden rounded-rs"
+              style={{
+                left: from * ppb + INSET,
+                top: TOP + r.y + INSET,
+                width: Math.max(0, (to - from) * ppb - 2 * INSET),
+                height: ROW_H - 2 * INSET,
+                background: `rgb(var(${c}) / .1)`,
+                boxShadow: `inset 0 0 0 1px rgb(var(${c}) / .35)`,
+              }}
+            >
+              <span className="absolute left-1.5 right-1.5 top-[3px] truncate text-[10.5px] font-bold leading-[14px] text-ink2">
+                {pl.clip}
+              </span>
+            </div>
+          )),
+        );
+        const cells = sections.map((s, i) => {
           const id = s.play[t.id];
           const w = Math.max(0, widthOf(s, i, drag, ppb) - 2 * INSET);
           const h = ROW_H - 2 * INSET;
@@ -1132,6 +1166,7 @@ const Blocks = memo(function Blocks({
             </button>
           );
         });
+        return [...cells, ...loose];
       })}
     </>
   );
@@ -1223,7 +1258,7 @@ const LaneOverlay = memo(function LaneOverlay({
                     stroke={r.color}
                     strokeOpacity={0.85}
                     strokeWidth={1.25}
-                    points={holdPoints(l.points, s.bars)
+                    points={holdPoints(l.points, l.from, l.to)
                       .map(([bar, v]) => {
                         const y = top + LANE_H - 3 - Math.min(1, Math.max(0, v)) * (LANE_H - 6);
                         return `${(s.start_bar + bar) * ppb},${y}`;
