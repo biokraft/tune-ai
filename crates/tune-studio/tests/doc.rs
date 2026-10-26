@@ -490,15 +490,53 @@ fn section_ops_keep_every_comment() {
             d.set(&path("sections[1].play.kick"), &Value::Null)
         }),
     ];
-    for (name, op) in ops {
-        let mut d = doc();
-        op(&mut d).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let text = d.text();
-        assert_ne!(text, COMMENTED, "{name} changed nothing");
-        for c in comment_lines(COMMENTED) {
-            assert!(text.contains(c), "{name} lost `{c}`:\n{text}");
+    // The fixture, and the fixture with a commented stretch across the
+    // `a`/`b` edge, which most ops split there.
+    let crossing = COMMENTED.replacen(
+        "[[sections]]\nname = \"a\"\nbars = 2\n",
+        "[[sections]]\nname = \"a\"\nbars = 2\n\n\
+         # a sweep across the edge\n[[automation]] # on the header\n\
+         param = \"acid.acid303.resonance\" # the param\nat = 2 # starts in a\n\
+         bars = 2 # ends in b\npoints = [[0, 0.2], [2, 0.6]] # it rises\n",
+        1,
+    );
+    assert_ne!(crossing, COMMENTED);
+    for src in [COMMENTED, crossing.as_str()] {
+        for (name, op) in ops {
+            let mut d = SongDoc::parse(src).unwrap();
+            op(&mut d).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let text = d.text();
+            assert_ne!(text, src, "{name} changed nothing");
+            for c in comment_lines(src) {
+                assert!(text.contains(c), "{name} lost `{c}`:\n{text}");
+            }
         }
     }
+}
+
+/// A stretch whose first piece an op drops keeps its table, comments
+/// included, for the piece that is left.
+#[test]
+fn a_cut_stretch_keeps_its_table() {
+    let src = COMMENTED.replacen(
+        "[[sections]]\nname = \"a\"\nbars = 2\n",
+        "[[sections]]\nname = \"a\"\nbars = 2\n\n\
+         # a sweep across the edge\n[[automation]] # on the header\n\
+         param = \"acid.acid303.resonance\" # the param\nat = 2 # starts in a\n\
+         bars = 2 # ends in b\npoints = [[0, 0.2], [2, 0.6]] # it rises\n",
+        1,
+    );
+    let mut d = SongDoc::parse(&src).unwrap();
+    d.delete_section(0).unwrap();
+    assert!(
+        d.text().contains(
+            "# a sweep across the edge\n[[automation]] # on the header\n\
+             param = \"acid.acid303.resonance\" # the param\nat = 1 # starts in a\n\
+             bars = 1 # ends in b\npoints = [[0, 0.4], [1, 0.6]] # it rises\n"
+        ),
+        "{}",
+        d.text()
+    );
 }
 
 #[test]
