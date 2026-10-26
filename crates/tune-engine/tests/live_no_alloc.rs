@@ -1,9 +1,9 @@
 //! Proves `LiveProcessor::process` and `Engine::process` neither allocate
 //! nor free memory, even across blocks that apply a swap (one that keeps the
 //! mix, one that rebuilds the delay for a new bpm, master-mode switches that
-//! crossfade between the clipper and the limiter, and swaps that add, reorder
-//! or replace devices), a seek, a loop wrap, the song end and knob overrides
-//! on tracks, strips and the mix.
+//! crossfade between the clipper and the limiter, and swaps that add,
+//! reorder, replace or remove devices), a seek, a loop wrap, the song end and
+//! knob overrides on tracks, strips and the mix.
 //!
 //! A counting global allocator counts every allocation, reallocation and
 //! deallocation made while the thread-local "audio" flag is set. The flag is
@@ -229,6 +229,13 @@ fn process_never_allocates_or_frees() {
         assert_eq!(ctl.swaps_applied(), 6 + i as u64);
         assert_eq!(ctl.collect_garbage(), 1);
     }
+
+    // Back to plain `mini`: the acid's and the kick's eq are removed and
+    // the kick is a kick again.
+    ctl.swap(a.clone()).unwrap();
+    audio(&mut p, &mut out, STEP, 512);
+    assert_eq!(ctl.swaps_applied(), 9);
+    assert_eq!(ctl.collect_garbage(), 1);
 
     assert_no_alloc();
 }
