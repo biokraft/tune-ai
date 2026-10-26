@@ -49,6 +49,7 @@
       "cmd": "set_fx_mode",
       "args": {
         "track": "acid",
+        "device": "dist",
         "mode": "hard"
       }
     },

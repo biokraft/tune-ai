@@ -20,7 +20,8 @@ export type Command =
       cmd: "set_param";
       args: { track: string; param: string; value: number; commit: boolean };
     }
-  | { cmd: "set_fx_mode"; args: { track: string; mode: string } }
+  /** Sets the mode of the track's fx device `device` (its id, e.g. `dist`). */
+  | { cmd: "set_fx_mode"; args: { track: string; device: string; mode: string } }
   | {
       cmd: "set_acid_step";
       args: {
