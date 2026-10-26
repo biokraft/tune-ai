@@ -862,7 +862,13 @@ function PlayheadCap({ x, bar, total, barAt, onDrag, onDrop, onSeek }: PlayheadC
         "pointer-events-auto absolute left-0 top-0 z-10 flex cursor-ew-resize touch-none justify-center rounded-sm",
         focusRing,
       )}
-      style={{ width: CAP_W, height: RULER_H, transform: `translateX(${x - CAP_W / 2}px)` }}
+      // Moved by transform on its own composited layer every tick, like the playhead line.
+      style={{
+        width: CAP_W,
+        height: RULER_H,
+        transform: `translateX(${x - CAP_W / 2}px)`,
+        willChange: "transform",
+      }}
       onPointerDown={down}
       onPointerMove={move}
       onPointerUp={up}

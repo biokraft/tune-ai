@@ -739,6 +739,10 @@ describe("Arrangement ruler", () => {
     expect(c).toHaveAttribute("aria-valuenow", "5");
     expect(c).toHaveAttribute("tabindex", "0");
     expect(c).toHaveClass("cursor-ew-resize", "pointer-events-auto");
+    // It rides the playhead by transform on its own layer, like the playhead line.
+    expect(c.style.transform).toBe(`translateX(${4.5 * 12 - 8}px)`);
+    expect(c.style.willChange).toBe("transform");
+    expect(c.getAttribute("style")).not.toMatch(/filter/);
   });
 
   it("dragging the cap moves the playhead bar by bar, ignores ticks, and seeks on release", () => {
