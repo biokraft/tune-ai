@@ -97,6 +97,8 @@ export type FxView = { kind: string; mode: string; modes: string[]; params: Para
 export type TrackView = {
   id: string;
   instrument: string;
+  /** The clip kinds the instrument plays (`"acid"`, `"drum"`). */
+  plays: string[];
   gain_db: number;
   pan: number;
   mute: boolean;
@@ -124,8 +126,8 @@ export type MixView = {
 };
 
 export type PatternView =
-  | { kind: "acid"; id: string; track: string; steps: AcidStep[] }
-  | { kind: "drum"; id: string; track: string; hits: DrumHit[] };
+  | { kind: "acid"; id: string; steps: AcidStep[] }
+  | { kind: "drum"; id: string; hits: DrumHit[] };
 
 export type SongView = {
   name: string;

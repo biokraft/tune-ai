@@ -89,7 +89,6 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
     () =>
       song.patterns.map((p) => ({
         id: p.id,
-        track: p.track,
         kind: p.kind,
         glyph: patternGlyph(p),
       })),

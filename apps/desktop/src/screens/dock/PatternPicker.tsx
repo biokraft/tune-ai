@@ -20,9 +20,10 @@ const option = cn(
   focusRing,
 );
 
-/** Which of the track's patterns the section plays: the pattern list, plus "None". */
+/** Which clip the track plays in the section: the clips its instrument can play, plus "None". */
 export function PatternPicker({ song, track, section, onPick }: PatternPickerProps) {
   const [open, setOpen] = useState(false);
+  const plays = song.tracks.find((t) => t.id === track)?.plays ?? [];
   const current = song.sections[section]?.play[track];
   const pick = (pattern: string | null) => {
     onPick(pattern);
@@ -58,7 +59,7 @@ export function PatternPicker({ song, track, section, onPick }: PatternPickerPro
           className="glass-solid z-50 flex w-40 flex-col gap-1 rounded-rs p-2 text-ink"
         >
           {song.patterns
-            .filter((p) => p.track === track)
+            .filter((p) => plays.includes(p.kind))
             .map((p) => (
               <button
                 key={p.id}

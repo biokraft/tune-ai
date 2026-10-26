@@ -777,7 +777,7 @@ fn cell_at(song: &CompiledSong, section: usize, t: usize, step: u64) -> &Cell {
     match s.play[t] {
         None => &REST,
         Some(p) => {
-            let pattern = &song.patterns[p];
+            let pattern = &song.clips[p];
             let offset = step - 16 * u64::from(s.start_bar);
             &pattern[(offset % pattern.len() as u64) as usize]
         }

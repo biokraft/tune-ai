@@ -62,7 +62,6 @@ describe("patternGlyph", () => {
       patternGlyph({
         kind: "drum",
         id: "k",
-        track: "kick",
         hits: hits as ("rest" | "hit" | "accent")[],
       }),
     ).toEqual([0.6, 0, 0, 0, 1, 0, 0, 0]);
@@ -76,7 +75,6 @@ describe("patternGlyph", () => {
       patternGlyph({
         kind: "acid",
         id: "a",
-        track: "acid",
         steps: [c2, rest, { ...c2, accent: true }, rest],
       }),
     ).toEqual([0.6, 0, 1, 0]);

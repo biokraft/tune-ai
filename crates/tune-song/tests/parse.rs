@@ -6,7 +6,7 @@ use tune_dsp::acid303::AcidPattern;
 use tune_dsp::drums::DrumPattern;
 use tune_modules::{ACID303, EQ, HAT_CLOSED, KICK, RIDE};
 use tune_song::{
-    ClipKind, Device, LoadError, MasterMode, Mix, MixUnit, PatternSteps, Registry, Song, SongError,
+    Clip, ClipKind, Device, LoadError, MasterMode, Mix, MixUnit, Registry, Song, SongError,
     load_song, parse_song, parse_song_with,
 };
 
@@ -85,21 +85,19 @@ fn parses_mini() {
     assert_eq!(hat.gain_db, -10.0);
     assert_eq!(hat.pan, 0.3);
 
-    let pids: Vec<&str> = song.patterns.keys().map(String::as_str).collect();
+    let pids: Vec<&str> = song.clips.keys().map(String::as_str).collect();
     assert_eq!(pids, ["k4", "a1", "h"]);
-    assert_eq!(song.patterns["k4"].track, "kick");
     assert_eq!(
-        song.patterns["k4"].steps,
-        PatternSteps::Drum(DrumPattern::parse("x...x...x...X...").unwrap())
-    );
-    assert_eq!(song.patterns["a1"].track, "acid");
-    assert_eq!(
-        song.patterns["a1"].steps,
-        PatternSteps::Acid(AcidPattern::parse("C2 C2! C3~ C2 . D#2 C2~ G2!").unwrap())
+        song.clips["k4"],
+        Clip::Drum(DrumPattern::parse("x...x...x...X...").unwrap())
     );
     assert_eq!(
-        song.patterns["h"].steps,
-        PatternSteps::Drum(DrumPattern::parse("..x...x...x...x.").unwrap())
+        song.clips["a1"],
+        Clip::Acid(AcidPattern::parse("C2 C2! C3~ C2 . D#2 C2~ G2!").unwrap())
+    );
+    assert_eq!(
+        song.clips["h"],
+        Clip::Drum(DrumPattern::parse("..x...x...x...x.").unwrap())
     );
 
     assert_eq!(song.sections.len(), 2);
@@ -854,4 +852,23 @@ fn device_rules_name_what_is_allowed() {
         "fx = [{ type = \"distortion\", mode = \"hard\" }]",
     ));
     assert_eq!(hard.tracks["acid"].fx[0].settings, ["hard"]);
+}
+
+#[test]
+fn patterns_become_clips_with_kinds() {
+    let song = mini();
+    let ids: Vec<&str> = song.clips.keys().map(String::as_str).collect();
+    assert_eq!(ids, ["k4", "a1", "h"]);
+    let kinds: Vec<ClipKind> = song.clips.values().map(Clip::kind).collect();
+    assert_eq!(kinds, [ClipKind::Drum, ClipKind::Acid, ClipKind::Drum]);
+    assert_eq!(song.clips["k4"].steps_text(), "x... x... x... X...");
+}
+
+#[test]
+fn the_v1_writer_names_the_playing_track_as_owner() {
+    let song = mini();
+    let again = parse_song(&song.to_toml()).unwrap();
+    assert_eq!(again, song);
+    // `h` is played by the hat track, not the first drum track.
+    assert!(song.to_toml().contains("[patterns.h]\ntrack = \"hat\""));
 }

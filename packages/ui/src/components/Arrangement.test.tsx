@@ -36,9 +36,9 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
           { id: "drums", instrument: "drums", mute: false, solo: false },
         ]}
         patterns={[
-          { id: "a1", track: "acid", kind: "acid", glyph: [0.6, 0, 1, 0] },
-          { id: "a2", track: "acid", kind: "acid", glyph: [1, 1] },
-          { id: "d1", track: "drums", kind: "drum", glyph: [0.6, 0, 0, 0, 1, 0, 0, 0] },
+          { id: "a1", kind: "acid", glyph: [0.6, 0, 1, 0] },
+          { id: "a2", kind: "acid", glyph: [1, 1] },
+          { id: "d1", kind: "drum", glyph: [0.6, 0, 0, 0, 1, 0, 0, 0] },
         ]}
         playhead={0}
         selected={null}

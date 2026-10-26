@@ -103,7 +103,7 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
         }
     }
 
-    for name in union(old.patterns.keys(), new.patterns.keys()) {
+    for name in union(old.clips.keys(), new.clips.keys()) {
         let p = SongPath::Pattern { pattern: name };
         let (a, b) = both(&p);
         push(p, a, b);

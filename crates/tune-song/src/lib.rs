@@ -18,8 +18,8 @@ use std::path::Path;
 
 pub use error::{LoadError, SongError};
 pub use model::{
-    Device, Lane, MIX_TRACK_ID, MasterMode, Mix, MixUnit, Pattern, PatternSteps, Section, Song,
-    Track, find_mix_param,
+    Clip, Device, Lane, MIX_TRACK_ID, MasterMode, Mix, MixUnit, Section, Song, Track,
+    find_mix_param,
 };
 pub use tune_modules::{ClipKind, ModuleDescriptor, Registry, SettingSpec};
 pub use watch::{RawReload, Reload, SongWatcher};
