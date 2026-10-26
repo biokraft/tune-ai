@@ -427,17 +427,21 @@ fn locate<'p>(track: &Track, id: &'p str) -> Option<Target<'p>> {
     on(Home::Fx(slot))
 }
 
-/// Whether some module, under its default device id, has this param or
-/// setting (`dist.drive`, `dist.mode`).
+/// Whether `<device id>.<name>` names a param or setting of some module
+/// under a device id that module's devices get: its prefix, or the prefix
+/// and a number as `Track::next_device_id` hands out (`dist.drive`,
+/// `eq2.low_cut`).
 fn is_known_param(id: &str) -> bool {
-    let Some((prefix, name)) = id.split_once('.') else {
+    let Some((device, name)) = id.split_once('.') else {
         return false;
     };
     let registry = Registry::builtin();
-    registry
-        .instruments()
-        .chain(registry.effects())
-        .any(|m| m.prefix == prefix && (m.param(name).is_some() || m.setting(name).is_some()))
+    registry.instruments().chain(registry.effects()).any(|m| {
+        let numbered = device
+            .strip_prefix(m.prefix)
+            .is_some_and(|n| n.is_empty() || n.parse::<u32>().is_ok_and(|n| n >= 2));
+        numbered && (m.param(name).is_some() || m.setting(name).is_some())
+    })
 }
 
 /// Applies one `set` to `doc`, using `song` (which `doc` describes) to find
