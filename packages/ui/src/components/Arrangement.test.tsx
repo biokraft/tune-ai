@@ -782,6 +782,23 @@ describe("Arrangement ruler", () => {
     expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(9 * 12));
   });
 
+  it("a press on the cap never reaches the ruler: no loop, and only the cap's own seek", () => {
+    const { onSeek, onLoop } = setup(two(), { playhead: 4 });
+    const heard = vi.fn();
+    ruler().addEventListener("pointerdown", heard);
+    // A drag on the cap across the ruler moves the playhead; it never marks a loop.
+    fireEvent.pointerDown(cap(), { clientX: 48, pointerId: 1 });
+    fireEvent.pointerMove(cap(), { clientX: 120, pointerId: 1 });
+    expect(screen.queryByTestId("loop-preview")).toBeNull();
+    fireEvent.pointerUp(cap(), { clientX: 120, pointerId: 1 });
+    // A still press seeks once, from the cap.
+    fireEvent.pointerDown(cap(), { clientX: 50, pointerId: 1 });
+    fireEvent.pointerUp(cap(), { clientX: 50, pointerId: 1 });
+    expect(heard).not.toHaveBeenCalled();
+    expect(onLoop).not.toHaveBeenCalled();
+    expect(onSeek.mock.calls).toEqual([[10], [4]]);
+  });
+
   it("a lost pointer capture mid cap-drag ends the drag: the playhead follows ticks again", () => {
     const { onSeek, update } = setup(two(), { playhead: 4.5 });
     fireEvent.pointerDown(cap(), { clientX: 54, pointerId: 1 });

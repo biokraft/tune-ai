@@ -13,6 +13,7 @@ import { cn } from "../lib/utils";
 import {
   dropIndex,
   fitPxPerBar,
+  gridBars,
   HEADER_W,
   holdPoints,
   rulerStep,
@@ -565,13 +566,6 @@ export function Arrangement(p: ArrangementProps) {
       </div>
     </div>
   );
-}
-
-/** Bars with a ruler label (and a grid line), from 0 up to but not including `bars`. */
-function gridBars(bars: number, step: number): number[] {
-  const out: number[] = [];
-  for (let b = 0; b < bars - 1e-9; b += step) out.push(b);
-  return out;
 }
 
 /** The loop range as a faint white band with 1 px white edges. */

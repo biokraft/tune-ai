@@ -28,6 +28,13 @@ export function rulerStep(pxPerBar: number): number {
   return Math.ceil(40 / pxPerBar / 16) * 16;
 }
 
+/** Bars with a ruler label (and a grid line), from 0 up to but not including `bars`. */
+export function gridBars(bars: number, step: number): number[] {
+  const out: number[] = [];
+  for (let b = 0; b < bars - 1e-9; b += step) out.push(b);
+  return out;
+}
+
 /** Resize snap: 8 bars (minimum 8), or 1 bar (minimum 1) when `fine`. */
 export function snapBars(bars: number, fine: boolean): number {
   return fine ? Math.max(1, Math.round(bars)) : Math.max(8, Math.round(bars / 8) * 8);
