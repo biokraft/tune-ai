@@ -173,6 +173,43 @@ fn shifted_partial_plays_are_not_play_changes() {
     assert_eq!(paths, ["sections[1].play.acid"]);
 }
 
+/// The mini song with the kick playing one placement over both sections,
+/// `offset` bars into its clip.
+fn spanning(offset: &str) -> String {
+    let text = MINI.replacen(
+        "play = [\n  { at = 1, clip = \"k4\", bars = 2 },\n  { at = 3, clip = \"k4\", bars = 2 },\n]",
+        &format!("play = [{{ at = 1, clip = \"k4\", bars = 4{offset} }}]"),
+        1,
+    );
+    assert_ne!(text, MINI);
+    text
+}
+
+/// A change of only where a placement starts in its clip is a change of
+/// what every section it covers plays.
+#[test]
+fn an_offset_only_change_is_a_play_change() {
+    let old = song(&spanning(""));
+    assert_eq!(
+        old.section_play(0, "kick"),
+        tune_song::SectionPlay::Clip("k4")
+    );
+    // It starts before section `b`, so `b` plays it mid-clip.
+    assert!(matches!(
+        old.section_play(1, "kick"),
+        tune_song::SectionPlay::Other(_)
+    ));
+    let new = song(&spanning(", offset = 1"));
+    let changes = diff_songs(&old, &new);
+    let paths: Vec<String> = changes.iter().map(|c| c.path.to_string()).collect();
+    assert_eq!(paths, ["sections[0].play.kick", "sections[1].play.kick"]);
+    assert_eq!(changes[0].old, json!("k4"));
+    assert_eq!(
+        changes[0].new,
+        json!([{ "at": 1, "clip": "k4", "bars": 4, "offset": 1 }])
+    );
+}
+
 /// A stretch across a section edge is split there by a resize; the part
 /// inside the later section is unchanged, so its lanes are too.
 #[test]

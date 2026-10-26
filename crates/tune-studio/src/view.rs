@@ -96,8 +96,10 @@ pub struct PlacementView {
     pub clip: String,
     /// Bars into the clip at which the placement starts playing it.
     pub offset: u32,
-    /// The first section whose `play` shows this placement (it alone plays
-    /// there, over the whole section); `None` when no section's does.
+    /// The section whose `play` shows this placement (it alone plays there,
+    /// from the section start and the clip's first step, over the whole
+    /// section); `None` when no section's does. Any later section it
+    /// covers plays it mid-clip and does not show it.
     pub in_section: Option<usize>,
 }
 
@@ -163,7 +165,8 @@ pub struct SectionView {
     pub start_bar: u32,
     pub bars: u32,
     /// Track id to clip id, in track order, for each track that plays one
-    /// clip over the whole section.
+    /// clip over the whole section, from the section start with offset 0
+    /// (see [`Song::section_play`]).
     pub play: IndexMap<String, String>,
     /// The lane stretches that overlap this section, in file order.
     pub lanes: Vec<LaneView>,
@@ -267,9 +270,9 @@ impl From<&Song> for SongView {
     }
 }
 
-/// Placement `p` of `track`, with the first section that shows it: one it
+/// Placement `p` of `track`, with the section that shows it: one it
 /// overlaps where the track plays one clip over the whole section, which
-/// can then only be this placement.
+/// can then only be this placement, starting there with offset 0.
 fn placement_view(song: &Song, track: &str, p: &Placement) -> PlacementView {
     let span = p.span();
     let in_section = song

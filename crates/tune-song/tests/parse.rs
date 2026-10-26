@@ -160,7 +160,8 @@ fn section_play_and_lanes_derive_from_the_arrangement() {
         other => panic!("expected Other, got {other:?}"),
     }
     assert_eq!(song.section_play(0, "acid"), SectionPlay::Silent);
-    // One placement over the whole song covers both sections.
+    // One placement over the whole song starts the clip in section `a`
+    // only; `b` plays it from mid-clip.
     song.tracks.get_mut("acid").unwrap().play = vec![Placement {
         start_bar: 0,
         bars: 4,
@@ -168,8 +169,18 @@ fn section_play_and_lanes_derive_from_the_arrangement() {
         offset_bars: 0,
     }];
     assert_eq!(song.section_play(0, "acid"), SectionPlay::Clip("a1"));
-    assert_eq!(song.section_play(1, "acid"), SectionPlay::Clip("a1"));
+    match song.section_play(1, "acid") {
+        SectionPlay::Other(ps) => assert_eq!(ps, [&song.tracks["acid"].play[0]]),
+        other => panic!("expected Other, got {other:?}"),
+    }
     assert_eq!(song.section_play(1, "nope"), SectionPlay::Silent);
+    // An offset makes it `Other` in its first section too.
+    song.tracks.get_mut("acid").unwrap().play[0].offset_bars = 1;
+    assert!(matches!(
+        song.section_play(0, "acid"),
+        SectionPlay::Other(_)
+    ));
+    song.tracks.get_mut("acid").unwrap().play[0].offset_bars = 0;
 
     // A stretch over bars 1..3 overlaps both sections.
     song.automation[0].start_bar = 1;

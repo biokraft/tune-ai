@@ -1188,11 +1188,25 @@ fn loose_placements_have_no_section() {
         ])
     );
     assert!(view["sections"][1]["play"].get("acid").is_none());
-    // One placement over both sections is shown by the first.
+    // One placement over both sections is shown by the first; the second
+    // plays it mid-clip, so it is loose there.
     let text = COMMENTED.replacen(from, "play = [{ at = 1, clip = \"a1\", bars = 4 }]", 1);
     let view = view_of(&text);
     assert_eq!(view["tracks"][1]["placements"][0]["in_section"], 0);
-    assert_eq!(view["sections"][1]["play"]["acid"], "a1");
+    assert_eq!(view["sections"][0]["play"]["acid"], "a1");
+    assert!(view["sections"][1]["play"].get("acid").is_none());
+    // With an offset, no section shows it.
+    let text = COMMENTED.replacen(
+        from,
+        "play = [{ at = 1, clip = \"a1\", bars = 4, offset = 1 }]",
+        1,
+    );
+    let view = view_of(&text);
+    assert_eq!(
+        view["tracks"][1]["placements"][0]["in_section"],
+        Value::Null
+    );
+    assert!(view["sections"][0]["play"].get("acid").is_none());
 }
 
 /// A song with one 4-bar section, then another, and one cutoff stretch.

@@ -113,6 +113,49 @@ fn set_empty_value_removes_play() {
     assert!(!fs::read_to_string(&song).unwrap().contains("clip = \"a1\""));
 }
 
+/// Re-setting the clip a placement already plays, on a section that
+/// placement enters mid-clip, restarts the clip there: a change, logged.
+#[test]
+fn set_same_clip_on_a_phase_shifted_section_is_a_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let song = dir.path().join("song.toml");
+    let k3 = "x...".repeat(12);
+    fs::write(
+        &song,
+        format!(
+            "[song]\nversion = 2\nname = \"phase\"\nbpm = 120\nseed = 1\n\n\
+             [tracks.k]\ninstrument = \"kick\"\nplay = [{{ at = 1, clip = \"k3\", bars = 4 }}]\n\n\
+             [clips.k3]\nkind = \"drum\"\nsteps = \"{k3}\"\n\n\
+             [[sections]]\nname = \"a\"\nbars = 2\n\n[[sections]]\nname = \"b\"\nbars = 2\n"
+        ),
+    )
+    .unwrap();
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "sections[1].play.k=k3",
+        "--json",
+    ]));
+    assert_eq!(v["changes"][0]["path"], "sections[1].play.k");
+    assert_eq!(
+        v["changes"][0]["old"],
+        serde_json::json!([{ "at": 1, "clip": "k3", "bars": 4, "offset": 0 }])
+    );
+    assert_eq!(v["changes"][0]["new"], "k3");
+    let text = fs::read_to_string(&song).unwrap();
+    assert!(
+        text.contains("{ at = 3, clip = \"k3\", bars = 2 }"),
+        "{text}"
+    );
+    let log = fs::read_to_string(dir.path().join("edits.jsonl")).unwrap();
+    let last: Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+    assert_eq!(
+        (&last["source"], &last["path"]),
+        (&"claude".into(), &"sections[1].play.k".into())
+    );
+    assert_eq!(last["file_hash"], text_hash(&text));
+}
+
 #[test]
 fn set_on_v1_migrates_and_says_so() {
     let (dir, song) = fixture_of("commented-v1.toml");
