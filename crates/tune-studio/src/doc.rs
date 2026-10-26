@@ -29,7 +29,7 @@ use tune_song::toml_doc::{
 use tune_song::{
     ArrangeError, Arranged, Device, FORMAT_VERSION, Lane, LaneOrigin, MIX_TRACK_ID, Migration,
     Placement, Registry, SectionPlay, SettingSpec, Song, SongError, Track, find_mix_param, migrate,
-    parse, placements_toml,
+    parse, placements_toml, section_bars_error,
 };
 
 use crate::path::{SongPath, TrackField};
@@ -81,7 +81,7 @@ fn arrange_error(e: ArrangeError, path: Option<&SongPath>) -> EditError {
             EditError::NoSuchTarget(SongPath::Track { track }.to_string())
         }
         (ArrangeError::LastSection, _) => EditError::LastSection,
-        // The validator's own wording, "bars must be 1 to 1024, got <n>".
+        // The validator's own wording (`section_bars_error`).
         (e @ ArrangeError::Bars { .. }, path) => EditError::BadValue {
             path: path.map_or_else(|| SongPath::Sections.to_string(), SongPath::to_string),
             message: e.to_string(),
@@ -304,7 +304,7 @@ fn section_bars(path: &SongPath, value: &Value) -> Result<u32, EditError> {
         .as_f64()
         .ok_or_else(|| bad("expected a number".to_owned()))?;
     let bars = as_integer(number).ok_or_else(|| bad("bars must be a whole number".to_owned()))?;
-    u32::try_from(bars).map_err(|_| bad(format!("bars must be 1 to 1024, got {bars}")))
+    u32::try_from(bars).map_err(|_| bad(section_bars_error(bars)))
 }
 
 /// What a section operation does to the `[[sections]]` tables themselves.

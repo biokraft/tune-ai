@@ -687,3 +687,26 @@ fn ops_results_validate() {
         }
     }
 }
+
+/// The section ops and the validator refuse a section length the same
+/// way, in one wording.
+#[test]
+fn bars_out_of_range_reads_like_the_validator() {
+    assert_eq!(
+        tune_song::section_bars_error(0),
+        "bars must be 1 to 1024, got 0"
+    );
+    assert_eq!(
+        tune_song::ArrangeError::Bars { bars: 2000 }.to_string(),
+        tune_song::section_bars_error(2000)
+    );
+    let src =
+        "[song]\nversion = 2\nname = \"x\"\nbpm = 120\n\n[[sections]]\nname = \"a\"\nbars = 0\n";
+    let errors = tune_song::parse(src).unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.message == tune_song::section_bars_error(0)),
+        "{errors:?}"
+    );
+}
