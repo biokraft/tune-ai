@@ -645,7 +645,7 @@ type RulerProps = {
 };
 
 /** A press on the ruler: the bar it started on, the bar under the pointer, and whether it moved. */
-type RulerPress = { x0: number; from: number; to: number; drag: boolean };
+type RulerPress = { pointer: number; x0: number; from: number; to: number; drag: boolean };
 
 /**
  * One-based bar numbers every `step` bars over a tick per bar, and the loop's white bracket.
@@ -662,21 +662,26 @@ const Ruler = memo(function Ruler({ laneW, ppb, step, loop, total, onSeek, onLoo
   const barAt = (e: PointerEvent<SVGSVGElement>) =>
     clampBar(Math.floor((e.clientX - e.currentTarget.getBoundingClientRect().left) / ppb), total);
 
+  /** The press in progress, if `e` comes from its pointer; a second pointer is ignored. */
+  const pressOf = (e: PointerEvent<SVGSVGElement>) => {
+    const cur = pressRef.current;
+    return cur && cur.pointer === e.pointerId ? cur : null;
+  };
   const down = (e: PointerEvent<SVGSVGElement>) => {
-    if (e.button !== 0 || total <= 0) return;
+    if (e.button !== 0 || total <= 0 || pressRef.current) return;
     capture(e);
     const bar = barAt(e);
-    set({ x0: e.clientX, from: bar, to: bar, drag: false });
+    set({ pointer: e.pointerId, x0: e.clientX, from: bar, to: bar, drag: false });
   };
   const move = (e: PointerEvent<SVGSVGElement>) => {
-    const cur = pressRef.current;
+    const cur = pressOf(e);
     if (!cur) return;
     const drag = cur.drag || Math.abs(e.clientX - cur.x0) >= DRAG_SLOP;
     const to = barAt(e);
     if (drag !== cur.drag || to !== cur.to) set({ ...cur, to, drag });
   };
   const up = (e: PointerEvent<SVGSVGElement>) => {
-    const cur = pressRef.current;
+    const cur = pressOf(e);
     if (!cur) return;
     release(e);
     set(null);
@@ -688,13 +693,13 @@ const Ruler = memo(function Ruler({ laneW, ppb, step, loop, total, onSeek, onLoo
     onLoop([Math.min(cur.from, to), Math.min(total, Math.max(cur.from, to) + 1)]);
   };
   const cancel = (e: PointerEvent<SVGSVGElement>) => {
-    if (!pressRef.current) return;
+    if (!pressOf(e)) return;
     release(e);
     set(null);
   };
   // The browser took the pointer away (a system gesture, say): drop the press, loop nothing.
-  const lost = () => {
-    if (pressRef.current) set(null);
+  const lost = (e: PointerEvent<SVGSVGElement>) => {
+    if (pressOf(e)) set(null);
   };
 
   const preview: [number, number] | null =

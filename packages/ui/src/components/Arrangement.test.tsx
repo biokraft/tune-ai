@@ -721,6 +721,21 @@ describe("Arrangement ruler", () => {
     expect(screen.queryByTestId("loop-preview")).toBeNull();
   });
 
+  it("a second pointer pressed during a ruler press is ignored", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(2));
+    fireEvent.pointerDown(ruler(), { ...at(9), pointerId: 2 });
+    fireEvent.pointerMove(ruler(), { ...at(12), pointerId: 2 });
+    fireEvent.pointerUp(ruler(), { ...at(12), pointerId: 2 });
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(onLoop).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("loop-preview")).toBeNull();
+    fireEvent.pointerUp(ruler(), at(2));
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek).toHaveBeenCalledWith(2);
+    expect(onLoop).not.toHaveBeenCalled();
+  });
+
   it("a cancelled drag neither loops nor seeks", () => {
     const { onSeek, onLoop } = setup(two());
     fireEvent.pointerDown(ruler(), at(2));
