@@ -38,6 +38,11 @@ describe("describeChange on clips", () => {
 });
 
 describe("describeChange on v2 songs", () => {
+  it("names the upgrade of the song file", () => {
+    expect(change("song.version", 1, 2)).toBe(
+      "Upgraded the song file to format version 2 (comments kept)",
+    );
+  });
   it("says what a track plays in a section changed when it is not one clip", () => {
     const placements = [{ at: 1, clip: "a1", bars: 1 }];
     expect(change("sections[1].play.acid", "a1", placements)).toBe("Changed what acid plays in b");

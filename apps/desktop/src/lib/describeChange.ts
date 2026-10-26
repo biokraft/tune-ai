@@ -56,6 +56,9 @@ const PATTERN = /^clips\.(.+)\.steps$/;
 /** One change in a few plain words, for the change notice. */
 export function describeChange(c: Change, song: SongView | null): string {
   if (c.path === "song.bpm") return `Tempo ${span(c.old, c.new, "BPM")}`;
+  if (c.path === "song.version") {
+    return `Upgraded the song file to format version ${show(c.new)} (comments kept)`;
+  }
   if (c.path === "sections") return "Arrangement";
 
   const pattern = PATTERN.exec(c.path);

@@ -98,7 +98,8 @@ describe("createStudioStore", () => {
   it("an applied edit from a human sets nothing", () => {
     const client = new FakeClient();
     const store = createStudioStore(client);
-    client.emit(stateEvent());
+    // Not migrated on open: no notice whose Undo the edit would take back.
+    client.emit(stateEvent((s) => (s.migrated_from = null)));
     const before = store.get();
     client.emit({
       event: "applied",
@@ -149,6 +150,60 @@ describe("createStudioStore", () => {
       }),
     );
     expect(store.get().notice).toBeNull();
+  });
+
+  it("shows the migration notice once, with undo", () => {
+    const client = new FakeClient();
+    const store = createStudioStore(client);
+    const opened = (path: string, from: number | null) =>
+      stateEvent((s) => {
+        s.path = path;
+        s.migrated_from = from;
+      });
+    client.emit(opened("songs/a/song.toml", 1));
+    expect(store.get().notice).toEqual({
+      source: "external",
+      changes: [{ path: "song.version", old: 1, new: 2 }],
+      replaced: false,
+      merged: [],
+      offered: [],
+      errors: [],
+    });
+    expect(store.get().noticeUndoable).toBe(true);
+    // The same song's next states do not show it again, even once dismissed.
+    store.dismissNotice();
+    client.emit(opened("songs/a/song.toml", 1));
+    expect(store.get().notice).toBeNull();
+    // Shown again, the notice loses its Undo once one undo no longer reverts the migration.
+    client.emit(opened("songs/b/song.toml", 1));
+    expect(store.get().notice?.changes[0]?.path).toBe("song.version");
+    client.emit(opened("songs/b/song.toml", null));
+    expect(store.get().notice).not.toBeNull();
+    expect(store.get().noticeUndoable).toBe(false);
+    // A song opened without a migration shows none.
+    store.dismissNotice();
+    client.emit(opened("songs/c/song.toml", null));
+    expect(store.get().notice).toBeNull();
+  });
+
+  it("a migration turning null leaves another notice's Undo alone", () => {
+    const client = new FakeClient();
+    const store = createStudioStore(client);
+    client.emit(stateEvent((s) => (s.migrated_from = 1)));
+    client.emit(external({ merged: [] }));
+    expect(store.get().notice?.source).toBe("claude");
+    client.emit(stateEvent((s) => (s.migrated_from = null)));
+    expect(store.get().noticeUndoable).toBe(true);
+  });
+
+  it("shows an error event, such as a migration that could not be saved", () => {
+    const client = new FakeClient();
+    const store = createStudioStore(client);
+    client.emit(stateEvent((s) => (s.migrated_from = null)));
+    const message =
+      "the song was upgraded to the new file format in memory but not saved: cannot write song.toml";
+    client.emit({ event: "error", message });
+    expect(store.get().message).toBe(message);
   });
 
   it("playhead events set the playhead", () => {
