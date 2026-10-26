@@ -823,3 +823,17 @@ fn v2_files_refuse_arrangement_edits_for_now() {
     assert_eq!(d.song().tracks["acid"].fx[1].params["low_cut"], 300.0);
     assert!(d.song().tracks["acid"].fx[0].params.is_empty());
 }
+
+#[test]
+fn a_numbered_device_id_the_track_lacks_is_no_such_target() {
+    let mut d = SongDoc::parse(V2).expect("v2 parses");
+    // The kick has no eq2 (nor any eq); a typo'd name stays unknown.
+    assert_eq!(
+        d.set(&path("tracks.kick.eq2.low_cut"), &json!(120)),
+        Err(EditError::NoSuchTarget("tracks.kick.eq2.low_cut".into()))
+    );
+    assert!(matches!(
+        d.set(&path("tracks.acid.eq2.low_cutt"), &json!(120)),
+        Err(EditError::UnknownParam { .. })
+    ));
+}
