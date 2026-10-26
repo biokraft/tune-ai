@@ -6,16 +6,17 @@ use std::process::ExitCode;
 
 use serde_json::{Map, Value, json};
 use tune_engine::Clock;
-use tune_song::{SectionPlay, Song};
+use tune_song::{Device, SectionPlay, Song};
 use tune_studio::placement_json;
 
-use super::{load, sample_rate};
+use super::{load, note_migration, sample_rate};
 use crate::report::{Success, finish, fmt_time};
 
 pub fn run(path: &Path, json: bool) -> ExitCode {
     finish(
         json,
-        load(path).map(|song| {
+        load(path).map(|loaded| {
+            let song = loaded.song;
             let sr = sample_rate(&song);
             let clock = Clock::new(song.bpm, sr);
             let bars = song.total_bars();
@@ -72,6 +73,7 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
             let mut tracks = Vec::new();
             for (id, t) in &song.tracks {
                 let fx: Vec<&str> = t.fx.iter().map(|d| d.module.name).collect();
+                let fx_shown: Vec<String> = t.fx.iter().map(shown).collect();
                 let mut flags = String::new();
                 if t.mute {
                     flags.push_str("  muted");
@@ -83,13 +85,13 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
                     text,
                     "\n  {:<10} {}  gain {} dB  pan {}  fx: {}{flags}",
                     id,
-                    t.instrument.module.name,
+                    shown(&t.instrument),
                     t.gain_db,
                     t.pan,
                     if fx.is_empty() {
                         "-".into()
                     } else {
-                        fx.join(" ")
+                        fx_shown.join(" ")
                     },
                 );
                 tracks.push(json!({
@@ -100,9 +102,14 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
                     "mute": t.mute,
                     "solo": t.solo,
                     "fx": fx,
+                    "devices": {
+                        "instrument": device_json(&t.instrument),
+                        "fx": t.fx.iter().map(device_json).collect::<Vec<_>>(),
+                    },
+                    "placements": t.play.iter().map(placement_json).collect::<Vec<_>>(),
                 }));
             }
-            Success {
+            let mut success = Success {
                 text,
                 json: json!({
                     "name": song.name,
@@ -113,9 +120,25 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
                     "sections": Value::Array(sections),
                     "tracks": Value::Array(tracks),
                 }),
-            }
+            };
+            note_migration(path, loaded.migrated_from, json, &mut success);
+            success
         }),
     )
+}
+
+/// The module name, with the device id after it in parentheses when the id is
+/// not the module's own prefix (`eq(eq2)`).
+fn shown(d: &Device) -> String {
+    if d.id == d.module.prefix {
+        d.module.name.to_owned()
+    } else {
+        format!("{}({})", d.module.name, d.id)
+    }
+}
+
+fn device_json(d: &Device) -> Value {
+    json!({ "id": d.id, "type": d.module.name })
 }
 
 /// What each track plays in section `section`, in track order, as text

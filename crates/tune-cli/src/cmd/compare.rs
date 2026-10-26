@@ -169,6 +169,12 @@ fn run_inner(a: &Args) -> Result<Success, Vec<Failure>> {
     let oa = analyze(&ours.audio, None).map_err(err)?;
     let ra = analyze(&reference.audio, None).map_err(err)?;
     let cmp = tune_analysis::compare(&oa, &ra);
+    if !a.json {
+        // stderr: stdout stays the table.
+        for n in ours.notes.iter().chain(&reference.notes) {
+            eprintln!("note: {n}");
+        }
+    }
 
     let default_name = format!("compare-{}-vs-{}", ours.png_name, reference.stem);
     let path = png_path(a.png.as_deref(), &default_name);
@@ -195,6 +201,10 @@ fn run_inner(a: &Args) -> Result<Success, Vec<Failure>> {
 fn merged(input: &Input, a: &Analysis) -> Value {
     let mut m = serde_json::Map::new();
     m.insert("source".into(), input.source.clone());
+    if let Some(from) = input.migrated_from {
+        m.insert("migrated_from".into(), Value::from(from));
+        m.insert("notes".into(), json!(input.notes));
+    }
     if let Value::Object(rest) = a.summary_json() {
         m.extend(rest);
     }
