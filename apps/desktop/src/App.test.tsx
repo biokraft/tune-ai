@@ -124,6 +124,18 @@ describe("App", () => {
     ]);
   });
 
+  it("the open-song screen shows the TuneAI lockup", async () => {
+    const client = new FakeClient();
+    client.results.list_songs = ["songs/mini/song.toml"];
+    render(<App store={createStudioStore(client)} />);
+    act(() => client.emit(stateEvent((s) => (s.path = null))));
+    await screen.findByRole("button", { name: /mini/ });
+    const main = screen.getByRole("main");
+    expect(main).toHaveTextContent("TuneAI");
+    expect(screen.getByText("AI")).toHaveClass("text-agent");
+    expect(main.querySelector('svg[viewBox="0 0 120 120"]')).not.toBeNull();
+  });
+
   it("an empty song list says how to start one", async () => {
     const client = new FakeClient();
     client.results.list_songs = [];

@@ -1,6 +1,7 @@
 import { memo, type ReactNode } from "react";
 import { formatPosition, formatTime } from "../lib/arrange";
 import { IconButton } from "./IconButton";
+import { TuneMark } from "./TuneMark";
 
 export type TransportBarProps = {
   playing: boolean;
@@ -66,16 +67,7 @@ export const TransportBar = memo(function TransportBar(p: TransportBarProps) {
       className="glass flex h-14 items-center gap-3 rounded-r px-3 text-ink"
     >
       <div className="flex items-center gap-2 pr-1">
-        <svg
-          viewBox="0 0 24 24"
-          width="22"
-          height="22"
-          aria-hidden="true"
-          className="fill-none stroke-acid"
-          style={{ strokeWidth: 2.2, strokeLinecap: "round" }}
-        >
-          <path d="M3 12h2l2-6 3 12 3-9 2 5 2-2h4" />
-        </svg>
+        <TuneMark size={22} />
         <div className="flex flex-col">
           <span className="text-[13px] font-extrabold tracking-[.02em]">{p.songName}</span>
           <span className="text-[10.5px] text-ink2">

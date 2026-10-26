@@ -1,4 +1,4 @@
-import { cn } from "@tune/ui";
+import { cn, TuneMark } from "@tune/ui";
 import { useEffect, useState } from "react";
 import type { Command } from "../client/protocol";
 
@@ -44,6 +44,12 @@ export function OpenSongScreen({ send }: OpenSongScreenProps) {
   return (
     <main className="flex min-h-0 flex-1 items-center justify-center p-6">
       <div className="glass flex max-h-full w-full max-w-xl flex-col gap-4 overflow-hidden rounded-r p-6">
+        <div className="flex items-center gap-3">
+          <TuneMark size={40} />
+          <span className="text-[28px] font-extrabold leading-none tracking-[-0.02em] text-ink">
+            Tune<span className="text-agent">AI</span>
+          </span>
+        </div>
         <h1 className="text-xl font-bold text-ink">Open a song</h1>
         {songs.kind === "loading" && <p className="text-ink2">Looking for songs…</p>}
         {songs.kind === "failed" && (
