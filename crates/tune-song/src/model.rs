@@ -84,6 +84,13 @@ impl Song {
         start..start + self.sections[section].bars
     }
 
+    /// Whether the 0-based bar range `span` (of a placement or a lane
+    /// stretch) covers exactly section `section`. Panics when there is no
+    /// such section.
+    pub fn covers_section(&self, section: usize, span: Range<u32>) -> bool {
+        span == self.section_bars(section)
+    }
+
     /// What track `track` plays in section `section`: nothing, one clip over
     /// the whole section, or anything else (the placements that overlap
     /// it, in time order). An unknown track is silent. Panics when there is

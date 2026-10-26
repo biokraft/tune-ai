@@ -7,6 +7,7 @@ use std::process::ExitCode;
 use serde_json::{Map, Value, json};
 use tune_engine::Clock;
 use tune_song::{SectionPlay, Song};
+use tune_studio::placement_json;
 
 use super::{load, sample_rate};
 use crate::report::{Success, finish, fmt_time};
@@ -137,17 +138,7 @@ fn section_play(song: &Song, section: usize) -> (Vec<String>, Map<String, Value>
                     .map(|p| format!("{}@{}+{}", p.clip, p.start_bar + 1, p.bars))
                     .collect();
                 text.push(format!("{t}={}", parts.join(",")));
-                let list = placements
-                    .iter()
-                    .map(|p| {
-                        json!({
-                            "at": p.start_bar + 1,
-                            "clip": p.clip,
-                            "bars": p.bars,
-                            "offset": p.offset_bars,
-                        })
-                    })
-                    .collect();
+                let list = placements.into_iter().map(placement_json).collect();
                 json.insert(t.clone(), Value::Array(list));
             }
         }
