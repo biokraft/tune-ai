@@ -7,7 +7,10 @@ import type { AcidStep, DrumHit, ParamSpecView, PlacementView, SectionView } fro
 
 export type Command =
   | { cmd: "list_songs" }
-  /** Resolves with the current `StudioState`; changes nothing. */
+  /**
+   * Resolves with the current `StudioState`; changes nothing. A migration the studio could not
+   * save is sent again as an `error` event, for a transport that dropped the first one.
+   */
   | { cmd: "get_state" }
   | { cmd: "open_song"; args: { path: string } }
   /** `from_bar` is 0-based; null starts at the cursor. */
