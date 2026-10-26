@@ -337,10 +337,15 @@ fn check_unique_ids<'a>(
             (Some(at), _) | (None, Some(at)) => &at.span,
             (None, None) => &raw.span,
         };
+        let hint = if raw.id.is_some() {
+            "give the second one a different `id`".to_owned()
+        } else {
+            format!("give the second one an `id`, e.g. `id = \"{suggestion}\"`")
+        };
         errors.at(
             span,
             format!(
-                "track `{}` already has a device `{id}` (give the second one an `id`, e.g. `id = \"{suggestion}\"`)",
+                "track `{}` already has a device `{id}` ({hint})",
                 track.value
             ),
         );

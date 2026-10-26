@@ -246,6 +246,13 @@ fn device_rules() {
         9,
         "track `acid` already has a device `eq` (give the second one an `id`, e.g. `id = \"eq2\"`)",
     );
+    // An explicit id that collides gets a different hint: it already has one.
+    fails_at(
+        &fx(r#"{ type = "eq" }, { type = "eq", id = "eq" }"#),
+        "\"eq\" }]",
+        0,
+        "track `acid` already has a device `eq` (give the second one a different `id`)",
+    );
     fails_at(
         &fx(r#"{ type = "eq", id = "send" }"#),
         "\"send\"",
