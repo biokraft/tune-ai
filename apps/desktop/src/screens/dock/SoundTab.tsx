@@ -92,7 +92,7 @@ export const SoundTab = memo(function SoundTab({
       />
       {track.fx.map((fx) => (
         <FxPanel
-          key={fx.kind}
+          key={fx.id}
           title={fxTitle(fx.kind)}
           params={live(fx.params)}
           color={color}
@@ -106,8 +106,10 @@ export const SoundTab = memo(function SoundTab({
                 label="Distortion mode"
                 options={fx.modes.map((m) => ({ value: m, label: sentenceCase(m) }))}
                 value={fx.mode}
-                highlight={highlight("dist.mode")}
-                onChange={(mode) => fire({ cmd: "set_fx_mode", args: { track: track.id, mode } })}
+                highlight={highlight(`${fx.id}.mode`)}
+                onChange={(mode) =>
+                  fire({ cmd: "set_fx_mode", args: { track: track.id, device: fx.id, mode } })
+                }
               />
             ) : undefined
           }

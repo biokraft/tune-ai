@@ -275,6 +275,7 @@ fn commands_map_to_paths() {
         (
             Command::SetFxMode {
                 track: "acid".into(),
+                device: "dist".into(),
                 mode: "hard".into(),
             },
             vec!["tracks.acid.dist.mode"],
@@ -340,6 +341,36 @@ fn commands_map_to_paths() {
         core.flush().unwrap();
         StudioCore::open(&s.path).expect("the written file is a valid song");
     }
+}
+
+/// The mode switch names its device: a second distortion's switch sets
+/// that device's mode and no other.
+#[test]
+fn set_fx_mode_reaches_the_named_device() {
+    let from = r#"fx = [{ type = "distortion", mode = "soft", params = { "dist.drive" = 12 } }]"#;
+    assert!(FIXTURE.contains(from));
+    let text = FIXTURE.replacen(
+        from,
+        r#"fx = [{ type = "distortion", mode = "soft" }, { type = "distortion", id = "dist2", mode = "soft" }]"#,
+        1,
+    );
+    let s = song_with(&text);
+    let mut core = open(&s);
+    let mode = |device: &str| Command::SetFxMode {
+        track: "acid".into(),
+        device: device.into(),
+        mode: "hard".into(),
+    };
+    let changes = core.apply_edit(&mode("dist2"), Instant::now()).unwrap();
+    let paths: Vec<String> = changes.iter().map(|c| c.path.to_string()).collect();
+    assert_eq!(paths, ["tracks.acid.dist2.mode"]);
+    let fx = &core.song().tracks["acid"].fx;
+    assert_eq!(
+        (fx[0].setting("mode"), fx[1].setting("mode")),
+        (Some("soft"), Some("hard"))
+    );
+    // A device the track lacks is refused.
+    assert!(core.apply_edit(&mode("dist3"), Instant::now()).is_err());
 }
 
 #[test]
