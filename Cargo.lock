@@ -4676,6 +4676,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "toml 1.1.2+spec-1.1.0",
+ "toml_edit 0.25.17+spec-1.1.0",
  "tune-dsp",
  "tune-modules",
 ]
