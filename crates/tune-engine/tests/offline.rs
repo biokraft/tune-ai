@@ -67,9 +67,6 @@ fn muted_track_still_has_a_stem_and_leaves_the_mix() {
     let mut without = song(MINI);
     without.tracks.shift_remove("kick");
     without.clips.shift_remove("k4");
-    for s in &mut without.sections {
-        s.play.shift_remove("kick");
-    }
     let other = render(compile_song(&without), &full()).unwrap();
     assert_eq!(r.mix, other.mix);
 }

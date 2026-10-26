@@ -95,7 +95,7 @@ fn compiles_mix_and_strip() {
     assert_eq!(acid.instrument.params.len(), ACID303_PARAMS.len());
     assert_eq!(s.tracks[2].strip, vec![-60.0, -20.0, 0.0, 80.0]);
 
-    let b: Vec<(usize, ParamTarget)> = s.sections[1]
+    let b: Vec<(usize, ParamTarget)> = s.regions[1]
         .lanes
         .iter()
         .map(|l| (l.track, l.target))
@@ -261,7 +261,8 @@ fn no_source_hits_no_ducking() {
     let depth = |db: f64| {
         clip_variant(move |s| {
             set_strip(s, "acid", "duck.depth", db);
-            s.sections[1].play.shift_remove("kick");
+            let kick = s.tracks.get_mut("kick").unwrap();
+            kick.play.retain(|p| p.start_bar != 2);
         })
     };
     let (c, deep) = render_all(&depth(12.0));

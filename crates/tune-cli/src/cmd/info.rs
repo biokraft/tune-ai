@@ -4,8 +4,9 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::process::ExitCode;
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tune_engine::Clock;
+use tune_song::{SectionPlay, Song};
 
 use super::{load, sample_rate};
 use crate::report::{Success, finish, fmt_time};
@@ -25,11 +26,16 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
                 fmt_time(seconds)
             );
             let mut sections = Vec::new();
-            for (s, start) in song.sections.iter().zip(song.section_start_bars()) {
+            for (i, (s, start)) in song
+                .sections
+                .iter()
+                .zip(song.section_start_bars())
+                .enumerate()
+            {
                 let start_seconds = clock.seconds(clock.bar_start(start));
-                let play: Vec<String> = s.play.iter().map(|(t, p)| format!("{t}={p}")).collect();
-                let automation: Vec<String> = s
-                    .automation
+                let (play, play_json) = section_play(&song, i);
+                let automation: Vec<String> = song
+                    .lanes_in(i)
                     .iter()
                     .map(|l| format!("{}.{}", l.track, l.param))
                     .collect();
@@ -57,9 +63,7 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
                     "start_bar": start + 1,
                     "end_bar": start + s.bars,
                     "start_seconds": start_seconds,
-                    "play": Value::Object(
-                        s.play.iter().map(|(t, p)| (t.clone(), Value::String(p.clone()))).collect()
-                    ),
+                    "play": Value::Object(play_json),
                     "automation": automation,
                 }));
             }
@@ -111,4 +115,42 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
             }
         }),
     )
+}
+
+/// What each track plays in section `section`, in track order, as text
+/// (`t=clip`, or `t=clip@<bar>+<bars>` per placement for anything but one
+/// clip over the whole section; bars 1-based) and as JSON (the clip id, or
+/// `[{at, clip, bars, offset}]`). Silent tracks are left out.
+fn section_play(song: &Song, section: usize) -> (Vec<String>, Map<String, Value>) {
+    let mut text = Vec::new();
+    let mut json = Map::new();
+    for t in song.tracks.keys() {
+        match song.section_play(section, t) {
+            SectionPlay::Silent => {}
+            SectionPlay::Clip(clip) => {
+                text.push(format!("{t}={clip}"));
+                json.insert(t.clone(), Value::from(clip));
+            }
+            SectionPlay::Other(placements) => {
+                let parts: Vec<String> = placements
+                    .iter()
+                    .map(|p| format!("{}@{}+{}", p.clip, p.start_bar + 1, p.bars))
+                    .collect();
+                text.push(format!("{t}={}", parts.join(",")));
+                let list = placements
+                    .iter()
+                    .map(|p| {
+                        json!({
+                            "at": p.start_bar + 1,
+                            "clip": p.clip,
+                            "bars": p.bars,
+                            "offset": p.offset_bars,
+                        })
+                    })
+                    .collect();
+                json.insert(t.clone(), Value::Array(list));
+            }
+        }
+    }
+    (text, json)
 }

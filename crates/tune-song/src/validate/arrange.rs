@@ -1,4 +1,4 @@
-//! The arrangement: patterns, sections and their automation lanes.
+//! The arrangement: clips, sections, placements and lane stretches.
 
 use indexmap::{IndexMap, IndexSet};
 use tune_dsp::acid303::{AcidPattern, PatternError};
@@ -8,7 +8,7 @@ use tune_modules::ClipKind;
 use super::tracks::{TrackShape, find_in, unknown_param};
 use super::{BARS, Duck, unknown_track};
 use crate::error::Errors;
-use crate::model::{Clip, Lane, MIX_TRACK_ID, MixUnit, Section};
+use crate::model::{Clip, Lane, MIX_TRACK_ID, MixUnit, Placement, Section};
 use crate::raw::{At, RawLane, RawPattern, RawSection};
 
 pub(super) fn clip(
@@ -59,14 +59,25 @@ pub(super) fn clip(
     }
 }
 
+/// A v1 section read into the arrangement: the section itself, a
+/// placement over all of it per `play` entry (track id first, in table
+/// order) and a lane stretch over all of it per lane (in file order).
+pub(super) struct V1Section {
+    pub section: Section,
+    pub play: Vec<(String, Placement)>,
+    pub lanes: Vec<Lane>,
+}
+
+/// Checks v1 section `index`, which starts at 0-based bar `start_bar`.
 pub(super) fn section(
     index: usize,
+    start_bar: u32,
     s: &RawSection,
     shapes: &IndexMap<&str, TrackShape>,
     pattern_owner: &IndexMap<&str, Option<&str>>,
     duck: &Duck<'_>,
     errors: &mut Errors,
-) -> Option<Section> {
+) -> Option<V1Section> {
     let label = match &s.name {
         Some(n) => format!("section `{}`", n.value),
         None => format!("section {}", index + 1),
@@ -80,7 +91,7 @@ pub(super) fn section(
     });
 
     let before = errors.len();
-    let mut play = IndexMap::new();
+    let mut play = Vec::new();
     for (track, pat) in &s.play {
         if !shapes.contains_key(track.value.as_str()) {
             errors.at(&track.span, unknown_track(&track.value));
@@ -95,16 +106,14 @@ pub(super) fn section(
                     pat.value, track.value
                 ),
             ),
-            _ => {
-                play.insert(track.value.clone(), pat.value.clone());
-            }
+            _ => play.push((track.value.clone(), pat.value.clone())),
         }
     }
 
     let mut automation = Vec::new();
     let mut seen: IndexSet<(String, String)> = IndexSet::new();
     for raw in &s.automation {
-        if let Some(lane) = lane(raw, bars, shapes, duck, errors) {
+        if let Some(lane) = lane(raw, start_bar, bars, shapes, duck, errors) {
             let key = (lane.track.clone(), lane.param.clone());
             if !seen.insert(key) {
                 let param = raw.param.as_ref().expect("a built lane has a param");
@@ -122,16 +131,35 @@ pub(super) fn section(
     }
 
     (errors.len() == before).then_some(())?;
-    Some(Section {
-        name: s.name.as_ref()?.value.clone(),
-        bars: bars?,
+    let bars = bars?;
+    let play = play
+        .into_iter()
+        .map(|(track, clip)| {
+            let placement = Placement {
+                start_bar,
+                bars,
+                clip,
+                offset_bars: 0,
+            };
+            (track, placement)
+        })
+        .collect();
+    Some(V1Section {
+        section: Section {
+            name: s.name.as_ref()?.value.clone(),
+            bars,
+        },
         play,
-        automation,
+        lanes: automation,
     })
 }
 
+/// Checks one lane of a v1 section starting at `start_bar` and `bars` long
+/// (`None` when its `bars` is broken); the lane stretches over the whole
+/// section.
 fn lane(
     raw: &RawLane,
+    start_bar: u32,
     bars: Option<u32>,
     shapes: &IndexMap<&str, TrackShape>,
     duck: &Duck<'_>,
@@ -185,6 +213,9 @@ fn lane(
     Some(Lane {
         track,
         param,
+        start_bar,
+        // A broken `bars` has its own error, so the lane is never used.
+        bars: bars.unwrap_or(0),
         points: points
             .value
             .iter()

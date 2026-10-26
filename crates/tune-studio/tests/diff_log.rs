@@ -81,9 +81,23 @@ fn diff_sections_reorder() {
 #[test]
 fn diff_bars_only() {
     let text = MINI.replacen("bars = 2", "bars = 4", 1);
+    let lane = |at: u32| {
+        json!([{
+            "track": "acid",
+            "param": "acid303.cutoff",
+            "at": at,
+            "bars": 2,
+            "points": [[0, 0.1], [2, 0.8]]
+        }])
+    };
+    // Section `b` and its lane stretch move back with it: only the
+    // stretch's `at` changes.
     assert_eq!(
         diff_songs(&song(MINI), &song(&text)),
-        vec![change("sections[0].bars", json!(2), json!(4))]
+        vec![
+            change("sections[0].bars", json!(2), json!(4)),
+            change("sections[1].lanes", lane(3), lane(5)),
+        ]
     );
 }
 

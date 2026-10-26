@@ -8,7 +8,7 @@ use tune_dsp::ParamSpec;
 use tune_engine::{
     Cell, CompiledSong, CompiledTrack, Effect, Engine, Instrument, StepCtx, TrackRuntime,
 };
-use tune_song::{Song, parse_song};
+use tune_song::{Lane, Placement, Song, parse_song};
 
 /// The shared `mini` fixture.
 pub const MINI: &str = include_str!("../../../tune-song/tests/fixtures/mini.toml");
@@ -37,13 +37,68 @@ pub fn variant_of(src: &str, edit: impl FnOnce(&mut Song)) -> Song {
     parse_song(&s.to_toml()).unwrap_or_else(|e| panic!("variant does not validate: {e:?}"))
 }
 
-/// Removes the lane on `track`'s `param` from every section.
+/// Removes every stretch of the lane on `track`'s `param`.
 pub fn drop_lane(s: &mut Song, track: &str, param: &str) {
-    for section in &mut s.sections {
-        section
-            .automation
-            .retain(|l| !(l.track == track && l.param == param));
+    s.automation
+        .retain(|l| !(l.track == track && l.param == param));
+}
+
+/// Silences `track` everywhere: clears its placements.
+pub fn unplay(s: &mut Song, track: &str) {
+    s.tracks
+        .get_mut(track)
+        .unwrap_or_else(|| panic!("no track `{track}`"))
+        .play
+        .clear();
+}
+
+/// Keeps the first `n` sections, dropping the placements and lane stretches
+/// past the new end and cutting those that cross it.
+pub fn keep_sections(s: &mut Song, n: usize) {
+    s.sections.truncate(n);
+    let end = s.total_bars();
+    for t in s.tracks.values_mut() {
+        t.play.retain(|p| p.start_bar < end);
+        for p in &mut t.play {
+            p.bars = p.bars.min(end - p.start_bar);
+        }
     }
+    s.automation.retain(|l| l.start_bar < end);
+    for l in &mut s.automation {
+        l.bars = l.bars.min(end - l.start_bar);
+    }
+}
+
+/// Appends a copy of section `i`, with copies of the placements and lane
+/// stretches that cover exactly that section.
+pub fn push_section_copy(s: &mut Song, i: usize) {
+    let start = s.section_start_bars()[i];
+    let section = s.sections[i].clone();
+    let to = s.total_bars();
+    let aligned = |start_bar: u32, bars: u32| start_bar == start && bars == section.bars;
+    for t in s.tracks.values_mut() {
+        let copies: Vec<_> = t
+            .play
+            .iter()
+            .filter(|p| aligned(p.start_bar, p.bars))
+            .map(|p| Placement {
+                start_bar: to,
+                ..p.clone()
+            })
+            .collect();
+        t.play.extend(copies);
+    }
+    let copies: Vec<_> = s
+        .automation
+        .iter()
+        .filter(|l| aligned(l.start_bar, l.bars))
+        .map(|l| Lane {
+            start_bar: to,
+            ..l.clone()
+        })
+        .collect();
+    s.automation.extend(copies);
+    s.sections.push(section);
 }
 
 /// The bit patterns of `x`, for bitwise comparisons.

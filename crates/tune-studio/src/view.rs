@@ -4,7 +4,7 @@
 use indexmap::IndexMap;
 use serde::Serialize;
 use tune_dsp::{Curve, ParamSpec, STRIP_PARAMS};
-use tune_song::{Clip, ClipKind, Device, MasterMode, MixUnit, Song};
+use tune_song::{Clip, ClipKind, Device, MasterMode, MixUnit, SectionPlay, Song};
 
 use crate::command::DrumHitDto;
 use crate::diff::Change;
@@ -137,8 +137,10 @@ pub struct SectionView {
     /// 0-based.
     pub start_bar: u32,
     pub bars: u32,
-    /// Track id to pattern id.
+    /// Track id to clip id, in track order, for each track that plays one
+    /// clip over the whole section.
     pub play: IndexMap<String, String>,
+    /// The lane stretches that cover exactly this section.
     pub lanes: Vec<LaneView>,
 }
 
@@ -207,14 +209,23 @@ impl From<&Song> for SongView {
                 .sections
                 .iter()
                 .zip(starts)
-                .map(|(s, start_bar)| SectionView {
+                .enumerate()
+                .map(|(i, (s, start_bar))| SectionView {
                     name: s.name.clone(),
                     start_bar,
                     bars: s.bars,
-                    play: s.play.clone(),
-                    lanes: s
+                    play: song
+                        .tracks
+                        .keys()
+                        .filter_map(|t| match song.section_play(i, t) {
+                            SectionPlay::Clip(clip) => Some((t.clone(), clip.to_owned())),
+                            _ => None,
+                        })
+                        .collect(),
+                    lanes: song
                         .automation
                         .iter()
+                        .filter(|l| l.start_bar == start_bar && l.bars == s.bars)
                         .map(|l| LaneView {
                             track: l.track.clone(),
                             param: l.param.clone(),

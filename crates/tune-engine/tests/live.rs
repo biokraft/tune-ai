@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use common::{
     Event, MINI, MIXED, Probe, ProbeFx, SharedLog, compile_song, compiled, drop_lane, engine_with,
-    probe_engine_slots, run, song, variant_of,
+    keep_sections, probe_engine_slots, push_section_copy, run, song, variant_of,
 };
 use tune_dsp::db2amp;
 use tune_engine::{
@@ -111,15 +111,12 @@ fn without_hat() -> Arc<CompiledSong> {
     mini_with(|s| {
         s.tracks.shift_remove("hat");
         s.clips.shift_remove("h");
-        for section in &mut s.sections {
-            section.play.shift_remove("hat");
-        }
     })
 }
 
 /// `mini` cut down to its first section (2 bars).
 fn two_bars() -> Arc<CompiledSong> {
-    let b = mini_with(|s| s.sections.truncate(1));
+    let b = mini_with(|s| keep_sections(s, 1));
     assert_eq!(b.total_bars, 2);
     b
 }
@@ -365,10 +362,7 @@ fn swap_waits_for_garbage_room() {
 #[test]
 fn swap_after_the_end_stays_finished() {
     let a = compiled(MINI);
-    let longer = mini_with(|s| {
-        let extra = s.sections[0].clone();
-        s.sections.push(extra);
-    });
+    let longer = mini_with(|s| push_section_copy(s, 0));
     assert_eq!(longer.total_bars, 6);
     let (mut ctl, mut p) = live(a, 3, None);
     play(&mut p, BAR + 10, 4096);
@@ -397,7 +391,7 @@ const DRIVE: ParamTarget = ParamTarget::Fx { slot: 0, index: 0 };
 /// value sound the same), then `edit`.
 fn no_lane(edit: impl FnOnce(&mut tune_song::Song)) -> Arc<CompiledSong> {
     mini_with(|s| {
-        s.sections[1].automation.clear();
+        drop_lane(s, "acid", "acid303.cutoff");
         edit(s);
     })
 }
