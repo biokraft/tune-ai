@@ -30,6 +30,7 @@ tune-analysis = { path = "../tune-analysis" }
 tune-audio = { path = "../tune-audio" }
 tune-dsp = { path = "../tune-dsp" }
 tune-engine = { path = "../tune-engine" }
+tune-modules = { path = "../tune-modules" }
 tune-song = { path = "../tune-song" }
 tune-studio = { path = "../tune-studio" }
 

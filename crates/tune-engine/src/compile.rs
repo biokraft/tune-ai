@@ -9,8 +9,8 @@ use tune_song::{
 };
 
 use crate::clock::{Clock, track_seed};
-use crate::instrument::Cell;
 use crate::mixer::pan_gains;
+use tune_modules::Cell;
 
 /// A song ready to play. Tracks, patterns and sections keep song-file order.
 #[derive(Clone, Debug)]

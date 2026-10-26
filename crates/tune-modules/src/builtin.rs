@@ -1,11 +1,13 @@
-//! Track wrappers: the `tune-dsp` voices behind the engine's traits.
+//! Today's modules: the `tune-dsp` voices behind the instrument and effect
+//! traits, and their descriptors.
 
 use tune_dsp::acid303::{ACID303_PARAMS, Acid303, AcidGate, AcidStep};
 use tune_dsp::{
-    Clap, DIST_PARAMS, Distortion, EQ_PARAMS, Equalizer, Hat, HatKind, Kick, ParamSpec,
+    CLAP_PARAMS, Clap, DIST_PARAMS, Distortion, DistortionMode, EQ_PARAMS, Equalizer,
+    HAT_CLOSED_PARAMS, HAT_OPEN_PARAMS, Hat, HatKind, KICK_PARAMS, Kick, ParamSpec, RIDE_PARAMS,
 };
-use tune_song::{FxSpec, InstrumentKind};
 
+use crate::descriptor::{ClipKind, ModuleDescriptor, Role, SettingSpec};
 use crate::instrument::{Cell, Effect, Instrument, StepCtx};
 
 /// An [`Acid303`] driven by the song clock instead of its own sequencer.
@@ -92,8 +94,8 @@ macro_rules! drum_instrument {
     };
 }
 
-drum_instrument!(Kick, tune_dsp::KICK_PARAMS);
-drum_instrument!(Clap, tune_dsp::CLAP_PARAMS);
+drum_instrument!(Kick, KICK_PARAMS);
+drum_instrument!(Clap, CLAP_PARAMS);
 
 impl Instrument for Hat {
     fn params(&self) -> &'static [ParamSpec] {
@@ -145,26 +147,109 @@ impl Effect for Equalizer {
     }
 }
 
-/// A fresh instrument of `kind` with every parameter at its default.
-pub fn make_instrument(kind: InstrumentKind, sample_rate: f64) -> Box<dyn Instrument> {
-    match kind {
-        InstrumentKind::Acid303 => Box::new(AcidTrack::new(sample_rate)),
-        InstrumentKind::Kick => Box::new(Kick::new(sample_rate)),
-        InstrumentKind::Clap => Box::new(Clap::new(sample_rate)),
-        InstrumentKind::HatClosed => Box::new(Hat::new(HatKind::Closed, sample_rate)),
-        InstrumentKind::HatOpen => Box::new(Hat::new(HatKind::Open, sample_rate)),
-        InstrumentKind::Ride => Box::new(Hat::new(HatKind::Ride, sample_rate)),
-    }
-}
+const ACID: &[ClipKind] = &[ClipKind::Acid];
+const DRUM: &[ClipKind] = &[ClipKind::Drum];
 
-/// A fresh effect for `fx` with its mode set; params stay at their defaults.
-pub fn make_effect(fx: &FxSpec, sample_rate: f64) -> Box<dyn Effect> {
-    match fx {
-        FxSpec::Distortion { mode, .. } => {
+pub static ACID303: ModuleDescriptor = ModuleDescriptor {
+    name: "acid303",
+    prefix: "acid303",
+    params: ACID303_PARAMS,
+    settings: &[],
+    role: Role::Instrument {
+        plays: ACID,
+        default_duck_source: false,
+        make: |sample_rate, _| Box::new(AcidTrack::new(sample_rate)),
+    },
+};
+
+pub static KICK: ModuleDescriptor = ModuleDescriptor {
+    name: "kick",
+    prefix: "kick",
+    params: KICK_PARAMS,
+    settings: &[],
+    role: Role::Instrument {
+        plays: DRUM,
+        default_duck_source: true,
+        make: |sample_rate, _| Box::new(Kick::new(sample_rate)),
+    },
+};
+
+pub static CLAP: ModuleDescriptor = ModuleDescriptor {
+    name: "clap",
+    prefix: "clap",
+    params: CLAP_PARAMS,
+    settings: &[],
+    role: Role::Instrument {
+        plays: DRUM,
+        default_duck_source: false,
+        make: |sample_rate, _| Box::new(Clap::new(sample_rate)),
+    },
+};
+
+pub static HAT_CLOSED: ModuleDescriptor = ModuleDescriptor {
+    name: "hat_closed",
+    prefix: "hat_closed",
+    params: HAT_CLOSED_PARAMS,
+    settings: &[],
+    role: Role::Instrument {
+        plays: DRUM,
+        default_duck_source: false,
+        make: |sample_rate, _| Box::new(Hat::new(HatKind::Closed, sample_rate)),
+    },
+};
+
+pub static HAT_OPEN: ModuleDescriptor = ModuleDescriptor {
+    name: "hat_open",
+    prefix: "hat_open",
+    params: HAT_OPEN_PARAMS,
+    settings: &[],
+    role: Role::Instrument {
+        plays: DRUM,
+        default_duck_source: false,
+        make: |sample_rate, _| Box::new(Hat::new(HatKind::Open, sample_rate)),
+    },
+};
+
+pub static RIDE: ModuleDescriptor = ModuleDescriptor {
+    name: "ride",
+    prefix: "ride",
+    params: RIDE_PARAMS,
+    settings: &[],
+    role: Role::Instrument {
+        plays: DRUM,
+        default_duck_source: false,
+        make: |sample_rate, _| Box::new(Hat::new(HatKind::Ride, sample_rate)),
+    },
+};
+
+pub static DISTORTION: ModuleDescriptor = ModuleDescriptor {
+    name: "distortion",
+    prefix: "dist",
+    params: DIST_PARAMS,
+    settings: &[SettingSpec {
+        name: "mode",
+        values: &["soft", "hard", "overdrive"],
+        default: "soft",
+        help: "Soft rounds the peaks off, hard clips them flat, overdrive adds asymmetric grit.",
+    }],
+    role: Role::Effect {
+        make: |sample_rate, settings| {
             let mut d = Distortion::new(sample_rate);
-            d.set_mode(*mode);
+            d.set_mode(
+                DistortionMode::from_name(settings[0])
+                    .expect("the distortion `mode` is one of its setting values"),
+            );
             Box::new(d)
-        }
-        FxSpec::Eq { .. } => Box::new(Equalizer::new(sample_rate)),
-    }
-}
+        },
+    },
+};
+
+pub static EQ: ModuleDescriptor = ModuleDescriptor {
+    name: "eq",
+    prefix: "eq",
+    params: EQ_PARAMS,
+    settings: &[],
+    role: Role::Effect {
+        make: |sample_rate, _| Box::new(Equalizer::new(sample_rate)),
+    },
+};

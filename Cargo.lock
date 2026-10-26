@@ -4617,6 +4617,7 @@ dependencies = [
  "tune-audio",
  "tune-dsp",
  "tune-engine",
+ "tune-modules",
  "tune-song",
  "tune-studio",
  "ureq",
@@ -4653,7 +4654,15 @@ dependencies = [
  "thiserror 2.0.21",
  "tune-analysis",
  "tune-dsp",
+ "tune-modules",
  "tune-song",
+]
+
+[[package]]
+name = "tune-modules"
+version = "0.1.0"
+dependencies = [
+ "tune-dsp",
 ]
 
 [[package]]

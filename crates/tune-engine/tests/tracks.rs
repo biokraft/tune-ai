@@ -1,6 +1,7 @@
 use tune_dsp::ParamError;
 use tune_dsp::acid303::AcidStep;
-use tune_engine::{Cell, Clock, Instrument, StepCtx, hit_seed, make_instrument, track_seed};
+use tune_engine::{Cell, Clock, Instrument, StepCtx, hit_seed, track_seed};
+use tune_modules::{ACID303, KICK, Registry};
 use tune_song::InstrumentKind;
 
 fn rms(x: &[f64]) -> f64 {
@@ -48,14 +49,14 @@ fn seeds_pinned() {
 
 #[test]
 fn acid_track_gate_closes_half_step() {
-    let mut t = make_instrument(InstrumentKind::Acid303, 48_000.0);
+    let mut t = ACID303.make_instrument(48_000.0, &[]).unwrap();
     let out = drive(t.as_mut(), &[note(false), Cell::Rest], 12_000);
     assert!(rms(&out[3600..6000]) < 0.01 * rms(&out[0..3000]));
 }
 
 #[test]
 fn acid_track_tie_holds_gate() {
-    let mut t = make_instrument(InstrumentKind::Acid303, 48_000.0);
+    let mut t = ACID303.make_instrument(48_000.0, &[]).unwrap();
     // `C2~ C2`: the first step slides into a note, so the gate stays open.
     let out = drive(t.as_mut(), &[note(true), note(false)], 12_000);
     assert!(rms(&out[3600..6000]) > 0.3 * rms(&out[0..3000]));
@@ -63,17 +64,17 @@ fn acid_track_tie_holds_gate() {
 
 #[test]
 fn drum_track_hits_only() {
-    let mut k = make_instrument(InstrumentKind::Kick, 48_000.0);
+    let mut k = KICK.make_instrument(48_000.0, &[]).unwrap();
     let out = drive(k.as_mut(), &[Cell::Rest], 6000);
     assert!(out.iter().all(|&v| v == 0.0));
-    let mut k = make_instrument(InstrumentKind::Kick, 48_000.0);
+    let mut k = KICK.make_instrument(48_000.0, &[]).unwrap();
     let out = drive(k.as_mut(), &[Cell::Hit { accent: false }], 6000);
     assert!(out.iter().any(|&v| v != 0.0));
 }
 
 #[test]
 fn set_param_by_id() {
-    let mut k = make_instrument(InstrumentKind::Kick, 48_000.0);
+    let mut k = KICK.make_instrument(48_000.0, &[]).unwrap();
     assert!(k.set_param("kick.tune", 60.0).is_ok());
     assert!(matches!(
         k.set_param("acid303.cutoff", 1000.0),
@@ -87,8 +88,13 @@ fn set_param_by_id() {
 
 #[test]
 fn params_tables() {
+    let registry = Registry::builtin();
     for k in InstrumentKind::ALL {
-        let a: Vec<_> = make_instrument(k, 48_000.0)
+        let a: Vec<_> = registry
+            .get(k.name())
+            .unwrap()
+            .make_instrument(48_000.0, &[])
+            .unwrap()
             .params()
             .iter()
             .map(|p| p.id)

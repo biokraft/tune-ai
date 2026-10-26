@@ -4,8 +4,9 @@ use std::fmt::Write as _;
 use std::process::ExitCode;
 
 use serde_json::{Map, Value, json};
-use tune_dsp::{Curve, DIST_PARAMS, EQ_PARAMS, ParamSpec, STRIP_PARAMS};
-use tune_song::{InstrumentKind, MixUnit};
+use tune_dsp::{Curve, ParamSpec, STRIP_PARAMS};
+use tune_modules::{ModuleDescriptor, Registry, SettingSpec};
+use tune_song::MixUnit;
 
 use crate::report::{Success, finish};
 
@@ -29,17 +30,42 @@ fn spec_json(p: &ParamSpec) -> Value {
     })
 }
 
+fn setting_json(s: &SettingSpec) -> Value {
+    json!({
+        "name": s.name,
+        "values": s.values,
+        "default": s.default,
+        "help": s.help,
+    })
+}
+
 pub fn run(json: bool) -> ExitCode {
-    let instruments: Vec<(&str, &[ParamSpec])> = InstrumentKind::ALL
-        .iter()
-        .map(|k| (k.name(), k.params()))
-        .collect();
-    let effects: Vec<(&str, &[ParamSpec])> = vec![("distortion", DIST_PARAMS), ("eq", EQ_PARAMS)];
+    let registry = Registry::builtin();
+    let instrument_modules: Vec<&ModuleDescriptor> = registry.instruments().collect();
+    let effect_modules: Vec<&ModuleDescriptor> = registry.effects().collect();
+    let tables = |modules: &[&ModuleDescriptor]| -> Vec<(&str, &[ParamSpec])> {
+        modules.iter().map(|m| (m.name, m.params)).collect()
+    };
+    let instruments = tables(&instrument_modules);
+    let effects = tables(&effect_modules);
     let mut text = String::new();
-    for (heading, groups) in [("instrument", &instruments), ("effect", &effects)] {
-        for (name, table) in groups {
-            let _ = writeln!(text, "{heading} {name}");
-            for p in *table {
+    for (heading, modules) in [
+        ("instrument", &instrument_modules),
+        ("effect", &effect_modules),
+    ] {
+        for m in modules {
+            let _ = writeln!(text, "{heading} {}", m.name);
+            for s in m.settings {
+                let _ = writeln!(
+                    text,
+                    "  setting {}: {} (default {})\n      {}",
+                    s.name,
+                    s.values.join("|"),
+                    s.default,
+                    s.help
+                );
+            }
+            for p in m.params {
                 let _ = writeln!(
                     text,
                     "  {:<24} {} {}..{} {} {} default {}\n      {}",
@@ -102,6 +128,17 @@ pub fn run(json: bool) -> ExitCode {
                 "effects": group(&effects),
                 "strip": STRIP_PARAMS.iter().map(spec_json).collect::<Vec<_>>(),
                 "mix": group(&mix),
+                "settings": registry
+                    .instruments()
+                    .chain(registry.effects())
+                    .filter(|m| !m.settings.is_empty())
+                    .map(|m| {
+                        (
+                            m.name.to_string(),
+                            Value::Array(m.settings.iter().map(setting_json).collect()),
+                        )
+                    })
+                    .collect::<Map<_, _>>(),
             }),
         }),
     )
