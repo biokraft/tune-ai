@@ -129,8 +129,9 @@ pub struct CellSource {
     pub offset_steps: u64,
 }
 
-/// A stretch of bars over which no placement and no lane stretch starts or
-/// ends; it runs up to the next region's `start_bar` (or the song's end).
+/// A stretch of bars inside which no section starts and no placement or
+/// lane stretch starts or ends; it runs up to the next region's
+/// `start_bar` (or the song's end).
 #[derive(Clone, Debug)]
 pub struct CompiledRegion {
     pub start_bar: u32,
