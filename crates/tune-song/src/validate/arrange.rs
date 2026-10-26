@@ -153,12 +153,13 @@ pub(super) fn v2(
         }
         _ => no_sections(errors),
     }
-    // The song's length, when every section is valid; the checks against
-    // it are skipped otherwise (the broken section has its own error).
+    // The song's length, when there are sections and every one is valid; the
+    // checks against it are skipped otherwise (a broken section, or none at
+    // all, has its own error).
     let total = raw
         .sections
         .as_ref()
-        .is_some_and(|list| list.len() == sections.len())
+        .is_some_and(|list| !list.is_empty() && list.len() == sections.len())
         .then(|| sections.iter().map(|s| s.bars).sum::<u32>());
 
     for (id, t) in &raw.tracks {
