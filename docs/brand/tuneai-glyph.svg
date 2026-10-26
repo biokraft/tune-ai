@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="19 19 82 82" width="82" height="82">
+  <title>TuneAI</title>
+  <g fill="#FFFFFF" fill-opacity=".1">
+    <rect x="19" y="41" width="16" height="16" rx="4"/>
+    <rect x="85" y="41" width="16" height="16" rx="4"/>
+    <rect x="19" y="63" width="16" height="16" rx="4"/>
+    <rect x="85" y="63" width="16" height="16" rx="4"/>
+    <rect x="19" y="85" width="16" height="16" rx="4"/>
+    <rect x="85" y="85" width="16" height="16" rx="4"/>
+  </g>
+  <g fill="#A8F04C">
+    <rect x="19" y="19" width="16" height="16" rx="4"/>
+    <rect x="41" y="19" width="16" height="16" rx="4"/>
+    <rect x="63" y="19" width="16" height="16" rx="4"/>
+    <rect x="41" y="41" width="16" height="16" rx="4"/>
+    <rect x="63" y="41" width="16" height="16" rx="4"/>
+    <rect x="41" y="63" width="16" height="16" rx="4"/>
+    <rect x="63" y="63" width="16" height="16" rx="4"/>
+    <rect x="41" y="85" width="16" height="16" rx="4"/>
+    <rect x="63" y="85" width="16" height="16" rx="4"/>
+  </g>
+  <rect x="85" y="19" width="16" height="16" rx="4" fill="#3FDCEB"/>
+</svg>

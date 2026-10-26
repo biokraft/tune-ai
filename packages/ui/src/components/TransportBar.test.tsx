@@ -34,6 +34,14 @@ function setup(extra: Partial<TransportBarProps> = {}) {
 }
 
 describe("TransportBar", () => {
+  it("shows the TuneAI mark beside the song name, not the old pulse glyph", () => {
+    setup();
+    const bar = screen.getByRole("toolbar", { name: "Transport" });
+    expect(bar.querySelector('svg[viewBox="0 0 120 120"]')).not.toBeNull();
+    expect(bar.querySelector('path[d="M3 12h2l2-6 3 12 3-9 2 5 2-2h4"]')).toBeNull();
+    expect(bar).toHaveTextContent("first-acid");
+  });
+
   it("loop disabled without selection", () => {
     setup({ canLoop: false });
     expect(screen.getByRole("button", { name: "Loop (L)" })).toBeDisabled();

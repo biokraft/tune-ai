@@ -30,3 +30,4 @@ export { Fader, type FaderProps } from "./components/Fader";
 export { Segmented, type SegmentedProps } from "./components/Segmented";
 export { MuteSolo, type MuteSoloProps } from "./components/MuteSolo";
 export { IconButton, type IconButtonProps } from "./components/IconButton";
+export { TuneMark, type TuneMarkProps } from "./components/TuneMark";

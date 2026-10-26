@@ -1,7 +1,10 @@
-# tune-ai
+<img src="docs/brand/tuneai-mark.svg" width="96" alt="TuneAI">
+
+# TuneAI
 
 A Rust music workstation. The first milestone is a faithful port of the
 Open303 TB-303 emulation, rendered to WAV through the `tune` command line tool.
+The studio app is called TuneAI; the command-line tool is still `tune`.
 
 ## Prerequisites
 
