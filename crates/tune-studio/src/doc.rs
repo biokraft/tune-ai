@@ -373,22 +373,23 @@ fn write_plays(doc: &mut DocumentMut, old: &Song, new: &Song) -> Option<()> {
 /// Rebuilds the root `automation` list (`[[automation]]` tables or an inline
 /// array) from the arranged stretches: a kept stretch reuses its old table,
 /// comments included, with only the values that changed put in place; a
-/// copy clones the original's table; a later piece of a split stretch is a
-/// new table. Old tables of stretches that are gone are dropped.
+/// copy clones the original's table. Of a split stretch whose first piece
+/// is gone, the first piece left reuses the old table, so its comments
+/// stay; any other piece is a new table. Old tables of stretches that are
+/// gone are dropped.
 fn write_automation(doc: &mut DocumentMut, old: &Song, arranged: &Arranged) -> Option<()> {
     let root = doc.as_table_mut();
-    let lanes = arranged.song.automation.iter().zip(&arranged.lanes);
+    let reused = reused_tables(&arranged.lanes);
+    let lanes = arranged.song.automation.iter().zip(reused);
     let empty = arranged.lanes.is_empty();
     match root.get_mut("automation") {
         None => return empty.then_some(()),
         Some(Item::ArrayOfTables(aot)) => {
             let mut new = ArrayOfTables::new();
-            for (lane, origin) in lanes {
-                let (table, before) = match *origin {
-                    LaneOrigin::Kept(i) | LaneOrigin::Copy(i) => {
-                        (aot.get(i)?.clone(), Some(old.automation.get(i)?))
-                    }
-                    LaneOrigin::Split(_) => {
+            for (lane, reuse) in lanes {
+                let (table, before) = match reuse {
+                    Some(i) => (aot.get(i)?.clone(), Some(old.automation.get(i)?)),
+                    None => {
                         let mut table = Table::new();
                         table.decor_mut().set_prefix("\n");
                         (table, None)
@@ -402,12 +403,10 @@ fn write_automation(doc: &mut DocumentMut, old: &Song, arranged: &Arranged) -> O
         }
         Some(Item::Value(toml_edit::Value::Array(array))) => {
             let mut new = Vec::new();
-            for (lane, origin) in lanes {
-                let (mut value, before) = match *origin {
-                    LaneOrigin::Kept(i) | LaneOrigin::Copy(i) => {
-                        (array.get(i)?.clone(), Some(old.automation.get(i)?))
-                    }
-                    LaneOrigin::Split(_) => (InlineTable::new().into(), None),
+            for (lane, reuse) in lanes {
+                let (mut value, before) = match reuse {
+                    Some(i) => (array.get(i)?.clone(), Some(old.automation.get(i)?)),
+                    None => (InlineTable::new().into(), None),
                 };
                 put_lane(Slot::Inline(value.as_inline_table_mut()?), before, lane)?;
                 if before.is_none() {
@@ -423,6 +422,32 @@ fn write_automation(doc: &mut DocumentMut, old: &Song, arranged: &Arranged) -> O
         root.remove("automation");
     }
     Some(())
+}
+
+/// For each arranged stretch, the index of the old table it is written into:
+/// its own for a kept stretch or a copy; for a split piece, the original's
+/// when no kept piece of that stretch is left and no earlier piece took it;
+/// `None` for a new table.
+fn reused_tables(origins: &[LaneOrigin]) -> Vec<Option<usize>> {
+    let kept: Vec<usize> = origins
+        .iter()
+        .filter_map(|o| match *o {
+            LaneOrigin::Kept(i) => Some(i),
+            _ => None,
+        })
+        .collect();
+    let mut taken = Vec::new();
+    origins
+        .iter()
+        .map(|o| match *o {
+            LaneOrigin::Kept(i) | LaneOrigin::Copy(i) => Some(i),
+            LaneOrigin::Split(i) if !kept.contains(&i) && !taken.contains(&i) => {
+                taken.push(i);
+                Some(i)
+            }
+            LaneOrigin::Split(_) => None,
+        })
+        .collect()
 }
 
 /// Writes stretch `lane` into its table. `before` is the stretch the table
