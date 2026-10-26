@@ -29,7 +29,9 @@ pub use doc::{EditError, SongDoc, effective_value, placement_json};
 pub use error::{ErrorView, StudioError};
 pub use log::{EditEntry, EditLog, Source, text_hash};
 pub use path::{SongPath, TrackField};
-pub use set::{SetOutcome, parse_assignment, set_paths, write_atomic};
+pub use set::{
+    MigrateOutcome, SetOutcome, migrate_file, parse_assignment, set_paths, write_atomic,
+};
 pub use studio::{Event, PLAYHEAD_INTERVAL, Studio, StudioConfig, StudioHandle};
 pub use view::{
     AcidStepView, FxView, LaneView, MixView, ParamView, PatternView, SectionView, SongView,

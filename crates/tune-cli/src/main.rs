@@ -24,6 +24,8 @@ enum Command {
     Validate(SongArgs),
     /// Show a song's sections and tracks.
     Info(SongArgs),
+    /// Upgrade a song file to the newest format, keeping its comments.
+    Migrate(MigrateArgs),
     /// Render a song (or a bar range) to WAV.
     Render(RenderArgs),
     /// Play a song through the audio device, reloading it when the file changes.
@@ -132,6 +134,18 @@ struct ServeArgs {
     #[arg(long, value_name = "DIR", default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/desktop/dist"))]
     ui: PathBuf,
     /// Print JSON events instead of text.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct MigrateArgs {
+    /// Song file (TOML).
+    song: PathBuf,
+    /// Show the migrated file without writing it or logging anything.
+    #[arg(long)]
+    dry_run: bool,
+    /// Print JSON instead of text.
     #[arg(long)]
     json: bool,
 }
@@ -397,6 +411,7 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Validate(a) => cmd::validate::run(&a.song, a.json),
         Command::Info(a) => cmd::info::run(&a.song, a.json),
+        Command::Migrate(a) => cmd::migrate::run(&a.song, a.dry_run, a.json),
         Command::Render(a) => cmd::render::run(&cmd::render::Args {
             song: a.song,
             bars: a.bars,
