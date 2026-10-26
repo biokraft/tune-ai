@@ -123,6 +123,41 @@ fn external_edit_logged_and_undoable() {
     assert_eq!(core.song().bpm, 120.0);
 }
 
+/// A v1 text from outside is read migrated in memory, not written back,
+/// and its change list says the version on disk changed.
+#[test]
+fn v1_text_from_outside_is_read_migrated() {
+    let s = song();
+    let mut core = open(&s);
+    let v1 = bpm_121(include_str!("fixtures/commented-v1.toml"));
+    fs::write(&s.path, &v1).unwrap();
+    let ext = core.on_disk_text(v1.clone()).expect("an external change");
+    let changes: Vec<(String, serde_json::Value, serde_json::Value)> = ext
+        .changes
+        .iter()
+        .map(|c| (c.path.to_string(), c.old.clone(), c.new.clone()))
+        .collect();
+    assert_eq!(
+        changes,
+        [
+            ("song.version".into(), json!(2), json!(1)),
+            ("song.bpm".into(), json!(120), json!(121)),
+        ]
+    );
+    assert_eq!(disk(&s), v1, "not written back");
+    assert_eq!(core.song().bpm, 121.0);
+
+    // The next edit writes v2 again.
+    core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
+    let written = core.flush().unwrap();
+    assert_eq!(written[0].path, SongPath::Version);
+    let now = disk(&s);
+    assert!(
+        now.contains("[song]\nversion = 2\n") && now.contains("bpm = 121"),
+        "{now}"
+    );
+}
+
 #[test]
 fn claude_edit_attributed() {
     let s = song();

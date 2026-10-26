@@ -364,6 +364,12 @@ impl Actor {
                 }
                 Ok(Msg::Subscribe(tx)) => {
                     if tx.send(Event::State(self.state())).is_ok() {
+                        // A song opened before anyone listened (the one the
+                        // studio was spawned on) still reports a failed
+                        // write-back of its migration.
+                        if let Some(message) = self.migration_error() {
+                            let _ = tx.send(Event::Error { message });
+                        }
                         self.subscribers.push(tx);
                     }
                 }
@@ -500,7 +506,19 @@ impl Actor {
         self.drag = None;
         self.released = None;
         self.flush_failed_at = None;
+        if let Some(message) = self.migration_error() {
+            self.emit(Event::Error { message });
+        }
         Ok(())
+    }
+
+    /// Why the open song's migration could not be written back, as the
+    /// producer reads it.
+    fn migration_error(&self) -> Option<String> {
+        let error = self.song.as_ref()?.core.migration_error()?;
+        Some(format!(
+            "the song was upgraded to the new file format in memory but not saved: {error}"
+        ))
     }
 
     /// Opens `path`; if it does not parse, watches it and waits for a fix.
@@ -933,6 +951,7 @@ impl Actor {
                 .map(|c| c.file_errors().to_vec())
                 .or(unopened.map(|u| u.errors.clone()))
                 .unwrap_or_default(),
+            migrated_from: core.and_then(StudioCore::migrated_from),
         }
     }
 

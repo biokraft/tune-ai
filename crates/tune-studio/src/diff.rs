@@ -143,6 +143,31 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
     out
 }
 
+/// The `song.version` change of a file whose format went from version `old`
+/// to `new`, if it changed.
+pub(crate) fn version_change(old: u32, new: u32) -> Option<Change> {
+    (old != new).then(|| Change {
+        path: SongPath::Version,
+        old: Value::from(old),
+        new: Value::from(new),
+    })
+}
+
+/// The changes between two texts of a song file, given the format version
+/// each was written in and the song it describes: `song.version` first when
+/// the version differs, then [`diff_songs`].
+pub(crate) fn diff_files(
+    old_version: u32,
+    old: &Song,
+    new_version: u32,
+    new: &Song,
+) -> Vec<Change> {
+    version_change(old_version, new_version)
+        .into_iter()
+        .chain(diff_songs(old, new))
+        .collect()
+}
+
 /// Names in `a` order, then those only in `b`.
 fn union<'a>(
     a: impl Iterator<Item = &'a String>,

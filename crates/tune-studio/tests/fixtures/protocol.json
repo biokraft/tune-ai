@@ -905,7 +905,8 @@
           "column": 5,
           "message": "expected a value"
         }
-      ]
+      ],
+      "migrated_from": 1
     },
     {
       "event": "playhead",
