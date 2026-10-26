@@ -123,6 +123,40 @@ fn external_edit_logged_and_undoable() {
     assert_eq!(core.song().bpm, 120.0);
 }
 
+/// A pending resize of section 0 moves section 1's partial placement; an
+/// external edit of only that placement does not conflict with it.
+#[test]
+fn resize_merges_with_an_edit_of_a_later_partial_placement() {
+    let partial = FIXTURE.replacen(
+        "play = [{ at = 3, clip = \"a1\", bars = 2 }]",
+        "play = [{ at = 3, clip = \"a1\", bars = 1, offset = 1 }]",
+        1,
+    );
+    assert_ne!(partial, FIXTURE);
+    let s = song();
+    fs::write(&s.path, &partial).unwrap();
+    let mut core = open(&s);
+    core.apply_edit(
+        &Command::ResizeSection { index: 0, bars: 6 },
+        Instant::now(),
+    )
+    .unwrap();
+    let text = partial.replacen("bars = 1, offset = 1 }", "bars = 1 }", 1);
+    fs::write(&s.path, &text).unwrap();
+
+    let ext = core.on_disk_text(text).expect("a change");
+    let changes: Vec<String> = ext.changes.iter().map(|c| c.path.to_string()).collect();
+    assert_eq!(changes, ["sections[1].play.acid"]);
+    let merged: Vec<String> = ext.merged.iter().map(|c| c.path.to_string()).collect();
+    assert_eq!(merged, ["sections[0].bars"]);
+    assert!(ext.offered.is_empty(), "{:?}", ext.offered);
+    let now = disk(&s);
+    assert!(
+        now.contains("play = [{ at = 7, clip = \"a1\", bars = 1 }]"),
+        "{now}"
+    );
+}
+
 /// A v1 text from outside is read migrated in memory, not written back,
 /// and its change list says the version on disk changed.
 #[test]
