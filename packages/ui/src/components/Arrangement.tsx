@@ -31,7 +31,6 @@ export type ArrangementTrack = { id: string; instrument: string; mute: boolean; 
 /** A pattern as its block draws it: one glyph value per step (rest 0, hit or note 0.6, accent 1). */
 export type ArrangementPattern = {
   id: string;
-  track: string;
   kind: "acid" | "drum";
   glyph: number[];
 };

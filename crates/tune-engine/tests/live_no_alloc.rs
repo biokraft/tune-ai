@@ -126,7 +126,7 @@ fn process_never_allocates_or_frees() {
     // adds a `clap` track (fresh runtime) and mutes the kick (kept runtime).
     let mut b = song(MINI);
     b.tracks.shift_remove("hat");
-    b.patterns.shift_remove("h");
+    b.clips.shift_remove("h");
     for s in &mut b.sections {
         s.play.shift_remove("hat");
     }

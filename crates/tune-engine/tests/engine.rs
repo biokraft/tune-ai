@@ -439,7 +439,7 @@ fn mute_and_solo() {
 
     let mut removed = base.clone();
     removed.tracks.shift_remove("kick");
-    removed.patterns.shift_remove("k4");
+    removed.clips.shift_remove("k4");
     for section in &mut removed.sections {
         section.play.shift_remove("kick");
     }

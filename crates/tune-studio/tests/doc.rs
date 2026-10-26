@@ -697,3 +697,14 @@ fn fx_setting_path_is_generic() {
     assert_eq!(d.get(&path("tracks.acid.eq.mode")), None);
     assert_eq!(d.text(), before);
 }
+
+#[test]
+fn views_list_clips_and_what_tracks_play() {
+    let view = serde_json::to_value(tune_studio::SongView::from(doc().song())).unwrap();
+    let first = &view["patterns"][0];
+    assert_eq!(first["kind"], "drum");
+    assert_eq!(first["id"], "k4");
+    assert!(first.get("track").is_none(), "a clip has no track: {first}");
+    assert_eq!(view["tracks"][0]["plays"], json!(["drum"]));
+    assert_eq!(view["tracks"][1]["plays"], json!(["acid"]));
+}

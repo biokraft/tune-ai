@@ -6,9 +6,9 @@ use tune_dsp::{
     DELAY_PARAMS, DrumPattern, MASTER_PARAMS, ParamSpec, REVERB_PARAMS, STRIP_PARAMS,
     STRIP_SEND_DELAY, STRIP_SEND_REVERB, find_spec,
 };
-use tune_modules::ModuleDescriptor;
+use tune_modules::{ClipKind, ModuleDescriptor};
 
-/// A whole song: header, tracks, patterns and the arrangement.
+/// A whole song: header, tracks, clips and the arrangement.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Song {
     pub name: String,
@@ -18,7 +18,8 @@ pub struct Song {
     /// `None` means the renderer's default (48 000 Hz).
     pub sample_rate: Option<u32>,
     pub tracks: IndexMap<String, Track>,
-    pub patterns: IndexMap<String, Pattern>,
+    /// The clip pool, in song-file order.
+    pub clips: IndexMap<String, Clip>,
     pub sections: Vec<Section>,
     /// The `[mix]` table: master mode, duck source and bus params.
     pub mix: Mix,
@@ -237,18 +238,32 @@ impl Track {
     }
 }
 
-/// A named loop of steps for one track.
+/// A named loop of steps in the pool of clips. A clip belongs to no track;
+/// which tracks can play it follows from its kind.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Pattern {
-    pub track: String,
-    pub steps: PatternSteps,
+pub enum Clip {
+    /// Steps in 303 notation.
+    Acid(AcidPattern),
+    /// Steps in drum notation.
+    Drum(DrumPattern),
 }
 
-/// Steps in the notation of the pattern's track.
-#[derive(Clone, Debug, PartialEq)]
-pub enum PatternSteps {
-    Acid(AcidPattern),
-    Drum(DrumPattern),
+impl Clip {
+    /// The kind a module must list in `plays` to play this clip.
+    pub fn kind(&self) -> ClipKind {
+        match self {
+            Self::Acid(_) => ClipKind::Acid,
+            Self::Drum(_) => ClipKind::Drum,
+        }
+    }
+
+    /// The steps in the clip's notation, as the song file writes them.
+    pub fn steps_text(&self) -> String {
+        match self {
+            Self::Acid(p) => p.to_string(),
+            Self::Drum(p) => p.to_string(),
+        }
+    }
 }
 
 /// A stretch of the arrangement.

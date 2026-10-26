@@ -4,7 +4,7 @@
 use indexmap::IndexMap;
 use serde::Serialize;
 use tune_dsp::{Curve, ParamSpec, STRIP_PARAMS};
-use tune_song::{Device, MasterMode, MixUnit, PatternSteps, Song};
+use tune_song::{Clip, ClipKind, Device, MasterMode, MixUnit, Song};
 
 use crate::command::DrumHitDto;
 use crate::diff::Change;
@@ -35,6 +35,7 @@ pub struct SongView {
     pub bpm: f64,
     pub total_bars: u32,
     pub tracks: Vec<TrackView>,
+    /// The clip pool, in song-file order.
     pub patterns: Vec<PatternView>,
     pub sections: Vec<SectionView>,
     pub mix: MixView,
@@ -64,6 +65,8 @@ pub struct MixView {
 pub struct TrackView {
     pub id: String,
     pub instrument: String,
+    /// The clip kinds the instrument plays (`"acid"`, `"drum"`).
+    pub plays: Vec<String>,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -111,12 +114,10 @@ pub struct FxView {
 pub enum PatternView {
     Acid {
         id: String,
-        track: String,
         steps: Vec<AcidStepView>,
     },
     Drum {
         id: String,
-        track: String,
         hits: Vec<DrumHitDto>,
     },
 }
@@ -166,6 +167,11 @@ impl From<&Song> for SongView {
                 .map(|(id, t)| TrackView {
                     id: id.clone(),
                     instrument: t.instrument.module.name.to_owned(),
+                    plays: ClipKind::ALL
+                        .into_iter()
+                        .filter(|&k| t.instrument.module.plays(k))
+                        .map(|k| k.name().to_owned())
+                        .collect(),
                     gain_db: t.gain_db,
                     pan: t.pan,
                     mute: t.mute,
@@ -176,12 +182,11 @@ impl From<&Song> for SongView {
                 })
                 .collect(),
             patterns: song
-                .patterns
+                .clips
                 .iter()
-                .map(|(id, p)| match &p.steps {
-                    PatternSteps::Acid(a) => PatternView::Acid {
+                .map(|(id, p)| match p {
+                    Clip::Acid(a) => PatternView::Acid {
                         id: id.clone(),
-                        track: p.track.clone(),
                         steps: a
                             .steps()
                             .iter()
@@ -192,9 +197,8 @@ impl From<&Song> for SongView {
                             })
                             .collect(),
                     },
-                    PatternSteps::Drum(d) => PatternView::Drum {
+                    Clip::Drum(d) => PatternView::Drum {
                         id: id.clone(),
-                        track: p.track.clone(),
                         hits: d.hits().iter().map(|&h| h.into()).collect(),
                     },
                 })

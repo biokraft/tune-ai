@@ -28,7 +28,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tune_dsp::DrumPattern;
 use tune_dsp::acid303::{AcidPattern, AcidStep};
-use tune_song::{PatternSteps, Registry, Song};
+use tune_song::{Clip, Registry, Song};
 
 use crate::command::Command;
 use crate::diff::{Change, diff_songs, is_whole_replace};
@@ -639,8 +639,8 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
                 pattern: pattern.clone(),
             };
             let mut steps = match pattern_steps(doc, &path, pattern)? {
-                PatternSteps::Acid(p) => p.steps().to_vec(),
-                PatternSteps::Drum(_) => return Err(bad(&path, "not an acid pattern").into()),
+                Clip::Acid(p) => p.steps().to_vec(),
+                Clip::Drum(_) => return Err(bad(&path, "not an acid pattern").into()),
             };
             let step = step_mut(&mut steps, *index)?;
             *step = AcidStep {
@@ -660,8 +660,8 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
                 pattern: pattern.clone(),
             };
             let mut hits = match pattern_steps(doc, &path, pattern)? {
-                PatternSteps::Drum(p) => p.hits().to_vec(),
-                PatternSteps::Acid(_) => return Err(bad(&path, "not a drum pattern").into()),
+                Clip::Drum(p) => p.hits().to_vec(),
+                Clip::Acid(_) => return Err(bad(&path, "not a drum pattern").into()),
             };
             *step_mut(&mut hits, *index)? = (*hit).into();
             let p = DrumPattern::new(hits).map_err(|e| bad(&path, &e.to_string()))?;
@@ -780,11 +780,10 @@ fn pattern_steps<'d>(
     doc: &'d SongDoc,
     path: &SongPath,
     pattern: &str,
-) -> Result<&'d PatternSteps, EditError> {
+) -> Result<&'d Clip, EditError> {
     doc.song()
-        .patterns
+        .clips
         .get(pattern)
-        .map(|p| &p.steps)
         .ok_or_else(|| EditError::NoSuchTarget(path.to_string()))
 }
 

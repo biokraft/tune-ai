@@ -8,15 +8,15 @@ use tune_modules::ClipKind;
 use super::tracks::{TrackShape, find_in, unknown_param};
 use super::{BARS, Duck, unknown_track};
 use crate::error::Errors;
-use crate::model::{Lane, MIX_TRACK_ID, MixUnit, Pattern, PatternSteps, Section};
+use crate::model::{Clip, Lane, MIX_TRACK_ID, MixUnit, Section};
 use crate::raw::{At, RawLane, RawPattern, RawSection};
 
-pub(super) fn pattern(
+pub(super) fn clip(
     id: &At<String>,
     p: &RawPattern,
     shapes: &IndexMap<&str, TrackShape>,
     errors: &mut Errors,
-) -> Option<Pattern> {
+) -> Option<Clip> {
     let track = p.track.as_ref()?;
     let Some(shape) = shapes.get(track.value.as_str()) else {
         errors.at(&track.span, unknown_track(&track.value));
@@ -27,24 +27,21 @@ pub(super) fn pattern(
     let module = shape.instrument?;
     let parsed = if module.plays(ClipKind::Drum) {
         DrumPattern::parse(&steps.value)
-            .map(PatternSteps::Drum)
+            .map(Clip::Drum)
             .map_err(|e| match e {
                 DrumPatternError::Length(n) => Err(n),
                 other => Ok(other.to_string()),
             })
     } else {
         AcidPattern::parse(&steps.value)
-            .map(PatternSteps::Acid)
+            .map(Clip::Acid)
             .map_err(|e| match e {
                 PatternError::Length(n) => Err(n),
                 other => Ok(other.to_string()),
             })
     };
     match parsed {
-        Ok(steps) => Some(Pattern {
-            track: track.value.clone(),
-            steps,
-        }),
+        Ok(clip) => Some(clip),
         Err(Err(n)) => {
             errors.at(
                 &steps.span,

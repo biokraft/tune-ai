@@ -6,9 +6,29 @@ use std::fmt::Write as _;
 
 use indexmap::IndexMap;
 
-use crate::model::{Device, PatternSteps, Song};
+use crate::model::{Clip, Device, Song};
 
 impl Song {
+    /// The track a v1 file names as the owner of clip `id`: the first track
+    /// whose section `play` uses it, else the first whose instrument plays
+    /// its kind.
+    fn v1_owner(&self, id: &str, clip: &Clip) -> &str {
+        let used = self
+            .sections
+            .iter()
+            .flat_map(|s| &s.play)
+            .find(|(_, c)| c.as_str() == id)
+            .map(|(t, _)| t.as_str());
+        used.or_else(|| {
+            self.tracks
+                .iter()
+                .find(|(_, t)| t.instrument.module.plays(clip.kind()))
+                .map(|(t, _)| t.as_str())
+        })
+        .or_else(|| self.tracks.keys().next().map(String::as_str))
+        .unwrap_or("")
+    }
+
     /// The song in canonical TOML form. Parsing the result gives back an equal
     /// song.
     pub fn to_toml(&self) -> String {
@@ -52,14 +72,12 @@ impl Song {
             }
         }
 
-        for (id, pattern) in &self.patterns {
+        // v1 binds a pattern to a track; the model keeps no binding, so write
+        // the first track that plays it, else the first that could.
+        for (id, clip) in &self.clips {
             let _ = write!(out, "\n[patterns.{}]\n", key(id));
-            let _ = writeln!(out, "track = {}", string(&pattern.track));
-            let steps = match &pattern.steps {
-                PatternSteps::Acid(p) => p.to_string(),
-                PatternSteps::Drum(p) => p.to_string(),
-            };
-            let _ = writeln!(out, "steps = {}", string(&steps));
+            let _ = writeln!(out, "track = {}", string(self.v1_owner(id, clip)));
+            let _ = writeln!(out, "steps = {}", string(&clip.steps_text()));
         }
 
         for section in &self.sections {

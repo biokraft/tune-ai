@@ -110,7 +110,7 @@ fn kick_muted() -> Arc<CompiledSong> {
 fn without_hat() -> Arc<CompiledSong> {
     mini_with(|s| {
         s.tracks.shift_remove("hat");
-        s.patterns.shift_remove("h");
+        s.clips.shift_remove("h");
         for section in &mut s.sections {
             section.play.shift_remove("hat");
         }
