@@ -166,7 +166,7 @@ pub(crate) fn read(
         doc.span(),
         "the song file",
         if v2 { ROOT_KEYS_V2 } else { ROOT_KEYS_V1 },
-        if v2 { ROOT_HINTS_V2 } else { &[] },
+        if v2 { ROOT_HINTS_V2 } else { ROOT_HINTS_V1 },
         errors,
     );
 
@@ -196,10 +196,11 @@ pub(crate) fn read(
         .into_iter()
         .filter_map(|(id, v)| {
             let what = format!("[tracks.{}]", id.value);
-            let f = Fields::open(
+            let f = Fields::open_hinted(
                 v,
                 &what,
                 if v2 { TRACK_KEYS_V2 } else { TRACK_KEYS_V1 },
+                if v2 { &[] } else { TRACK_HINTS_V1 },
                 errors,
             )?;
             let instrument = if v2 {
@@ -328,6 +329,10 @@ pub(crate) fn read(
     })
 }
 
+/// What a v1 file gets for a key that only version 2 has.
+const V2_SHAPE: &str = "this looks like a version 2 song: add `version = 2` to [song]";
+const ROOT_HINTS_V1: &[(&str, &str)] = &[("clips", V2_SHAPE), ("automation", V2_SHAPE)];
+const TRACK_HINTS_V1: &[(&str, &str)] = &[("play", V2_SHAPE)];
 const ROOT_KEYS_V1: &[&str] = &["song", "mix", "tracks", "patterns", "sections"];
 const ROOT_KEYS_V2: &[&str] = &["song", "mix", "tracks", "clips", "sections", "automation"];
 const ROOT_HINTS_V2: &[(&str, &str)] = &[(
