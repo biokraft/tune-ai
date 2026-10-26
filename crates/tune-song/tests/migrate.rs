@@ -148,8 +148,13 @@ fn mini_migrates_to_this_text() {
 fn migrated_song_equals_the_v1_song() {
     for (name, src) in SOURCES {
         let old = parse(src).unwrap().song;
+        let new = parse(&migrated(src));
+        // `Song`'s `==` ignores the order of its maps (tracks set the mix
+        // and stem order); the canonical text does not.
+        let canonical = new.as_ref().map(|p| p.song.to_toml());
+        assert_eq!(canonical, Ok(old.to_toml()), "{name}");
         assert_eq!(
-            parse(&migrated(src)),
+            new,
             Ok(Parsed {
                 song: old,
                 version: 2,
