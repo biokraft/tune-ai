@@ -1,19 +1,40 @@
 //! In-place song edits: paths, comment preservation, validation and section
-//! moves.
+//! operations.
 
 use serde_json::{Value, json};
-use tune_song::SectionPlay;
+use tune_song::{SectionPlay, placements_toml};
 use tune_studio::{EditError, SongDoc, SongPath};
 
+/// The commented fixture in format 2: `migrate(COMMENTED_V1)`.
 const COMMENTED: &str = include_str!("fixtures/commented.toml");
+const COMMENTED_V1: &str = include_str!("fixtures/commented-v1.toml");
 
-/// The four comments the fixture adds to the mini song.
-const COMMENTS: [&str; 4] = [
+/// The five comments the fixture adds to the mini song.
+const COMMENTS: [&str; 5] = [
     "# the body\n[tracks.kick]",
     "gain_db = -3 # headroom\n",
     "# the squelch\n[tracks.acid]",
     "# acid enters\n[[sections]]",
+    "# the filter opens over the section\n[[automation]]",
 ];
+
+/// Every comment line of `text`, in order.
+fn comment_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter_map(|l| l.find('#').map(|i| &l[i..]))
+        .collect()
+}
+
+/// The table headers of `text` from `from` on, in order.
+fn headers_from<'a>(text: &'a str, from: &str) -> Vec<&'a str> {
+    let start = text
+        .find(from)
+        .unwrap_or_else(|| panic!("`{from}` in:\n{text}"));
+    text[start..]
+        .lines()
+        .filter(|l| l.starts_with('['))
+        .collect()
+}
 
 fn doc() -> SongDoc {
     SongDoc::parse(COMMENTED).expect("fixture parses")
@@ -51,7 +72,8 @@ fn paths_round_trip() {
         "tracks.acid.dist.drive",
         "tracks.acid.dist.mode",
         "tracks.acid",
-        "patterns.a1.steps",
+        "clips.a1.steps",
+        "song.version",
         "sections[2].bars",
         "sections[0].name",
         "sections[1].lanes",
@@ -83,7 +105,41 @@ fn paths_serialize_as_strings() {
 
 #[test]
 fn parse_round_trips_text() {
-    assert_eq!(doc().text(), COMMENTED);
+    let d = doc();
+    assert_eq!(d.text(), COMMENTED);
+    assert_eq!(d.migrated_from(), None);
+}
+
+#[test]
+fn v1_text_is_migrated_in_memory() {
+    let d = SongDoc::parse(COMMENTED_V1).expect("the v1 fixture parses");
+    assert_eq!(d.migrated_from(), Some(1));
+    let text = d.text();
+    assert!(text.contains("[song]\nversion = 2\n"), "{text}");
+    assert_eq!(comment_lines(&text), comment_lines(COMMENTED_V1));
+    assert_eq!(text, COMMENTED, "the committed v2 fixture is the migration");
+    assert_eq!(d.song(), doc().song());
+    assert_eq!(d.get(&path("song.version")), Some(json!(2)));
+}
+
+#[test]
+fn clip_steps_path() {
+    let old: SongPath = "patterns.k4.steps".parse().unwrap();
+    let new: SongPath = "clips.k4.steps".parse().unwrap();
+    assert_eq!(old, new);
+    assert_eq!(old.to_string(), "clips.k4.steps");
+    let mut d = doc();
+    d.set(&new, &json!("x.x.x.x.x.x.x.x.")).unwrap();
+    assert_eq!(
+        changed_lines(COMMENTED, &d.text()),
+        ["steps = \"x.x.x.x.x.x.x.x.\""]
+    );
+    let k4 = d.text().find("[clips.k4]").unwrap();
+    assert!(
+        d.text()[k4..].starts_with("[clips.k4]\nkind = \"drum\"\nsteps = \"x.x.x.x.x.x.x.x.\"\n"),
+        "{}",
+        d.text()
+    );
 }
 
 #[test]
@@ -208,36 +264,43 @@ fn play_null_removes_key() {
             SectionPlay::Clip("h")
         ]
     );
+    // The acid plays nowhere now, so it has no `play` key.
+    let acid = &d.text()[d.text().find("[tracks.acid]").unwrap()..];
+    let acid = &acid[..acid.find("\n\n").unwrap()];
+    assert!(!acid.contains("play"), "{acid}");
     d.set(&path("sections[0].play.acid"), &json!("a1")).unwrap();
     assert_eq!(d.song().section_play(0, "acid"), SectionPlay::Clip("a1"));
     assert!(
         d.text()
-            .contains("play = { kick = \"k4\", hat = \"h\", acid = \"a1\" }"),
+            .contains("fx = [{ type = \"distortion\", mode = \"soft\", params = { \"dist.drive\" = 12 } }]\nplay = [{ at = 1, clip = \"a1\", bars = 2 }]\n"),
         "{}",
         d.text()
     );
 }
 
+/// Review Focus 1 and F9: the stretch under section `b` and the comment
+/// above it travel with `b`.
 #[test]
-fn move_section_carries_comments_and_lanes() {
+fn move_section_moves_its_automation_tables_with_it() {
     let mut d = doc();
     d.move_section(1, 0).unwrap();
     assert_eq!(names(&d), ["b", "a"]);
     let text = d.text();
-    let comment = text.find("# acid enters").expect("comment kept");
-    let first = text.find("[[sections]]").unwrap();
-    assert!(
-        comment < first,
-        "comment must lead the first section:\n{text}"
-    );
-    assert!(
-        text.contains("# acid enters\n[[sections]]\nname = \"b\""),
-        "{text}"
-    );
+    let b = "# acid enters\n[[sections]]\nname = \"b\"\nbars = 2\n\n\
+             # the filter opens over the section\n[[automation]]\n\
+             param = \"acid.acid303.cutoff\"\nat = 1\nbars = 2\n\
+             points = [[0, 0.1], [2, 0.8]]\n\n[[sections]]\nname = \"a\"\nbars = 2\n";
+    assert!(text.contains(b), "{text}");
     let song = d.song();
     assert_eq!(song.lanes_in(0).len(), 1);
     assert_eq!(song.lanes_in(0)[0].param, "acid303.cutoff");
     assert!(song.lanes_in(1).is_empty());
+    assert_eq!(song.section_play(0, "acid"), SectionPlay::Clip("a1"));
+    assert_eq!(song.section_play(1, "acid"), SectionPlay::Silent);
+    assert!(
+        text.contains("play = [{ at = 1, clip = \"a1\", bars = 2 }]"),
+        "{text}"
+    );
     for c in COMMENTS {
         assert!(text.contains(c), "lost `{c}`:\n{text}");
     }
@@ -281,19 +344,181 @@ fn duplicate_carries_lanes_in_order() {
     let song = d.song();
     assert_eq!(song.lanes_in(1).len(), 1);
     assert_eq!(song.lanes_in(2).len(), 1);
-    // Each copy's lane follows its own header.
-    let text = d.text();
-    let tail = &text[text.find("# acid enters").unwrap()..];
-    let order: Vec<&str> = tail.lines().filter(|l| l.starts_with("[[")).collect();
+    assert_eq!(song.lanes_in(2)[0].start_bar, 4);
+    assert_eq!(song.section_play(2, "acid"), SectionPlay::Clip("a1"));
+    // Each copy's lane follows its own section.
     assert_eq!(
-        order,
+        headers_from(&d.text(), "# acid enters"),
         [
             "[[sections]]",
-            "[[sections.automation]]",
+            "[[automation]]",
             "[[sections]]",
-            "[[sections.automation]]"
+            "[[automation]]"
         ]
     );
+}
+
+#[test]
+fn duplicate_section_copies_lane_comments() {
+    let mut d = doc();
+    d.duplicate_section(1).unwrap();
+    let text = d.text();
+    let copy = "# acid enters\n[[sections]]\nname = \"b\"\nbars = 2\n\n\
+                # the filter opens over the section\n[[automation]]\n\
+                param = \"acid.acid303.cutoff\"\nat = 5\nbars = 2\n\
+                points = [[0, 0.1], [2, 0.8]]\n";
+    assert!(text.ends_with(copy), "{text}");
+    assert_eq!(
+        text.matches("# the filter opens over the section").count(),
+        2
+    );
+    assert_eq!(text.matches("# acid enters").count(), 2);
+    assert!(
+        text.contains("play = [\n  { at = 3, clip = \"a1\", bars = 2 },\n  { at = 5, clip = \"a1\", bars = 2 },\n]"),
+        "{text}"
+    );
+}
+
+#[test]
+fn resize_section_uses_section_semantics() {
+    let mut d = doc();
+    d.set(&path("sections[1].bars"), &json!(4)).unwrap();
+    assert_eq!(d.song().total_bars(), 6);
+    let text = d.text();
+    // The placements and the stretch that ran to the end of `b` grow with
+    // it; the stretch's points stay as they are.
+    assert!(
+        text.contains("play = [{ at = 3, clip = \"a1\", bars = 4 }]"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  { at = 3, clip = \"k4\", bars = 4 },\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("at = 3\nbars = 4\npoints = [[0, 0.1], [2, 0.8]]"),
+        "{text}"
+    );
+    // Growing `a` moves `b` and everything in it.
+    d.set(&path("sections[0].bars"), &json!(3)).unwrap();
+    let text = d.text();
+    assert!(
+        text.contains("play = [{ at = 4, clip = \"a1\", bars = 4 }]"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  { at = 1, clip = \"k4\", bars = 3 },\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("at = 4\nbars = 4\npoints = [[0, 0.1], [2, 0.8]]"),
+        "{text}"
+    );
+    for c in COMMENTS {
+        assert!(text.contains(c), "lost `{c}`:\n{text}");
+    }
+}
+
+#[test]
+fn set_section_play_writes_placements() {
+    let mut d = doc();
+    d.set(&path("sections[0].play.acid"), &json!("a1")).unwrap();
+    let play = &d.song().tracks["acid"].play;
+    assert_eq!(play.len(), 2);
+    let expected = format!("\nplay = {}\n", placements_toml(play));
+    assert!(d.text().contains(&expected), "{}", d.text());
+    assert_eq!(
+        changed_lines(
+            &COMMENTED.replacen(
+                "play = [{ at = 3, clip = \"a1\", bars = 2 }]",
+                "x\nx\nx\nx",
+                1
+            ),
+            &d.text()
+        ),
+        [
+            "play = [",
+            "  { at = 1, clip = \"a1\", bars = 2 },",
+            "  { at = 3, clip = \"a1\", bars = 2 },",
+            "]"
+        ]
+    );
+}
+
+/// Review Focus 5: the clip-kind rule refuses the edit with the
+/// validator's message, and the text stays as it was.
+#[test]
+fn set_section_play_rejects_an_incompatible_clip() {
+    let mut d = doc();
+    let err = d
+        .set(&path("sections[0].play.acid"), &json!("k4"))
+        .unwrap_err();
+    match &err {
+        EditError::Invalid(errors) => assert!(
+            errors.iter().any(|e| e
+                .message
+                .contains("track `acid` (acid303) plays acid clips")),
+            "{errors:?}"
+        ),
+        other => panic!("expected Invalid, got {other:?}"),
+    }
+    assert_eq!(d.text(), COMMENTED);
+    let err = d
+        .set(&path("sections[0].play.acid"), &json!(3))
+        .unwrap_err();
+    assert!(matches!(err, EditError::BadValue { .. }), "{err:?}");
+}
+
+/// An edit of a document, for tables of edits.
+type Op = fn(&mut SongDoc) -> Result<(), EditError>;
+
+/// Review Focus 1: no section operation loses a comment.
+#[test]
+fn section_ops_keep_every_comment() {
+    let ops: [(&str, Op); 9] = [
+        ("move 1 to 0", |d| d.move_section(1, 0)),
+        ("move 0 to 1", |d| d.move_section(0, 1)),
+        ("duplicate 0", |d| d.duplicate_section(0)),
+        ("duplicate 1", |d| d.duplicate_section(1)),
+        ("delete 0", |d| d.delete_section(0)),
+        ("grow 0", |d| d.set(&path("sections[0].bars"), &json!(5))),
+        ("shrink 1", |d| d.set(&path("sections[1].bars"), &json!(1))),
+        ("play a1 in 0", |d| {
+            d.set(&path("sections[0].play.acid"), &json!("a1"))
+        }),
+        ("silence 1", |d| {
+            d.set(&path("sections[1].play.kick"), &Value::Null)
+        }),
+    ];
+    for (name, op) in ops {
+        let mut d = doc();
+        op(&mut d).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let text = d.text();
+        assert_ne!(text, COMMENTED, "{name} changed nothing");
+        for c in comment_lines(COMMENTED) {
+            assert!(text.contains(c), "{name} lost `{c}`:\n{text}");
+        }
+    }
+}
+
+#[test]
+fn bars_out_of_range_read_like_the_validator() {
+    let mut d = doc();
+    for (bars, message) in [
+        (0, "bars must be 1 to 1024, got 0"),
+        (2000, "bars must be 1 to 1024, got 2000"),
+        (-3, "bars must be 1 to 1024, got -3"),
+    ] {
+        let err = d.set(&path("sections[0].bars"), &json!(bars)).unwrap_err();
+        assert_eq!(
+            err,
+            EditError::BadValue {
+                path: "sections[0].bars".into(),
+                message: message.into()
+            }
+        );
+        assert_eq!(d.text(), COMMENTED);
+    }
 }
 
 #[test]
@@ -315,11 +540,11 @@ fn names_and_steps() {
     let mut d = doc();
     d.set(&path("sections[0].name"), &json!("intro")).unwrap();
     assert_eq!(names(&d), ["intro", "b"]);
-    d.set(&path("patterns.h.steps"), &json!("x.x.x.x.x.x.x.x."))
+    d.set(&path("clips.h.steps"), &json!("x.x.x.x.x.x.x.x."))
         .unwrap();
     // Read back in the canonical notation (groups of four).
     assert_eq!(
-        d.get(&path("patterns.h.steps")),
+        d.get(&path("clips.h.steps")),
         Some(json!("x.x. x.x. x.x. x.x."))
     );
 }
@@ -338,7 +563,7 @@ fn no_such_target() {
     for p in [
         "tracks.clap.gain_db",
         "sections[9].bars",
-        "patterns.zz.steps",
+        "clips.zz.steps",
         "tracks.kick.dist.mode",
     ] {
         let err = d.set(&path(p), &json!(1)).unwrap_err();
@@ -350,7 +575,12 @@ fn no_such_target() {
 #[test]
 fn read_only() {
     let mut d = doc();
-    for p in ["sections", "tracks.acid", "sections[1].lanes"] {
+    for p in [
+        "sections",
+        "tracks.acid",
+        "sections[1].lanes",
+        "song.version",
+    ] {
         let err = d.set(&path(p), &json!([])).unwrap_err();
         assert!(matches!(err, EditError::ReadOnly(_)), "{p}: {err:?}");
     }
@@ -429,14 +659,21 @@ fn section_values_are_derived() {
     assert_eq!(value(&path("sections[1].lanes")), Some(lane));
 }
 
+/// The section and automation tables are laid out as one block from the
+/// first section; a table that sat between sections follows the block.
 #[test]
 fn move_section_with_interleaved_tables() {
-    // A pattern table between the sections, and a comment on a lane.
-    let src = "[song]\nname = \"x\"\nbpm = 120\n\n[tracks.acid]\ninstrument = \"acid303\"\n\n\
-               [[sections]]\nname = \"a\"\nbars = 1\n\n# lane of a\n[[sections.automation]]\n\
-               param = \"acid.acid303.cutoff\"\npoints = [[0, 0.5]]\n\n[patterns.p]\ntrack = \"acid\"\n\
-               steps = \"C2\"\n\n[[sections]]\nname = \"b\"\nbars = 2\nplay = { acid = \"p\" }\n";
+    // A clip table between the sections, a stretch after the last section
+    // (the canonical layout) and a comment on it.
+    let src = "[song]\nversion = 2\nname = \"x\"\nbpm = 120\n\n\
+               [tracks.acid]\ninstrument = \"acid303\"\nplay = [{ at = 2, clip = \"p\", bars = 2 }]\n\n\
+               [[sections]]\nname = \"a\"\nbars = 1\n\n\
+               [clips.p]\nkind = \"acid\"\nsteps = \"C2\"\n\n\
+               [[sections]]\nname = \"b\"\nbars = 2\n\n\
+               # lane of a\n[[automation]]\nparam = \"acid.acid303.cutoff\"\nat = 1\nbars = 1\n\
+               points = [[0, 0.5]]\n";
     let mut d = SongDoc::parse(src).unwrap();
+    let before = d.song().clone();
     d.move_section(0, 1).unwrap();
     assert_eq!(names(&d), ["b", "a"]);
     let song = d.song();
@@ -444,18 +681,36 @@ fn move_section_with_interleaved_tables() {
     assert_eq!(song.lanes_in(1).len(), 1);
     assert_eq!(song.section_play(0, "acid"), SectionPlay::Clip("p"));
     let text = d.text();
+    assert_eq!(
+        headers_from(&text, "[[sections]]"),
+        [
+            "[[sections]]",
+            "[[sections]]",
+            "[[automation]]",
+            "[clips.p]"
+        ]
+    );
     assert!(
-        text.contains("# lane of a\n[[sections.automation]]"),
+        text.contains("name = \"a\"\nbars = 1\n\n# lane of a\n[[automation]]\n"),
         "{text}"
     );
     d.move_section(1, 0).unwrap();
-    assert_eq!(d.text(), src);
+    assert_eq!(d.song(), &before);
+    assert_eq!(
+        headers_from(&d.text(), "[[sections]]"),
+        [
+            "[[sections]]",
+            "[[automation]]",
+            "[[sections]]",
+            "[clips.p]"
+        ]
+    );
 }
 
 #[test]
 fn inline_sections_array() {
     let src = "sections = [{ name = \"a\", bars = 1 }, { name = \"b\", bars = 2 }]\n\n\
-               [song]\nname = \"x\"\nbpm = 120\n";
+               [song]\nversion = 2\nname = \"x\"\nbpm = 120\n";
     let mut d = SongDoc::parse(src).unwrap();
     d.move_section(1, 0).unwrap();
     assert!(
@@ -478,7 +733,7 @@ fn inline_sections_array() {
 
 // ----- the mixer: `mix.*` paths and strip params -----
 
-const MIXED: &str = include_str!("../../tune-song/tests/fixtures/mixed.toml");
+const MIXED: &str = include_str!("../../tune-song/tests/fixtures/v2/mixed.toml");
 
 fn mixed() -> SongDoc {
     SongDoc::parse(MIXED).expect("mixed fixture parses")
@@ -602,10 +857,10 @@ fn set_mix_param_creates_mix_table() {
 /// `[mix]` follows `[song]` wherever `[song]` sits in the file.
 #[test]
 fn mix_table_follows_song() {
-    let src = "# tracks first\n[tracks.k]\ninstrument = \"kick\"\n\n\
-               [song]\nname = \"x\"\nbpm = 120\n\n\
-               # the end\n[[sections]]\nname = \"a\"\nbars = 1\nplay = { k = \"p\" }\n\n\
-               [patterns.p]\ntrack = \"k\"\nsteps = \"x...\"\n";
+    let src = "# tracks first\n[tracks.k]\ninstrument = \"kick\"\nplay = [{ at = 1, clip = \"p\", bars = 1 }]\n\n\
+               [song]\nversion = 2\nname = \"x\"\nbpm = 120\n\n\
+               # the end\n[[sections]]\nname = \"a\"\nbars = 1\n\n\
+               [clips.p]\nkind = \"drum\"\nsteps = \"x...\"\n";
     let mut d = SongDoc::parse(src).unwrap();
     d.set(&path("mix.master"), &json!("limit")).unwrap();
     assert_eq!(
@@ -619,11 +874,12 @@ fn mix_table_follows_song() {
 fn set_strip_param_on_track_without_params() {
     let mut d = doc();
     d.set(&path("tracks.hat.send.delay"), &json!(-14)).unwrap();
+    // The new key goes last, after the hat's `play`.
     assert_eq!(
         d.text(),
         COMMENTED.replacen(
-            "pan = 0.3\n",
-            "pan = 0.3\nparams = { \"send.delay\" = -14 }\n",
+            "  { at = 3, clip = \"h\", bars = 2 },\n]\n",
+            "  { at = 3, clip = \"h\", bars = 2 },\n]\nparams = { \"send.delay\" = -14 }\n",
             1
         )
     );
@@ -769,7 +1025,7 @@ play = [{ at = 1, clip = "k4", bars = 2 }]
 
 [tracks.acid]
 instrument = "acid303"
-fx = [{ type = "eq" }, { type = "eq", id = "eq2", params = { "eq2.low_cut" = 200 } }]
+fx = [{ type = "eq", params = { "eq.low_cut" = 85 } }, { type = "eq", id = "eq2" }]
 play = [{ at = 2, clip = "a1", bars = 1 }]
 
 [clips.k4]
@@ -789,39 +1045,26 @@ name = "b"
 bars = 1
 "#;
 
+/// Review Focus 3: a param of the second eq reaches that device and no
+/// other.
 #[test]
-fn v2_files_refuse_arrangement_edits_for_now() {
+fn set_param_on_second_eq() {
     let mut d = SongDoc::parse(V2).expect("v2 parses");
-    assert_eq!(d.version(), 2);
-    for (p, v) in [
-        ("sections[0].bars", json!(2)),
-        ("sections[1].play.acid", json!("a1")),
-        ("sections[1].play.acid", Value::Null),
-        ("patterns.a1.steps", json!("C2")),
-    ] {
-        assert_eq!(
-            d.set(&path(p), &v),
-            Err(EditError::NotYetOnV2(p.to_owned())),
-            "{p}"
-        );
-    }
-    assert_eq!(
-        d.move_section(0, 1).unwrap_err().to_string(),
-        "`moving a section` is not yet supported on v2 files"
-    );
-    assert!(matches!(
-        d.duplicate_section(0),
-        Err(EditError::NotYetOnV2(_))
-    ));
-    assert!(matches!(d.delete_section(0), Err(EditError::NotYetOnV2(_))));
-    assert_eq!(d.text(), V2);
-
-    // Edits that touch no arrangement still work.
-    d.set(&path("sections[1].name"), &json!("drop")).unwrap();
-    d.set(&path("tracks.acid.eq2.low_cut"), &json!(300))
+    d.set(&path("tracks.acid.eq2.low_cut"), &json!(200))
         .unwrap();
-    assert_eq!(d.song().tracks["acid"].fx[1].params["low_cut"], 300.0);
-    assert!(d.song().tracks["acid"].fx[0].params.is_empty());
+    let text = d.text();
+    assert_eq!(
+        changed_lines(V2, &text),
+        [
+            "fx = [{ type = \"eq\", params = { \"eq.low_cut\" = 85 } }, { type = \"eq\", id = \"eq2\", params = { \"eq2.low_cut\" = 200 } }]"
+        ]
+    );
+    assert_eq!(text.matches("eq2.low_cut").count(), 1, "{text}");
+    assert_eq!(d.get(&path("tracks.acid.eq2.low_cut")), Some(json!(200)));
+    assert_eq!(d.get(&path("tracks.acid.eq.low_cut")), Some(json!(85)));
+    let fx = &d.song().tracks["acid"].fx;
+    assert_eq!(fx[1].params["low_cut"], 200.0);
+    assert_eq!(fx[0].params["low_cut"], 85.0);
 }
 
 #[test]

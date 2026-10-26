@@ -83,16 +83,16 @@ describe("createStudioStore", () => {
     expect(store.get().highlights.size).toBe(0);
   });
 
-  it("expands pattern steps into step indices", () => {
+  it("expands `clips.<c>.steps` into per-step keys", () => {
     const client = new FakeClient();
     const store = createStudioStore(client);
     client.emit(
       external({
-        changes: [{ path: "patterns.k4.steps", old: "x... x...", new: "x... X..." }],
+        changes: [{ path: "clips.k4.steps", old: "x... x...", new: "x... X..." }],
       }),
     );
     const keys = [...store.get().highlights.keys()];
-    expect(keys).toEqual(["patterns.k4.steps[4]"]);
+    expect(keys).toEqual(["clips.k4.steps[4]"]);
   });
 
   it("an applied edit from a human sets nothing", () => {

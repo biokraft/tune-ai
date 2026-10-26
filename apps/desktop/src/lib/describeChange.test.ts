@@ -29,3 +29,10 @@ describe("describeChange on the mixer", () => {
     expect(change("mix", null, {})).toBe("mix");
   });
 });
+
+describe("describeChange on clips", () => {
+  it("describes a clip step change by its `clips.` path", () => {
+    expect(change("clips.k4.steps", "x... x...", "x... X...")).toBe("k4 pattern (1 step)");
+    expect(change("clips.a1.steps", null, "C2 C3")).toBe("Pattern a1 added");
+  });
+});

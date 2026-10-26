@@ -1,7 +1,7 @@
 const DRUM = /^[xX.\s]*$/;
 
 /**
- * Indices of the steps that differ between two pattern texts (`patterns.<p>.steps` values).
+ * Indices of the steps that differ between two pattern texts (`clips.<c>.steps` values).
  * Acid patterns compare by token (`C2 C2! . D#2~`); drum patterns by character with spaces
  * dropped (`x... X...`). Steps only one side has count as changed.
  */
