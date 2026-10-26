@@ -417,3 +417,23 @@ fn automation_tables_may_sit_between_sections() {
     assert_eq!(song.automation.len(), 1);
     assert_eq!(song, parse_song(MINI).unwrap());
 }
+
+#[test]
+fn empty_sections_report_only_the_missing_section() {
+    // Placements and an automation stretch exist, but no section: the one
+    // error is the real one, not "past the song's end (bar 0)" beside it.
+    let head = MINI_V2.split("[[sections]]").next().unwrap();
+    let tail = &MINI_V2[MINI_V2.find("[[automation]]").unwrap()..];
+    let src = format!("sections = []\n{head}{tail}");
+    let errors = parse(&src).expect_err("must fail");
+    assert_eq!(
+        errors,
+        [SongError {
+            line: None,
+            column: None,
+            message: "a song needs at least one section ([[sections]])".to_owned(),
+        }],
+        "{}",
+        messages(&errors)
+    );
+}
