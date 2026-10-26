@@ -630,8 +630,8 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
             accent,
             slide,
         } => {
-            let path = SongPath::Pattern {
-                pattern: pattern.clone(),
+            let path = SongPath::Clip {
+                clip: pattern.clone(),
             };
             let mut steps = match pattern_steps(doc, &path, pattern)? {
                 Clip::Acid(p) => p.steps().to_vec(),
@@ -651,8 +651,8 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
             index,
             hit,
         } => {
-            let path = SongPath::Pattern {
-                pattern: pattern.clone(),
+            let path = SongPath::Clip {
+                clip: pattern.clone(),
             };
             let mut hits = match pattern_steps(doc, &path, pattern)? {
                 Clip::Drum(p) => p.hits().to_vec(),

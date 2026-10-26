@@ -84,10 +84,10 @@ describe("patternGlyph", () => {
 describe("highlightedSteps", () => {
   it("keeps who changed each step of the pattern", () => {
     const h = new Map([
-      ["patterns.a1.steps[2]", "claude" as const],
-      ["patterns.a1.steps[5]", "external" as const],
-      ["patterns.a10.steps[1]", "claude" as const],
-      ["patterns.a1.length", "external" as const],
+      ["clips.a1.steps[2]", "claude" as const],
+      ["clips.a1.steps[5]", "external" as const],
+      ["clips.a10.steps[1]", "claude" as const],
+      ["clips.a1.length", "external" as const],
     ]);
     expect(highlightedSteps(h, "a1")).toEqual(
       new Map([

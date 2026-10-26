@@ -47,7 +47,7 @@ export type ArrangementProps = {
   openTrack: string | null;
   /**
    * Edit paths changed from outside (`sections`, `sections[i]`, `sections[i].*`,
-   * `patterns.<id>.*`), each with who changed it: Claude's are ringed cyan, the song file's
+   * `clips.<id>.*`), each with who changed it: Claude's are ringed cyan, the song file's
    * outlined dashed in ink2.
    */
   highlighted?: ReadonlyMap<string, Mark>;
@@ -162,7 +162,7 @@ function strongest(h: Marks, hit: (path: string) => boolean): Highlight {
 /** Who changed what `track` plays in section `i`, or the pattern `id` itself, if anyone. */
 function blockMark(h: Marks, i: number, track: string, id: string | undefined): Highlight {
   const play = `sections[${i}].play.${track}`;
-  const pat = `patterns.${id}`;
+  const pat = `clips.${id}`;
   return strongest(
     h,
     (p) => p === play || (id !== undefined && (p === pat || p.startsWith(`${pat}.`))),

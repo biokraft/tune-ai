@@ -11,8 +11,8 @@ export type StudioView = {
   state: StudioState | null;
   playhead: { step: number; bar: number; beat: number } | null;
   /**
-   * Edit paths changed from outside in the last 4 s. `patterns.<p>.steps` is expanded to one
-   * key per changed step: `patterns.<p>.steps[<i>]`.
+   * Edit paths changed from outside in the last 4 s. `clips.<c>.steps` is expanded to one key
+   * per changed step: `clips.<c>.steps[<i>]`.
    */
   highlights: Map<string, HighlightKind>;
   /** The last change on disk, until dismissed. */
@@ -38,7 +38,7 @@ export type StudioStore = {
   dismissMessage(): void;
 };
 
-const STEPS = /^patterns\.(.+)\.steps$/;
+const STEPS = /^clips\.(.+)\.steps$/;
 
 /** The highlight keys for one change. */
 function highlightKeys(path: string, old: unknown, next: unknown): string[] {

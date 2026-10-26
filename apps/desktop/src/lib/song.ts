@@ -80,7 +80,7 @@ export function highlightedSteps(
   highlights: ReadonlyMap<string, HighlightKind>,
   pattern: string,
 ): Map<number, HighlightKind> {
-  const prefix = `patterns.${pattern}.steps[`;
+  const prefix = `clips.${pattern}.steps[`;
   const out = new Map<number, HighlightKind>();
   for (const [key, kind] of highlights) {
     if (key.startsWith(prefix)) out.set(Number(key.slice(prefix.length, -1)), kind);

@@ -17,7 +17,7 @@ use tune_studio::{
     StudioState, set_paths,
 };
 
-const MINI: &str = include_str!("../../tune-song/tests/fixtures/mini.toml");
+const MINI: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
 /// The longest any test waits for one thing.
 // Generous: FSEvents delivery can take seconds while the machine is busy
 // (e.g. under `task verify`), and a deadline only costs time on failure.
@@ -210,11 +210,11 @@ fn acid_value(text: &str, param: &str) -> f64 {
 /// `mini`, with the acid also playing in section `a` (bars 0..2), where no
 /// lane drives the cutoff: a knob there is both audible and writable.
 fn acid_in_a() -> String {
-    let from = "play = { kick = \"k4\", hat = \"h\" }";
+    let from = "play = [{ at = 3, clip = \"a1\", bars = 2 }]";
     assert!(MINI.contains(from));
     MINI.replacen(
         from,
-        "play = { kick = \"k4\", acid = \"a1\", hat = \"h\" }",
+        "play = [\n  { at = 1, clip = \"a1\", bars = 2 },\n  { at = 3, clip = \"a1\", bars = 2 },\n]",
         1,
     )
 }

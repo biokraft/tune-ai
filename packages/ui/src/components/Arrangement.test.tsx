@@ -492,7 +492,7 @@ describe("Arrangement blocks", () => {
       {
         highlighted: new Map([
           ["sections[0].play.drums", "claude"],
-          ["patterns.a1.steps[2]", "claude"],
+          ["clips.a1.steps[2]", "claude"],
         ]),
       },
     );
@@ -511,7 +511,7 @@ describe("Arrangement blocks", () => {
     setup([sec("a", 0, 16, { play: { acid: "a1", drums: "d1" } })], {
       highlighted: new Map([
         ["sections[0].play.drums", "external"],
-        ["patterns.a1.steps[2]", "external"],
+        ["clips.a1.steps[2]", "external"],
       ]),
     });
     for (const name of ["d1 in a", "a1 in a"]) {
