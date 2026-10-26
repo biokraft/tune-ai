@@ -10,12 +10,9 @@
 //! Results are not validated here (the caller re-parses them): clip
 //! existence and compatibility are the validator's.
 
-use std::ops::{Range, RangeInclusive};
+use std::ops::Range;
 
-use crate::model::{Lane, Placement, Song, lane_value};
-
-/// The bars a section may have (the validator's range).
-const SECTION_BARS: RangeInclusive<u32> = 1..=1024;
+use crate::model::{Lane, Placement, SECTION_BARS, Song, lane_value, section_bars_error};
 
 /// Where each stretch of the edited song came from, index-aligned with the
 /// new `song.automation`. Each holds an index into the old `automation`.
@@ -55,7 +52,7 @@ pub enum ArrangeError {
     LastSection,
     #[error("there is no track `{0}`")]
     NoSuchTrack(String),
-    #[error("bars must be 1 to 1024, got {bars}")]
+    #[error("{}", section_bars_error(i64::from(*.bars)))]
     Bars { bars: u32 },
     /// The result would hold a bar past `u32::MAX` (never for a song the
     /// validator accepts).
@@ -152,7 +149,8 @@ pub fn delete_section(song: &Song, index: usize) -> Result<Arranged, ArrangeErro
 /// stretches that ran to its end run to the new end (a stretch holds its
 /// last value); on a shrink, whatever crosses the new end is cut there and
 /// whatever starts at or after it is dropped. Everything after the section
-/// moves with its end. `bars` must be 1 to 1024, as the validator wants.
+/// moves with its end. `bars` must be in [`SECTION_BARS`], as the validator
+/// wants.
 pub fn resize_section(song: &Song, index: usize, bars: u32) -> Result<Arranged, ArrangeError> {
     if !SECTION_BARS.contains(&bars) {
         return Err(ArrangeError::Bars { bars });

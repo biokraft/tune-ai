@@ -11,7 +11,9 @@ use tune_modules::ClipKind;
 use super::tracks::{TrackShape, find_in, or_list, param_ids, spec_ids, unknown_param};
 use super::{BARS, Duck, check_id, unknown_track};
 use crate::error::Errors;
-use crate::model::{Clip, Lane, MIX_TRACK_ID, MixUnit, Placement, Section, Track};
+use crate::model::{
+    Clip, Lane, MIX_TRACK_ID, MixUnit, Placement, Section, Track, section_bars_error,
+};
 use crate::raw::{At, RawLane, RawPlacement, RawSection, RawSong};
 
 /// The arrangement of a song: its clip pool, sections and lane stretches.
@@ -264,7 +266,7 @@ fn section_bars(s: &RawSection, errors: &mut Errors) -> Option<u32> {
     s.bars.as_ref().and_then(|b| {
         let ok = BARS.contains(&b.value);
         if !ok {
-            errors.at(&b.span, format!("bars must be 1 to 1024, got {}", b.value));
+            errors.at(&b.span, section_bars_error(b.value));
         }
         ok.then(|| u32::try_from(b.value).expect("checked range"))
     })
