@@ -11,8 +11,7 @@ use serde_json::{Value, json};
 use toml_edit::{DocumentMut, InlineTable, Item, Table};
 use tune_dsp::{ParamSpec, STRIP_PARAMS, find_spec};
 use tune_song::{
-    Device, MIX_TRACK_ID, PatternSteps, Registry, SettingSpec, Song, SongError, Track,
-    find_mix_param, parse_song,
+    Device, MIX_TRACK_ID, Registry, SettingSpec, Song, SongError, Track, find_mix_param, parse_song,
 };
 
 use crate::path::{SongPath, TrackField};
@@ -267,10 +266,7 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
                     .collect();
             json!({ "instrument": t.instrument.module.name, "fx": fx })
         }
-        SongPath::Pattern { pattern } => match &song.patterns.get(pattern)?.steps {
-            PatternSteps::Acid(p) => Value::from(p.to_string()),
-            PatternSteps::Drum(p) => Value::from(p.to_string()),
-        },
+        SongPath::Pattern { pattern } => Value::from(song.clips.get(pattern)?.steps_text()),
         SongPath::SectionBars(i) => Value::from(song.sections.get(*i)?.bars),
         SongPath::SectionName(i) => Value::from(song.sections.get(*i)?.name.clone()),
         SongPath::SectionPlay { section, track } => {
@@ -492,7 +488,7 @@ fn apply(
             _ => return Err(bad("expected a track id or null")),
         },
         SongPath::Pattern { pattern } => {
-            if !song.patterns.contains_key(pattern) {
+            if !song.clips.contains_key(pattern) {
                 return Err(missing());
             }
             let v = toml_edit::Value::from(string()?);

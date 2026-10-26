@@ -5,9 +5,7 @@
 use tune_dsp::acid303::math::db2amp;
 use tune_dsp::{DrumHit, ParamSpec, STRIP_PARAMS, find_spec};
 use tune_modules::{Cell, ModuleDescriptor};
-use tune_song::{
-    Device, MIX_TRACK_ID, MasterMode, MixUnit, PatternSteps, Song, Track, find_mix_param,
-};
+use tune_song::{Clip, Device, MIX_TRACK_ID, MasterMode, MixUnit, Song, Track, find_mix_param};
 
 use crate::clock::{Clock, track_seed};
 use crate::mixer::pan_gains;
@@ -19,8 +17,8 @@ pub struct CompiledSong {
     pub clock: Clock,
     pub total_bars: u32,
     pub tracks: Vec<CompiledTrack>,
-    /// One cell per pattern step, indexed like `Song::patterns`.
-    pub patterns: Vec<Vec<Cell>>,
+    /// One cell per clip step, indexed like `Song::clips`.
+    pub clips: Vec<Vec<Cell>>,
     pub sections: Vec<CompiledSection>,
     pub mix: CompiledMix,
 }
@@ -111,7 +109,7 @@ pub struct CompiledSection {
     pub name: String,
     pub start_bar: u32,
     pub bars: u32,
-    /// Pattern index per track (indexed like `CompiledSong::tracks`);
+    /// Clip index per track (indexed like `CompiledSong::tracks`);
     /// `None` when the section does not play the track.
     pub play: Vec<Option<usize>>,
     pub lanes: Vec<CompiledLane>,
@@ -153,11 +151,11 @@ impl CompiledSong {
             .map(|(id, t)| compile_track(id, t, song.seed))
             .collect();
 
-        let patterns = song
-            .patterns
+        let clips = song
+            .clips
             .values()
-            .map(|p| match &p.steps {
-                PatternSteps::Acid(acid) => acid
+            .map(|p| match p {
+                Clip::Acid(acid) => acid
                     .steps()
                     .iter()
                     .map(|s| match s.note {
@@ -165,7 +163,7 @@ impl CompiledSong {
                         None => Cell::Rest,
                     })
                     .collect(),
-                PatternSteps::Drum(drum) => drum
+                Clip::Drum(drum) => drum
                     .hits()
                     .iter()
                     .map(|h| match h {
@@ -190,7 +188,7 @@ impl CompiledSong {
                 let mut play = vec![None; tracks.len()];
                 for (track, pattern) in &s.play {
                     play[track_index(track)] = Some(
-                        song.patterns
+                        song.clips
                             .get_index_of(pattern)
                             .unwrap_or_else(|| panic!("unknown pattern `{pattern}`")),
                     );
@@ -234,7 +232,7 @@ impl CompiledSong {
             clock: Clock::new(song.bpm, sample_rate),
             total_bars: song.total_bars(),
             tracks,
-            patterns,
+            clips,
             sections,
             mix,
         }
@@ -441,15 +439,15 @@ mod tests {
     }
 
     #[test]
-    fn patterns_become_cells() {
+    fn clips_become_cells() {
         let s = mini();
-        assert_eq!(s.patterns.len(), 3);
-        let k4 = &s.patterns[0];
+        assert_eq!(s.clips.len(), 3);
+        let k4 = &s.clips[0];
         assert_eq!(k4.len(), 16);
         assert_eq!(k4[0], Cell::Hit { accent: false });
         assert_eq!(k4[1], Cell::Rest);
         assert_eq!(k4[12], Cell::Hit { accent: true });
-        let a1 = &s.patterns[1];
+        let a1 = &s.clips[1];
         assert_eq!(a1.len(), 8);
         assert!(matches!(&a1[1], Cell::Note(n) if n.note == Some(36) && n.accent));
         assert!(matches!(&a1[2], Cell::Note(n) if n.note == Some(48) && n.slide));

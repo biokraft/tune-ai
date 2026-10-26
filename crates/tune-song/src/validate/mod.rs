@@ -18,7 +18,7 @@ use crate::error::Errors;
 use crate::model::{MIX_TRACK_ID, MasterMode, Mix, MixUnit, Song};
 use crate::raw::{At, RawMix, RawSong};
 
-use arrange::{pattern, section};
+use arrange::{clip, section};
 use tracks::{TrackShape, param_values, track};
 
 const BPM: RangeInclusive<f64> = 40.0..=300.0;
@@ -86,11 +86,11 @@ pub(crate) fn validate(raw: RawSong, registry: &Registry, errors: &mut Errors) -
     let duck = Duck::of(&raw, &shapes);
     check_duck_depths(&raw, &duck, errors);
 
-    let mut patterns = IndexMap::new();
+    let mut clips = IndexMap::new();
     for (id, p) in &raw.patterns {
         check_id(id, "pattern", errors);
-        if let Some(pattern) = pattern(id, p, &shapes, errors) {
-            patterns.insert(id.value.clone(), pattern);
+        if let Some(clip) = clip(id, p, &shapes, errors) {
+            clips.insert(id.value.clone(), clip);
         }
     }
 
@@ -136,7 +136,7 @@ pub(crate) fn validate(raw: RawSong, registry: &Registry, errors: &mut Errors) -
         seed,
         sample_rate,
         tracks,
-        patterns,
+        clips,
         sections,
         mix: mix?,
     })
