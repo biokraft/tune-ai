@@ -197,6 +197,33 @@ describe("App", () => {
     );
   });
 
+  it("says a song was upgraded on open, with an Undo that reverts it", () => {
+    const { client } = setup(
+      stateEvent((s) => {
+        s.offered = [];
+        s.file_errors = [];
+        s.migrated_from = 1;
+      }),
+    );
+    const notice = screen.getByRole("status", { name: "Song file change" });
+    expect(notice).toHaveTextContent(
+      "The song file changed 1 thing: Upgraded the song file to format version 2 (comments kept)",
+    );
+    fireEvent.click(within(notice).getByRole("button", { name: "Undo the change on disk" }));
+    expect(client.named("undo")).toHaveLength(1);
+    expect(screen.queryByRole("status", { name: "Song file change" })).toBeNull();
+  });
+
+  it("shows an error from the studio, such as a migration it could not save", () => {
+    const { client } = setup(stateEvent((s) => (s.migrated_from = null)));
+    const message =
+      "the song was upgraded to the new file format in memory but not saved: cannot write song.toml";
+    act(() => client.emit({ event: "error", message }));
+    const banner = screen.getByText(message).closest('[role="status"]')!;
+    fireEvent.click(within(banner as HTMLElement).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(message)).toBeNull();
+  });
+
   it("Cmd+Z undoes, Shift+Cmd+Z redoes", () => {
     const { client } = setup();
     press({ key: "z", metaKey: true });
