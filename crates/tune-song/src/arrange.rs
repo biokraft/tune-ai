@@ -10,9 +10,12 @@
 //! Results are not validated here (the caller re-parses them): clip
 //! existence and compatibility are the validator's.
 
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 
 use crate::model::{Lane, Placement, Song, lane_value};
+
+/// The bars a section may have (the validator's range).
+const SECTION_BARS: RangeInclusive<u32> = 1..=1024;
 
 /// Where each stretch of the edited song came from, index-aligned with the
 /// new `song.automation`. Each holds an index into the old `automation`.
@@ -52,13 +55,19 @@ pub enum ArrangeError {
     LastSection,
     #[error("there is no track `{0}`")]
     NoSuchTrack(String),
+    #[error("bars must be 1 to 1024, got {bars}")]
+    Bars { bars: u32 },
+    /// The result would hold a bar past `u32::MAX` (never for a song the
+    /// validator accepts).
+    #[error("the arrangement would be too long")]
+    TooLong,
 }
 
 /// Moves section `from` to index `to`, as `Vec::remove` then `insert`, with
 /// everything it plays.
 pub fn move_section(song: &Song, from: usize, to: usize) -> Result<Arranged, ArrangeError> {
-    let moved = check(song, from)?;
-    let target = check(song, to)?;
+    let moved = check(song, from, 0)?;
+    let target = check(song, to, 0)?;
     let mut edit = Edit::new(song);
     if to == from {
         return Ok(edit.finish());
@@ -92,7 +101,8 @@ pub fn move_section(song: &Song, from: usize, to: usize) -> Result<Arranged, Arr
 
 /// Puts a copy of section `index`, with everything it plays, right after it.
 pub fn duplicate_section(song: &Song, index: usize) -> Result<Arranged, ArrangeError> {
-    let bars = check(song, index)?;
+    let grows = song.sections.get(index).map_or(0, |s| s.bars);
+    let bars = check(song, index, grows)?;
     let len = i64::from(bars.end - bars.start);
     let mut edit = Edit::new(song);
     edit.split(bars.start);
@@ -117,7 +127,7 @@ pub fn duplicate_section(song: &Song, index: usize) -> Result<Arranged, ArrangeE
 /// Removes section `index` and everything inside it; the rest closes up.
 /// The last section is never deleted.
 pub fn delete_section(song: &Song, index: usize) -> Result<Arranged, ArrangeError> {
-    let bars = check(song, index)?;
+    let bars = check(song, index, 0)?;
     if song.sections.len() == 1 {
         return Err(ArrangeError::LastSection);
     }
@@ -142,9 +152,12 @@ pub fn delete_section(song: &Song, index: usize) -> Result<Arranged, ArrangeErro
 /// stretches that ran to its end run to the new end (a stretch holds its
 /// last value); on a shrink, whatever crosses the new end is cut there and
 /// whatever starts at or after it is dropped. Everything after the section
-/// moves with its end.
+/// moves with its end. `bars` must be 1 to 1024, as the validator wants.
 pub fn resize_section(song: &Song, index: usize, bars: u32) -> Result<Arranged, ArrangeError> {
-    let old = check(song, index)?;
+    if !SECTION_BARS.contains(&bars) {
+        return Err(ArrangeError::Bars { bars });
+    }
+    let old = check(song, index, bars)?;
     let delta = i64::from(bars) - i64::from(old.end - old.start);
     let new_end = old.start + bars;
     let mut edit = Edit::new(song);
@@ -178,7 +191,7 @@ pub fn set_section_play(
     track: &str,
     clip: Option<&str>,
 ) -> Result<Arranged, ArrangeError> {
-    let bars = check(song, section)?;
+    let bars = check(song, section, 0)?;
     if !song.tracks.contains_key(track) {
         return Err(ArrangeError::NoSuchTrack(track.to_owned()));
     }
@@ -202,13 +215,32 @@ pub fn set_section_play(
     Ok(edit.finish())
 }
 
-/// The 0-based bars of section `index`, or why there is no such section.
-fn check(song: &Song, index: usize) -> Result<Range<u32>, ArrangeError> {
+/// The 0-based bars of section `index`, or why there is no such section
+/// or why an op that may push items up to `grows` bars later cannot run.
+///
+/// Every bar an op computes (a section start or end, an item's start or end,
+/// a shifted or copied item, a split's offset) is at most the song's
+/// furthest bar plus `grows`, or a placement's `offset_bars + bars`. When
+/// those fit in `u32`, no bar arithmetic of the op can overflow.
+fn check(song: &Song, index: usize, grows: u32) -> Result<Range<u32>, ArrangeError> {
     if index >= song.sections.len() {
         return Err(ArrangeError::OutOfBounds {
             index,
             len: song.sections.len(),
         });
+    }
+    let end = |start: u32, bars: u32| u64::from(start) + u64::from(bars);
+    let total: u64 = song.sections.iter().map(|s| u64::from(s.bars)).sum();
+    let placements = song.tracks.values().flat_map(|t| &t.play);
+    let furthest = placements
+        .clone()
+        .map(|p| end(p.start_bar, p.bars))
+        .chain(song.automation.iter().map(|l| end(l.start_bar, l.bars)))
+        .fold(total, u64::max);
+    let offsets = placements.map(|p| end(p.offset_bars, p.bars)).max();
+    let max = u64::from(u32::MAX);
+    if furthest + u64::from(grows) > max || offsets.is_some_and(|o| o > max) {
+        return Err(ArrangeError::TooLong);
     }
     Ok(song.section_bars(index))
 }
@@ -238,9 +270,9 @@ impl Fate {
     }
 }
 
-/// `span` moved `by` bars.
+/// `span` moved `by` bars, in `i64`; [`check`] keeps the result in `u32`.
 fn shift(span: Range<u32>, by: i64) -> Range<u32> {
-    let start = u32::try_from(i64::from(span.start) + by).expect("shifted inside the song");
+    let start = u32::try_from(i64::from(span.start) + by).expect("checked: inside u32");
     start..start + (span.end - span.start)
 }
 
@@ -355,6 +387,7 @@ fn split_placements(play: &mut Vec<Placement>, bar: u32) {
         start_bar: bar,
         bars: p.bars - k,
         clip: p.clip.clone(),
+        // At most `offset_bars + bars`, which `check` keeps in `u32`.
         offset_bars: p.offset_bars + k,
     };
     p.bars = k;
