@@ -259,6 +259,45 @@ fn state_reports_migrated_from_after_opening_v1() {
     }
 }
 
+/// A v1 song whose folder cannot be written opens migrated in memory and
+/// says why it was not saved: to a listener on subscribing, and again
+/// after `get_state`, for a transport that drops the first events (Tauri
+/// does) and asks for the state instead.
+#[cfg(unix)]
+#[test]
+fn get_state_repeats_a_migration_that_could_not_be_saved() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("song.toml");
+    fs::write(&path, include_str!("fixtures/commented-v1.toml")).expect("write song");
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o555)).unwrap();
+    let config = StudioConfig {
+        audio: Box::new(CaptureOut {
+            slot: Slot::default(),
+        }),
+        songs_root: dir.path().to_owned(),
+    };
+    let studio = tune_studio::Studio::spawn(config, Some(path.clone()));
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    let studio = studio.expect("opens");
+    let events = studio.subscribe();
+    let next = || events.recv_timeout(WAIT).expect("an event");
+    assert!(matches!(next(), Event::State(s) if s.migrated_from.is_none()));
+    let unsaved = |e: Event| match e {
+        Event::Error { message } => assert!(
+            message.starts_with(
+                "the song was upgraded to the new file format in memory but not saved: "
+            ),
+            "{message}"
+        ),
+        other => panic!("expected the migration error, got {other:?}"),
+    };
+    unsaved(next());
+    studio.call(Command::GetState).expect("get_state");
+    unsaved(next());
+}
+
 #[test]
 fn get_state_returns_current_state_and_changes_nothing() {
     let f = fixture(MINI);

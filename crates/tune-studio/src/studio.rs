@@ -356,11 +356,18 @@ impl Actor {
                             | Command::ListSongs
                             | Command::GetState
                     );
+                    let repeat = matches!(cmd, Command::GetState);
                     let result = self.handle(cmd);
                     if shown {
                         self.publish_if_stale();
                     }
                     let _ = reply.send(result);
+                    // A client that asks for the state may have missed the
+                    // events sent when it subscribed, the migration error
+                    // among them.
+                    if repeat && let Some(message) = self.migration_error() {
+                        self.emit(Event::Error { message });
+                    }
                 }
                 Ok(Msg::Subscribe(tx)) => {
                     if tx.send(Event::State(self.state())).is_ok() {
