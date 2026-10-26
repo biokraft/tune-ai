@@ -18,7 +18,6 @@ use crate::error::Errors;
 use crate::model::{MIX_TRACK_ID, MasterMode, Mix, MixUnit, Song};
 use crate::raw::{At, RawMix, RawSong};
 
-use arrange::{clip, section};
 use tracks::{TrackShape, param_values, track};
 
 const BPM: RangeInclusive<f64> = 40.0..=300.0;
@@ -56,70 +55,32 @@ pub(crate) fn validate(raw: RawSong, registry: &Registry, errors: &mut Errors) -
 
     // Every track the file declares, valid or not, with what is known of
     // its shape: a reference to a declared but broken track is not reported
-    // again as unknown, and its patterns and lanes are still checked as far
+    // again as unknown, and its clips and lanes are still checked as far
     // as its instrument and fx types allow.
     let shapes: IndexMap<&str, TrackShape> = raw
         .tracks
         .iter()
         .map(|(id, t)| (id.value.as_str(), TrackShape::of(t, registry)))
         .collect();
-    let pattern_owner: IndexMap<&str, Option<&str>> = raw
-        .patterns
-        .iter()
-        .map(|(id, p)| {
-            (
-                id.value.as_str(),
-                p.track.as_ref().map(|t| t.value.as_str()),
-            )
-        })
-        .collect();
 
     let mix = mix(raw.mix.as_ref(), &shapes, errors);
 
+    let v2 = raw.version == 2;
     let mut tracks = IndexMap::new();
     for (id, t) in &raw.tracks {
         check_id(id, "track", errors);
-        if let Some(track) = track(id, t, registry, errors) {
+        if let Some(track) = track(id, t, v2, registry, errors) {
             tracks.insert(id.value.clone(), track);
         }
     }
     let duck = Duck::of(&raw, &shapes);
     check_duck_depths(&raw, &duck, errors);
 
-    let mut clips = IndexMap::new();
-    for (id, p) in &raw.patterns {
-        check_id(id, "pattern", errors);
-        if let Some(clip) = clip(id, p, &shapes, errors) {
-            clips.insert(id.value.clone(), clip);
-        }
-    }
-
-    // v1: each section's `play` entries become placements over the whole
-    // section, appended to their tracks in section order, and its lanes
-    // become stretches over it, in file order. Once a section is broken
-    // the later start bars are off, but then no song is built.
-    let mut sections = Vec::new();
-    let mut automation = Vec::new();
-    let mut start_bar = 0;
-    match &raw.sections {
-        Some(list) if !list.is_empty() => {
-            for (i, s) in list.iter().enumerate() {
-                let Some(v1) = section(i, start_bar, s, &shapes, &pattern_owner, &duck, errors)
-                else {
-                    continue;
-                };
-                start_bar += v1.section.bars;
-                sections.push(v1.section);
-                for (track, placement) in v1.play {
-                    if let Some(t) = tracks.get_mut(&track) {
-                        t.play.push(placement);
-                    }
-                }
-                automation.extend(v1.lanes);
-            }
-        }
-        _ => errors.global("a song needs at least one section ([[sections]])"),
-    }
+    let arrangement = if v2 {
+        arrange::v2(&raw, &shapes, &duck, &mut tracks, errors)
+    } else {
+        arrange::v1(&raw, &shapes, &duck, &mut tracks, errors)
+    };
 
     // Counted over every section whose bars are valid, so the length check
     // still runs when another part of a section is broken.
@@ -151,9 +112,9 @@ pub(crate) fn validate(raw: RawSong, registry: &Registry, errors: &mut Errors) -
         seed,
         sample_rate,
         tracks,
-        clips,
-        sections,
-        automation,
+        clips: arrangement.clips,
+        sections: arrangement.sections,
+        automation: arrangement.automation,
         mix: mix?,
     })
 }
@@ -193,7 +154,7 @@ fn mix(
                 None
             }
             // An unknown instrument already has its own error.
-            Some(shape) if shape.instrument.is_some_and(|m| !plays_drums(m)) => {
+            Some(shape) if shape.module().is_some_and(|m| !plays_drums(m)) => {
                 errors.at(
                     &src.span,
                     format!(
@@ -233,14 +194,14 @@ impl<'a> Duck<'a> {
             Some(src) => Self::Explicit(
                 shapes
                     .get(src.value.as_str())
-                    .and_then(|s| s.instrument)
+                    .and_then(TrackShape::module)
                     .is_some_and(plays_drums)
                     .then_some(src.value.as_str()),
             ),
             None => Self::FirstKick(
                 shapes
                     .iter()
-                    .find(|(_, s)| s.instrument.is_some_and(|m| m.default_duck_source()))
+                    .find(|(_, s)| s.module().is_some_and(|m| m.default_duck_source()))
                     .map(|(id, _)| *id),
             ),
         }
@@ -292,7 +253,7 @@ fn check_duck_depths(raw: &RawSong, duck: &Duck<'_>, errors: &mut Errors) {
     }
 }
 
-/// Track and pattern ids match `[a-z0-9_]+`.
+/// Track, device, clip and pattern ids match `[a-z0-9_]+`.
 fn check_id(id: &At<String>, what: &str, errors: &mut Errors) {
     let ok = !id.value.is_empty()
         && id

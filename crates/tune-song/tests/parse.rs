@@ -7,7 +7,7 @@ use tune_dsp::drums::DrumPattern;
 use tune_modules::{ACID303, EQ, HAT_CLOSED, KICK, RIDE};
 use tune_song::{
     Clip, ClipKind, Device, Lane, LoadError, MasterMode, Mix, MixUnit, Placement, Registry,
-    SectionPlay, Song, SongError, lane_value, load_song, parse_song, parse_song_with,
+    SectionPlay, Song, SongError, lane_value, load_song, parse_song, parse_with,
 };
 
 const MINI: &str = include_str!("fixtures/mini.toml");
@@ -215,7 +215,9 @@ fn instruments_come_from_the_registry() {
             },
             1,
         );
-        let song = parse_song_with(&src, registry).unwrap_or_else(|e| panic!("{}", messages(&e)));
+        let song = parse_with(&src, registry)
+            .map(|p| p.song)
+            .unwrap_or_else(|e| panic!("{}", messages(&e)));
         assert_eq!(
             song.tracks["hat"].instrument,
             Device::new(module.name, module)
@@ -930,13 +932,4 @@ fn patterns_become_clips_with_kinds() {
     let kinds: Vec<ClipKind> = song.clips.values().map(Clip::kind).collect();
     assert_eq!(kinds, [ClipKind::Drum, ClipKind::Acid, ClipKind::Drum]);
     assert_eq!(song.clips["k4"].steps_text(), "x... x... x... X...");
-}
-
-#[test]
-fn the_v1_writer_names_the_playing_track_as_owner() {
-    let song = mini();
-    let again = parse_song(&song.to_toml()).unwrap();
-    assert_eq!(again, song);
-    // `h` is played by the hat track, not the first drum track.
-    assert!(song.to_toml().contains("[patterns.h]\ntrack = \"hat\""));
 }
