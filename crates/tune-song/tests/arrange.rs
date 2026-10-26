@@ -24,7 +24,12 @@ steps = "x...x...x...x..."
 /// track tables `tracks`, the clips `c` and `d`, and the `[[automation]]`
 /// tables `automation`.
 fn song(sections: &[u32], tracks: &str, automation: &str) -> Song {
-    let mut text = String::from("[song]\nversion = 2\nname = \"t\"\nbpm = 120\n\n");
+    song_at(120, sections, tracks, automation)
+}
+
+/// [`song`] at `bpm`.
+fn song_at(bpm: u32, sections: &[u32], tracks: &str, automation: &str) -> Song {
+    let mut text = format!("[song]\nversion = 2\nname = \"t\"\nbpm = {bpm}\n\n");
     text += tracks;
     text += CLIPS;
     for (i, bars) in sections.iter().enumerate() {
@@ -298,6 +303,74 @@ fn ops_refuse_bad_indices_and_tracks() {
 }
 
 #[test]
+fn resize_refuses_out_of_range_bars() {
+    let s = song(&[2, 2], &kick_hat(&[(0, 4, "c", 0)], &[]), "");
+    for bars in [0, 1025, u32::MAX] {
+        for index in [0, 1] {
+            assert_eq!(
+                resize_section(&s, index, bars),
+                Err(ArrangeError::Bars { bars })
+            );
+        }
+    }
+    assert_eq!(
+        ArrangeError::Bars { bars: 0 }.to_string(),
+        "bars must be 1 to 1024, got 0"
+    );
+    assert!(resize_section(&s, 0, 1024).is_ok());
+}
+
+#[test]
+fn ops_refuse_results_past_u32_bars() {
+    // Only a song built in code gets here: the validator caps a song at
+    // 2250 bars (30 minutes at 300 bpm).
+    let mut s = song(&[1, 1], &kick_hat(&[], &[]), "");
+    s.sections[1].bars = u32::MAX - 10;
+    assert!(move_section(&s, 0, 1).is_ok());
+    assert!(delete_section(&s, 0).is_ok());
+    assert_eq!(duplicate_section(&s, 1), Err(ArrangeError::TooLong));
+    assert_eq!(resize_section(&s, 0, 1024), Err(ArrangeError::TooLong));
+    assert!(resize_section(&s, 0, 5).is_ok());
+
+    let mut s = song(&[2], &kick_hat(&[(0, 2, "c", 0)], &[]), "");
+    s.tracks["kick"].play[0].offset_bars = u32::MAX - 1;
+    assert_eq!(resize_section(&s, 0, 1), Err(ArrangeError::TooLong));
+}
+
+#[test]
+fn ops_on_a_song_at_the_validators_maximum() {
+    // 2250 bars at 300 bpm is exactly 30 minutes; offsets at their maximum.
+    let mut s = song_at(
+        300,
+        &[1024, 1024, 202],
+        &kick_hat(
+            &[(1000, 1100, "c", 1024), (2100, 150, "d", 1024)],
+            &[(0, 2250, "c", 1024)],
+        ),
+        &(lane(
+            "kick.kick.tune",
+            500,
+            1750,
+            &[(0.0, 0.0), (1000.0, 0.5), (1000.0, 0.7), (1750.0, 1.0)],
+        ) + &lane(
+            "hat.hat_closed.decay",
+            0,
+            2250,
+            &[(0.0, 0.2), (2250.0, 0.8)],
+        )),
+    );
+    // Each round moves the edges, so the next round splits the pieces again.
+    for round in 0..6 {
+        for (op, a) in every_op(&s) {
+            assert_eq!(a.lanes.len(), a.song.automation.len(), "{round} {op}");
+        }
+        let last = s.sections.len() - 1;
+        let moved = move_section(&s, 0, last).unwrap().song;
+        s = resize_section(&moved, 0, 1000 + round).unwrap().song;
+    }
+}
+
+#[test]
 fn resize_grows_the_placement_that_ran_to_the_end() {
     let s = song(
         &[2, 2],
@@ -512,7 +585,7 @@ fn every_op(s: &Song) -> Vec<(String, Arranged)> {
         out.push((format!("duplicate {i}"), duplicate_section(s, i).unwrap()));
         out.push((format!("delete {i}"), delete_section(s, i).unwrap()));
         let bars = s.sections[i].bars;
-        for new in [1, bars / 2, bars + 8] {
+        for new in [1, (bars / 2).max(1), (bars + 8).min(1024)] {
             out.push((
                 format!("resize {i} to {new}"),
                 resize_section(s, i, new).unwrap(),
