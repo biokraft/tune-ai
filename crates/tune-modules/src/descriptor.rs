@@ -112,6 +112,15 @@ impl ModuleDescriptor {
             .find(|(_, spec)| self.strip_prefix(spec.id) == Some(local))
     }
 
+    /// The local name of `id` when it is `"<device_id>.<local>"` and `local`
+    /// names one of this module's params: how a device called `device_id`
+    /// reads a track-relative param id (`eq2.low_cut` on device `eq2` is
+    /// `low_cut`).
+    pub fn local_param<'a>(&self, device_id: &str, id: &'a str) -> Option<&'a str> {
+        let local = id.strip_prefix(device_id)?.strip_prefix('.')?;
+        self.param(local).map(|_| local)
+    }
+
     /// The id of the param at `index` without `"<prefix>."`.
     ///
     /// # Panics

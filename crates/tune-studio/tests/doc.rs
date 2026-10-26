@@ -756,3 +756,70 @@ fn views_list_clips_and_what_tracks_play() {
     assert_eq!(view["tracks"][0]["plays"], json!(["drum"]));
     assert_eq!(view["tracks"][1]["plays"], json!(["acid"]));
 }
+
+/// A version 2 song with a second eq on the acid.
+const V2: &str = r#"[song]
+version = 2
+name = "v2"
+bpm = 120
+
+[tracks.kick]
+instrument = "kick"
+play = [{ at = 1, clip = "k4", bars = 2 }]
+
+[tracks.acid]
+instrument = "acid303"
+fx = [{ type = "eq" }, { type = "eq", id = "eq2", params = { "eq2.low_cut" = 200 } }]
+play = [{ at = 2, clip = "a1", bars = 1 }]
+
+[clips.k4]
+kind = "drum"
+steps = "x...x...x...x..."
+
+[clips.a1]
+kind = "acid"
+steps = "C2 C3"
+
+[[sections]]
+name = "a"
+bars = 1
+
+[[sections]]
+name = "b"
+bars = 1
+"#;
+
+#[test]
+fn v2_files_refuse_arrangement_edits_for_now() {
+    let mut d = SongDoc::parse(V2).expect("v2 parses");
+    assert_eq!(d.version(), 2);
+    for (p, v) in [
+        ("sections[0].bars", json!(2)),
+        ("sections[1].play.acid", json!("a1")),
+        ("sections[1].play.acid", Value::Null),
+        ("patterns.a1.steps", json!("C2")),
+    ] {
+        assert_eq!(
+            d.set(&path(p), &v),
+            Err(EditError::NotYetOnV2(p.to_owned())),
+            "{p}"
+        );
+    }
+    assert_eq!(
+        d.move_section(0, 1).unwrap_err().to_string(),
+        "`moving a section` is not yet supported on v2 files"
+    );
+    assert!(matches!(
+        d.duplicate_section(0),
+        Err(EditError::NotYetOnV2(_))
+    ));
+    assert!(matches!(d.delete_section(0), Err(EditError::NotYetOnV2(_))));
+    assert_eq!(d.text(), V2);
+
+    // Edits that touch no arrangement still work.
+    d.set(&path("sections[1].name"), &json!("drop")).unwrap();
+    d.set(&path("tracks.acid.eq2.low_cut"), &json!(300))
+        .unwrap();
+    assert_eq!(d.song().tracks["acid"].fx[1].params["low_cut"], 300.0);
+    assert!(d.song().tracks["acid"].fx[0].params.is_empty());
+}

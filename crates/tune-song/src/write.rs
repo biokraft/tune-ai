@@ -1,40 +1,21 @@
-//! The canonical serializer. Hand-written so the layout is fixed: the same
-//! song always produces the same text, and diffs between saves stay small.
-//! Comments are not preserved.
+//! The canonical serializer, format version 2. Hand-written so the layout
+//! is fixed: the same song always produces the same text, and diffs between
+//! saves stay small. Comments are not preserved.
 
 use std::fmt::Write as _;
 
 use indexmap::IndexMap;
 
-use crate::model::{Clip, Device, Song};
+use crate::FORMAT_VERSION;
+use crate::model::{Device, Placement, Song};
 
 impl Song {
-    /// The track a v1 file names as the owner of clip `id`: the track of
-    /// the earliest placement of it (the first in track order on a tie),
-    /// else the first track whose instrument plays its kind.
-    fn v1_owner(&self, id: &str, clip: &Clip) -> &str {
-        let used = self
-            .tracks
-            .iter()
-            .flat_map(|(t, track)| track.play.iter().map(move |p| (t, p)))
-            .filter(|(_, p)| p.clip == id)
-            .min_by_key(|(_, p)| p.start_bar)
-            .map(|(t, _)| t.as_str());
-        used.or_else(|| {
-            self.tracks
-                .iter()
-                .find(|(_, t)| t.instrument.module.plays(clip.kind()))
-                .map(|(t, _)| t.as_str())
-        })
-        .or_else(|| self.tracks.keys().next().map(String::as_str))
-        .unwrap_or("")
-    }
-
-    /// The song in canonical TOML form. Parsing the result gives back an equal
-    /// song.
+    /// The song in canonical TOML form, format version 2. Parsing the result
+    /// gives back an equal song.
     pub fn to_toml(&self) -> String {
         let mut out = String::new();
         out.push_str("[song]\n");
+        let _ = writeln!(out, "version = {FORMAT_VERSION}");
         let _ = writeln!(out, "name = {}", string(&self.name));
         let _ = writeln!(out, "bpm = {}", num(self.bpm));
         let _ = writeln!(out, "seed = {}", self.seed);
@@ -55,13 +36,13 @@ impl Song {
 
         for (id, track) in &self.tracks {
             let _ = write!(out, "\n[tracks.{}]\n", key(id));
-            // v1 names the instrument by module; its device id is the module's prefix.
-            let _ = writeln!(out, "instrument = {}", string(track.instrument.module.name));
+            let _ = writeln!(out, "instrument = {}", instrument(&track.instrument));
             let _ = writeln!(out, "gain_db = {}", num(track.gain_db));
             let _ = writeln!(out, "pan = {}", num(track.pan));
             let _ = writeln!(out, "mute = {}", track.mute);
             let _ = writeln!(out, "solo = {}", track.solo);
-            // Instrument params first, then the strip's, in one table.
+            // The model keeps the instrument's params and the strip's apart:
+            // the instrument's come first, each in model order.
             let mut params = device_params(&track.instrument);
             params.extend(track.strip.iter().map(|(k, v)| (k.clone(), *v)));
             if !params.is_empty() {
@@ -71,79 +52,104 @@ impl Song {
                 let fx: Vec<String> = track.fx.iter().map(fx_inline).collect();
                 let _ = writeln!(out, "fx = [{}]", fx.join(", "));
             }
+            if !track.play.is_empty() {
+                let _ = writeln!(out, "play = {}", placements_toml(&track.play));
+            }
         }
 
-        // v1 binds a pattern to a track; the model keeps no binding, so write
-        // the first track that plays it, else the first that could.
         for (id, clip) in &self.clips {
-            let _ = write!(out, "\n[patterns.{}]\n", key(id));
-            let _ = writeln!(out, "track = {}", string(self.v1_owner(id, clip)));
+            let _ = write!(out, "\n[clips.{}]\n", key(id));
+            let _ = writeln!(out, "kind = {}", string(clip.kind().name()));
             let _ = writeln!(out, "steps = {}", string(&clip.steps_text()));
         }
 
-        // v1 keeps placements and lanes in sections, so each must cover
-        // exactly one section (and start at the clip's first bar).
-        let starts = self.section_start_bars();
-        let aligned = |start_bar: u32, bars: u32| {
-            starts
-                .iter()
-                .zip(&self.sections)
-                .any(|(&s, section)| s == start_bar && section.bars == bars)
-        };
-        let all_aligned = self
-            .tracks
-            .values()
-            .flat_map(|t| &t.play)
-            .all(|p| p.offset_bars == 0 && aligned(p.start_bar, p.bars))
-            && self.automation.iter().all(|l| aligned(l.start_bar, l.bars));
-        assert!(
-            all_aligned,
-            "the v1 writer can only write placements and lanes aligned to sections"
-        );
-        for (section, start) in self.sections.iter().zip(starts.iter().copied()) {
+        for section in &self.sections {
             out.push_str("\n[[sections]]\n");
             let _ = writeln!(out, "name = {}", string(&section.name));
             let _ = writeln!(out, "bars = {}", section.bars);
-            let covers = |start_bar: u32, bars: u32| start_bar == start && bars == section.bars;
-            let play: Vec<String> = self
-                .tracks
+        }
+
+        for lane in &self.automation {
+            out.push_str("\n[[automation]]\n");
+            let _ = writeln!(
+                out,
+                "param = {}",
+                string(&format!("{}.{}", lane.track, lane.param))
+            );
+            let _ = writeln!(out, "at = {}", lane.start_bar + 1);
+            let _ = writeln!(out, "bars = {}", lane.bars);
+            let points: Vec<String> = lane
+                .points
                 .iter()
-                .filter_map(|(t, track)| {
-                    let p = track.play.iter().find(|p| covers(p.start_bar, p.bars))?;
-                    Some(format!("{} = {}", key(t), string(&p.clip)))
-                })
+                .map(|(bar, value)| format!("[{}, {}]", num(*bar), num(*value)))
                 .collect();
-            let _ = writeln!(out, "play = {}", inline(&play));
-            for lane in self
-                .automation
-                .iter()
-                .filter(|l| covers(l.start_bar, l.bars))
-            {
-                out.push_str("\n[[sections.automation]]\n");
-                let _ = writeln!(
-                    out,
-                    "param = {}",
-                    string(&format!("{}.{}", lane.track, lane.param))
-                );
-                let points: Vec<String> = lane
-                    .points
-                    .iter()
-                    .map(|(bar, value)| format!("[{}, {}]", num(*bar), num(*value)))
-                    .collect();
-                let _ = writeln!(out, "points = [{}]", points.join(", "));
-            }
+            let _ = writeln!(out, "points = [{}]", points.join(", "));
         }
         out
     }
 }
 
-/// `{ type = "<module>", <setting> = "<value>", …, params = { … } }`: every
-/// setting, then the explicit params.
-fn fx_inline(fx: &Device) -> String {
-    let mut parts = vec![format!("type = {}", string(fx.module.name))];
-    for (spec, value) in fx.module.settings.iter().zip(&fx.settings) {
+/// A track's `play` value: one placement inline (`[{ at = 1, clip = "k4",
+/// bars = 2 }]`), two or more one per line with a two-space indent and a
+/// trailing comma. `offset` is written only when it is not 0.
+pub fn placements_toml(play: &[Placement]) -> String {
+    let entries: Vec<String> = play.iter().map(placement_inline).collect();
+    match entries.as_slice() {
+        [] => "[]".to_owned(),
+        [one] => format!("[{one}]"),
+        many => {
+            let mut out = String::from("[\n");
+            for entry in many {
+                let _ = writeln!(out, "  {entry},");
+            }
+            out.push(']');
+            out
+        }
+    }
+}
+
+/// `{ at = <1-based bar>, clip = "<id>", bars = <n>[, offset = <n>] }`.
+fn placement_inline(p: &Placement) -> String {
+    let mut parts = vec![
+        format!("at = {}", p.start_bar + 1),
+        format!("clip = {}", string(&p.clip)),
+        format!("bars = {}", p.bars),
+    ];
+    if p.offset_bars != 0 {
+        parts.push(format!("offset = {}", p.offset_bars));
+    }
+    inline(&parts)
+}
+
+/// The `instrument` value: the module name when the device has the
+/// module's prefix as id and the module has no settings, else a table with
+/// `type`, the `id` when it is not the prefix, then every setting.
+fn instrument(device: &Device) -> String {
+    let module = device.module;
+    if device.id == module.prefix && module.settings.is_empty() {
+        return string(module.name);
+    }
+    inline(&device_head(device))
+}
+
+/// `type = "<module>"`, `id = "<id>"` when it is not the module's prefix,
+/// then every setting.
+fn device_head(device: &Device) -> Vec<String> {
+    let module = device.module;
+    let mut parts = vec![format!("type = {}", string(module.name))];
+    if device.id != module.prefix {
+        parts.push(format!("id = {}", string(&device.id)));
+    }
+    for (spec, value) in module.settings.iter().zip(&device.settings) {
         parts.push(format!("{} = {}", key(spec.name), string(value)));
     }
+    parts
+}
+
+/// `{ type = "<module>", [id = "<id>",] <setting> = "<value>", …, params =
+/// { … } }`: the head, then the explicit params.
+fn fx_inline(fx: &Device) -> String {
+    let mut parts = device_head(fx);
     let params = device_params(fx);
     if !params.is_empty() {
         parts.push(format!("params = {}", num_table(&params)));

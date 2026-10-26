@@ -4649,6 +4649,7 @@ name = "tune-engine"
 version = "0.1.0"
 dependencies = [
  "hound",
+ "indexmap 2.14.2",
  "rtrb",
  "tempfile",
  "thiserror 2.0.21",
