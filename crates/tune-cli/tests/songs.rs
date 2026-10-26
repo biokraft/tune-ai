@@ -90,3 +90,26 @@ fn first_acid_arrangement() {
     let seconds = v["seconds"].as_f64().unwrap();
     assert!((238.3..238.4).contains(&seconds), "seconds = {seconds}");
 }
+
+/// `first-acid` is written in song format v2: no in-memory migration happens
+/// on read, and the file says so.
+#[test]
+fn first_acid_is_version_2() {
+    let song = songs_dir().join("first-acid/song.toml");
+    let out = tune()
+        .arg("validate")
+        .arg(&song)
+        .arg("--json")
+        .assert()
+        .success();
+    let v = json_of(&out.get_output().stdout);
+    assert!(
+        v.get("migrated_from").is_none_or(Value::is_null),
+        "first-acid still reads as v1: {v}"
+    );
+    let text = std::fs::read_to_string(&song).unwrap();
+    assert!(
+        text.lines().any(|l| l.trim() == "version = 2"),
+        "song.toml has no `version = 2` line"
+    );
+}
