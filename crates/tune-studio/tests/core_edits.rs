@@ -546,7 +546,7 @@ fn view_describes_the_song() {
     );
     assert_eq!(
         json["sections"][1]["lanes"][0],
-        json!({"track": "acid", "param": "acid303.cutoff", "points": [[0.0, 0.1], [2.0, 0.8]]})
+        json!({"track": "acid", "param": "acid303.cutoff", "points": [[0.0, 0.1], [2.0, 0.8]], "from": 0.0, "to": 2.0})
     );
 }
 

@@ -139,6 +139,7 @@
           {
             "id": "kick",
             "instrument": "kick",
+            "instrument_id": "kick",
             "plays": [
               "drum"
             ],
@@ -258,11 +259,28 @@
                 "explicit": false
               }
             ],
-            "fx": []
+            "fx": [],
+            "placements": [
+              {
+                "start_bar": 0,
+                "bars": 2,
+                "clip": "k4",
+                "offset": 0,
+                "in_section": 0
+              },
+              {
+                "start_bar": 2,
+                "bars": 2,
+                "clip": "k4",
+                "offset": 0,
+                "in_section": 1
+              }
+            ]
           },
           {
             "id": "acid",
             "instrument": "acid303",
+            "instrument_id": "acid303",
             "plays": [
               "acid"
             ],
@@ -432,6 +450,7 @@
             ],
             "fx": [
               {
+                "id": "dist",
                 "kind": "distortion",
                 "mode": "soft",
                 "modes": [
@@ -478,11 +497,21 @@
                   }
                 ]
               }
+            ],
+            "placements": [
+              {
+                "start_bar": 2,
+                "bars": 2,
+                "clip": "a1",
+                "offset": 0,
+                "in_section": 1
+              }
             ]
           },
           {
             "id": "hat",
             "instrument": "hat_closed",
+            "instrument_id": "hat_closed",
             "plays": [
               "drum"
             ],
@@ -578,7 +607,23 @@
                 "explicit": false
               }
             ],
-            "fx": []
+            "fx": [],
+            "placements": [
+              {
+                "start_bar": 0,
+                "bars": 2,
+                "clip": "h",
+                "offset": 0,
+                "in_section": 0
+              },
+              {
+                "start_bar": 2,
+                "bars": 2,
+                "clip": "h",
+                "offset": 0,
+                "in_section": 1
+              }
+            ]
           }
         ],
         "patterns": [
@@ -706,7 +751,9 @@
                     2.0,
                     0.8
                   ]
-                ]
+                ],
+                "from": 0.0,
+                "to": 2.0
               }
             ]
           }
