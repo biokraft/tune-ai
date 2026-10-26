@@ -72,33 +72,35 @@ pub fn keep_sections(s: &mut Song, n: usize) {
 /// Appends a copy of section `i`, with copies of the placements and lane
 /// stretches that cover exactly that section.
 pub fn push_section_copy(s: &mut Song, i: usize) {
-    let start = s.section_start_bars()[i];
-    let section = s.sections[i].clone();
     let to = s.total_bars();
-    let aligned = |start_bar: u32, bars: u32| start_bar == start && bars == section.bars;
-    for t in s.tracks.values_mut() {
-        let copies: Vec<_> = t
-            .play
-            .iter()
-            .filter(|p| aligned(p.start_bar, p.bars))
-            .map(|p| Placement {
-                start_bar: to,
-                ..p.clone()
-            })
-            .collect();
-        t.play.extend(copies);
-    }
-    let copies: Vec<_> = s
+    let placements: Vec<Vec<Placement>> = s
+        .tracks
+        .values()
+        .map(|t| {
+            t.play
+                .iter()
+                .filter(|p| s.covers_section(i, p.span()))
+                .map(|p| Placement {
+                    start_bar: to,
+                    ..p.clone()
+                })
+                .collect()
+        })
+        .collect();
+    let lanes: Vec<Lane> = s
         .automation
         .iter()
-        .filter(|l| aligned(l.start_bar, l.bars))
+        .filter(|l| s.covers_section(i, l.span()))
         .map(|l| Lane {
             start_bar: to,
             ..l.clone()
         })
         .collect();
-    s.automation.extend(copies);
-    s.sections.push(section);
+    for (t, copies) in s.tracks.values_mut().zip(placements) {
+        t.play.extend(copies);
+    }
+    s.automation.extend(lanes);
+    s.sections.push(s.sections[i].clone());
 }
 
 /// The bit patterns of `x`, for bitwise comparisons.

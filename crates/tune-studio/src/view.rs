@@ -225,7 +225,7 @@ impl From<&Song> for SongView {
                     lanes: song
                         .automation
                         .iter()
-                        .filter(|l| l.start_bar == start_bar && l.bars == s.bars)
+                        .filter(|l| song.covers_section(i, l.span()))
                         .map(|l| LaneView {
                             track: l.track.clone(),
                             param: l.param.clone(),

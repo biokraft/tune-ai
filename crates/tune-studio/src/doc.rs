@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use toml_edit::{DocumentMut, InlineTable, Item, Table};
 use tune_dsp::{ParamSpec, STRIP_PARAMS, find_spec};
 use tune_song::{
-    Device, MIX_TRACK_ID, Registry, SectionPlay, SettingSpec, Song, SongError, Track,
+    Device, MIX_TRACK_ID, Placement, Registry, SectionPlay, SettingSpec, Song, SongError, Track,
     find_mix_param, parse,
 };
 
@@ -315,19 +315,9 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
             match song.section_play(*section, track) {
                 SectionPlay::Silent => Value::Null,
                 SectionPlay::Clip(clip) => Value::from(clip),
-                SectionPlay::Other(placements) => Value::Array(
-                    placements
-                        .iter()
-                        .map(|p| {
-                            json!({
-                                "at": p.start_bar + 1,
-                                "clip": p.clip,
-                                "bars": p.bars,
-                                "offset": p.offset_bars,
-                            })
-                        })
-                        .collect(),
-                ),
+                SectionPlay::Other(placements) => {
+                    Value::Array(placements.into_iter().map(placement_json).collect())
+                }
             }
         }
         SongPath::SectionLanes(i) => {
@@ -358,6 +348,16 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
                 .map(|s| Value::from(format!("{}:{}", s.name, s.bars)))
                 .collect(),
         ),
+    })
+}
+
+/// A placement as JSON: `{"at", "clip", "bars", "offset"}`, `at` 1-based.
+pub fn placement_json(p: &Placement) -> Value {
+    json!({
+        "at": p.start_bar + 1,
+        "clip": p.clip,
+        "bars": p.bars,
+        "offset": p.offset_bars,
     })
 }
 
