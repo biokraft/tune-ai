@@ -26,6 +26,9 @@ pub struct StudioState {
     pub offered: Vec<Change>,
     /// Problems in the song file on disk; edits wait until they are fixed.
     pub file_errors: Vec<ErrorView>,
+    /// The format version the song file was migrated from when it was
+    /// opened, while one undo would revert that migration; else `None`.
+    pub migrated_from: Option<u32>,
 }
 
 /// The open song.

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use serde_json::{Value, json};
-use tune_studio::{Source, StudioError, parse_assignment, set_paths};
+use tune_studio::{SongPath, Source, StudioError, parse_assignment, set_paths};
 
 use crate::report::{Failure, Success, finish};
 
@@ -22,7 +22,14 @@ fn set(song: &Path, assignments: &[String]) -> Result<Success, Vec<Failure>> {
     let text = out
         .changes
         .iter()
-        .map(|c| format!("set {} {} -> {}", c.path, show(&c.old), show(&c.new)))
+        .map(|c| match c.path {
+            SongPath::Version => format!(
+                "migrated the file from version {} to {}",
+                show(&c.old),
+                show(&c.new)
+            ),
+            _ => format!("set {} {} -> {}", c.path, show(&c.old), show(&c.new)),
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let text = if text.is_empty() {
@@ -32,7 +39,11 @@ fn set(song: &Path, assignments: &[String]) -> Result<Success, Vec<Failure>> {
     };
     Ok(Success {
         text,
-        json: json!({ "changes": out.changes, "file_hash": out.file_hash }),
+        json: json!({
+            "changes": out.changes,
+            "file_hash": out.file_hash,
+            "migrated_from": out.migrated_from,
+        }),
     })
 }
 

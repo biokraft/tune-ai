@@ -13,6 +13,8 @@ use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
+use crate::diff::Change;
+
 /// Who made an edit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -62,6 +64,29 @@ impl EditLog {
         Self {
             file: dir.join("edits.jsonl"),
         }
+    }
+
+    /// Appends one entry per change, all from `source`, stamped now and
+    /// carrying `file_hash` (the file after the changes).
+    pub(crate) fn append_changes(
+        &self,
+        source: Source,
+        changes: &[Change],
+        file_hash: &str,
+    ) -> io::Result<()> {
+        let ts = Timestamp::now();
+        let entries: Vec<EditEntry> = changes
+            .iter()
+            .map(|c| EditEntry {
+                ts,
+                source,
+                path: c.path.to_string(),
+                old: c.old.clone(),
+                new: c.new.clone(),
+                file_hash: Some(file_hash.to_owned()),
+            })
+            .collect();
+        self.append(&entries)
     }
 
     /// Appends the entries as lines, in one `O_APPEND` write so concurrent
