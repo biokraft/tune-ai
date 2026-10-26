@@ -1,5 +1,5 @@
 use assert_cmd::Command;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 fn tune() -> Command {
@@ -137,6 +137,10 @@ fn params_json_lists_tables() {
     let v = json_of(&out.get_output().stdout);
     assert_eq!(v["instruments"]["kick"][0]["id"], "kick.tune");
     assert!(!v["effects"]["distortion"].as_array().unwrap().is_empty());
+    assert_eq!(
+        v["settings"]["distortion"][0]["values"],
+        json!(["soft", "hard", "overdrive"])
+    );
     for group in ["instruments", "effects"] {
         for (_, list) in v[group].as_object().unwrap() {
             for p in list.as_array().unwrap() {

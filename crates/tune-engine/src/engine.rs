@@ -9,14 +9,45 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use tune_dsp::{ParamSpec, STRIP_PARAMS};
-use tune_song::FxSpec;
+use tune_modules::{BUILTIN, Cell, Effect, Instrument, ModuleDescriptor, StepCtx};
+use tune_song::{FxSpec, InstrumentKind};
 
 use crate::clock::hit_seed;
 use crate::compile::{CompiledFx, CompiledSong, CompiledTrack, MIX_TRACK, ParamTarget};
-use crate::instrument::{Cell, Effect, Instrument, StepCtx};
 use crate::live::SongUpdate;
 use crate::mixer::{Meter, MixRuntime, Strip};
-use crate::tracks::{make_effect, make_instrument};
+
+/// The built-in module called `name`. A bridge from the song model's
+/// closed kinds to the registry.
+fn module_named(name: &str) -> &'static ModuleDescriptor {
+    BUILTIN
+        .iter()
+        .copied()
+        .find(|m| m.name == name)
+        .unwrap_or_else(|| panic!("no built-in module `{name}`"))
+}
+
+/// A fresh instrument of `kind` with every param at its default.
+fn make_instrument(kind: InstrumentKind, sample_rate: f64) -> Box<dyn Instrument> {
+    module_named(kind.name())
+        .make_instrument(sample_rate, &[])
+        .unwrap_or_else(|| panic!("`{}` is not an instrument", kind.name()))
+}
+
+/// A fresh effect for `fx` with its mode set; params stay at their defaults.
+fn make_effect(fx: &FxSpec, sample_rate: f64) -> Box<dyn Effect> {
+    let mode;
+    let settings: &[&'static str] = match fx {
+        FxSpec::Distortion { mode: m, .. } => {
+            mode = [m.name()];
+            &mode
+        }
+        FxSpec::Eq { .. } => &[],
+    };
+    module_named(fx.type_name())
+        .make_effect(sample_rate, settings)
+        .unwrap_or_else(|| panic!("`{}` is not an effect", fx.type_name()))
+}
 
 /// The live DSP objects of one track, with its knob overrides.
 pub struct TrackRuntime {
