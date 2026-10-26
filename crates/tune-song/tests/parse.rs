@@ -215,7 +215,7 @@ fn instruments_come_from_the_registry() {
             },
             1,
         );
-        let song = parse_song_with(&src, &registry).unwrap_or_else(|e| panic!("{}", messages(&e)));
+        let song = parse_song_with(&src, registry).unwrap_or_else(|e| panic!("{}", messages(&e)));
         assert_eq!(
             song.tracks["hat"].instrument,
             Device::new(module.name, module)
