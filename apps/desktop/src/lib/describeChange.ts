@@ -51,7 +51,7 @@ function implied(song: SongView | null, track: string): boolean {
 const MIX = /^mix\.(.+)$/;
 const TRACK = /^tracks\.([^.]+)(?:\.(.+))?$/;
 const SECTION = /^sections\[(\d+)\]\.(bars|name|lanes|play\.(.+))$/;
-const PATTERN = /^patterns\.(.+)\.steps$/;
+const PATTERN = /^clips\.(.+)\.steps$/;
 
 /** One change in a few plain words, for the change notice. */
 export function describeChange(c: Change, song: SongView | null): string {

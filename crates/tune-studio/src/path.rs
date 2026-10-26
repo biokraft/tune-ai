@@ -16,6 +16,9 @@ use tune_song::MIX_TRACK_ID;
 pub enum SongPath {
     /// `song.bpm`
     Bpm,
+    /// `song.version` (read-only: the file's format version, which changes
+    /// only when a file is migrated)
+    Version,
     /// `tracks.<t>.gain_db|pan|mute|solo`
     TrackField { track: String, field: TrackField },
     /// `tracks.<t>.<device>.<name>`: a param of the instrument or an fx
@@ -33,8 +36,9 @@ pub enum SongPath {
     MixDuckSource,
     /// `tracks.<t>` (read-only: the track as a whole)
     Track { track: String },
-    /// `patterns.<p>.steps`
-    Pattern { pattern: String },
+    /// `clips.<c>.steps`; `patterns.<c>.steps`, the version 1 spelling,
+    /// parses to it too.
+    Clip { clip: String },
     /// `sections[<i>].bars`
     SectionBars(usize),
     /// `sections[<i>].name`
@@ -103,7 +107,7 @@ impl SongPath {
     pub fn is_read_only(&self) -> bool {
         matches!(
             self,
-            Self::Track { .. } | Self::SectionLanes(_) | Self::Sections
+            Self::Version | Self::Track { .. } | Self::SectionLanes(_) | Self::Sections
         )
     }
 }
@@ -112,13 +116,14 @@ impl fmt::Display for SongPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Bpm => f.write_str("song.bpm"),
+            Self::Version => f.write_str("song.version"),
             Self::TrackField { track, field } => write!(f, "tracks.{track}.{field}"),
             Self::TrackParam { track, param } => write!(f, "tracks.{track}.{param}"),
             Self::MixParam { param } => write!(f, "mix.{param}"),
             Self::MixMaster => f.write_str("mix.master"),
             Self::MixDuckSource => f.write_str("mix.duck_source"),
             Self::Track { track } => write!(f, "tracks.{track}"),
-            Self::Pattern { pattern } => write!(f, "patterns.{pattern}.steps"),
+            Self::Clip { clip } => write!(f, "clips.{clip}.steps"),
             Self::SectionBars(i) => write!(f, "sections[{i}].bars"),
             Self::SectionName(i) => write!(f, "sections[{i}].name"),
             Self::SectionPlay { section, track } => write!(f, "sections[{section}].play.{track}"),
@@ -135,7 +140,7 @@ impl FromStr for SongPath {
         parse(s).ok_or_else(|| {
             format!(
                 "unknown path `{s}` (expected e.g. song.bpm, tracks.<track>.gain_db, \
-                 tracks.<track>.<param id>, mix.<param id>, patterns.<pattern>.steps, \
+                 tracks.<track>.<param id>, mix.<param id>, clips.<clip>.steps, \
                  sections[<i>].bars)"
             )
         })
@@ -146,6 +151,9 @@ fn parse(s: &str) -> Option<SongPath> {
     if s == "song.bpm" {
         return Some(SongPath::Bpm);
     }
+    if s == "song.version" {
+        return Some(SongPath::Version);
+    }
     if s == "sections" {
         return Some(SongPath::Sections);
     }
@@ -155,10 +163,13 @@ fn parse(s: &str) -> Option<SongPath> {
     if let Some(rest) = s.strip_prefix("mix.") {
         return parse_mix(rest);
     }
-    if let Some(rest) = s.strip_prefix("patterns.") {
-        let pattern = rest.strip_suffix(".steps")?;
-        return is_id(pattern).then(|| SongPath::Pattern {
-            pattern: pattern.to_owned(),
+    if let Some(rest) = s
+        .strip_prefix("clips.")
+        .or_else(|| s.strip_prefix("patterns."))
+    {
+        let clip = rest.strip_suffix(".steps")?;
+        return is_id(clip).then(|| SongPath::Clip {
+            clip: clip.to_owned(),
         });
     }
     if let Some(rest) = s.strip_prefix("sections[") {
@@ -228,7 +239,7 @@ fn parse_index(s: &str) -> Option<usize> {
     canonical.then(|| s.parse().ok()).flatten()
 }
 
-/// Track, pattern and param-name ids match `[a-z0-9_]+`.
+/// Track, clip and param-name ids match `[a-z0-9_]+`.
 fn is_id(s: &str) -> bool {
     !s.is_empty()
         && s.bytes()
@@ -274,6 +285,9 @@ mod tests {
             "tracks.acid.acid303.cut.off",
             "patterns.a1",
             "patterns.a1.track",
+            "clips.a1",
+            "clips.a1.kind",
+            "song.versions",
             "sections[0]",
             "sections[0].play",
             "sections[0].play.",

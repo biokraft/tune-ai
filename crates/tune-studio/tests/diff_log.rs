@@ -8,7 +8,7 @@ use tune_studio::{
     Change, EditEntry, EditLog, SongDoc, SongPath, Source, diff_songs, is_whole_replace, text_hash,
 };
 
-const MINI: &str = include_str!("../../tune-song/tests/fixtures/mini.toml");
+const MINI: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
 const FIRST_ACID: &str = include_str!("../../../songs/first-acid/song.toml");
 
 fn song(text: &str) -> tune_song::Song {
@@ -53,16 +53,20 @@ fn diff_steps() {
     let text = MINI.replace("C2 C2! C3~ C2 . D#2 C2~ G2!", "C2 C2! C3~ C2 . D#2 C2~ A2!");
     let d = diff_songs(&song(MINI), &song(&text));
     assert_eq!(d.len(), 1, "{d:?}");
-    assert_eq!(d[0].path.to_string(), "patterns.a1.steps");
+    assert_eq!(d[0].path.to_string(), "clips.a1.steps");
     assert!(d[0].old.is_string() && d[0].new.is_string());
     assert_ne!(d[0].old, d[0].new);
 }
 
+/// The mini song with its two sections in the other order (and what plays
+/// in them with them).
 fn swapped() -> String {
-    let a = "[[sections]]\nname = \"a\"\nbars = 2\nplay = { kick = \"k4\", hat = \"h\" }\n\n";
-    let b = "[[sections]]\nname = \"b\"\nbars = 2\nplay = { kick = \"k4\", acid = \"a1\", hat = \"h\" }\n\n[[sections.automation]]\nparam = \"acid.acid303.cutoff\"\npoints = [[0, 0.1], [2, 0.8]]\n";
-    assert!(MINI.contains(&format!("{a}{b}")));
-    MINI.replace(&format!("{a}{b}"), &format!("{b}\n{a}"))
+    let mut song = song(MINI);
+    let mut doc = SongDoc::parse(MINI).unwrap();
+    doc.move_section(1, 0).unwrap();
+    song.sections.swap(0, 1);
+    assert_eq!(doc.song().sections, song.sections);
+    doc.text()
 }
 
 #[test]
@@ -80,23 +84,22 @@ fn diff_sections_reorder() {
 
 #[test]
 fn diff_bars_only() {
-    let text = MINI.replacen("bars = 2", "bars = 4", 1);
-    // Section `b` and its lane stretch move back with it; within `b` the
-    // lane is the same, so only the bars changed.
+    let mut d = SongDoc::parse(MINI).unwrap();
+    d.set(&path("sections[0].bars"), &json!(4)).unwrap();
+    // Section `b` and what plays in it move back with it; within `b`
+    // nothing changed, and `a`'s clips grow with it, so only the bars did.
     assert_eq!(
-        diff_songs(&song(MINI), &song(&text)),
+        diff_songs(&song(MINI), d.song()),
         vec![change("sections[0].bars", json!(2), json!(4))]
     );
 }
-
-const MINI_V2: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
 
 /// Resizing a section moves the stretches after it (their `at` is
 /// absolute), which is not an edit of those sections' lanes. A real edit of
 /// a later section's lane still is.
 #[test]
 fn shifted_lanes_are_not_lane_changes() {
-    let old = song(MINI_V2);
+    let old = song(MINI);
     assert_eq!(
         old.lanes_in(1).len(),
         1,
