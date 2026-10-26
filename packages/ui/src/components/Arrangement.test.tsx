@@ -627,6 +627,15 @@ describe("Arrangement ruler", () => {
   const ruler = () => screen.getByTestId("ruler");
   const at = (bar: number, into = 3) => ({ clientX: bar * 12 + into, pointerId: 1 });
   const cap = () => screen.getByRole("slider", { name: "Playhead" });
+  /** Pointer capture as a browser grants it; jsdom has none. */
+  const fakeCapture = (el: Element) => {
+    const held = new Set<number>();
+    Object.assign(el, {
+      setPointerCapture: (id: number) => held.add(id),
+      releasePointerCapture: (id: number) => held.delete(id),
+      hasPointerCapture: (id: number) => held.has(id),
+    });
+  };
 
   it("a click on the ruler seeks to the bar under the pointer", () => {
     const { onSeek, onLoop } = setup(two());
@@ -723,6 +732,7 @@ describe("Arrangement ruler", () => {
 
   it("a second pointer pressed during a ruler press is ignored", () => {
     const { onSeek, onLoop } = setup(two());
+    fakeCapture(ruler());
     fireEvent.pointerDown(ruler(), at(2));
     fireEvent.pointerDown(ruler(), { ...at(9), pointerId: 2 });
     fireEvent.pointerMove(ruler(), { ...at(12), pointerId: 2 });
@@ -734,6 +744,16 @@ describe("Arrangement ruler", () => {
     expect(onSeek).toHaveBeenCalledTimes(1);
     expect(onSeek).toHaveBeenCalledWith(2);
     expect(onLoop).not.toHaveBeenCalled();
+  });
+
+  it("a press that never got the pointer does not block the next one", () => {
+    // jsdom grants no capture, as a browser may not: the first press's release lands elsewhere.
+    const { onSeek } = setup(two());
+    fireEvent.pointerDown(ruler(), at(2));
+    fireEvent.pointerDown(ruler(), { ...at(9), pointerId: 2 });
+    fireEvent.pointerUp(ruler(), { ...at(9), pointerId: 2 });
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek).toHaveBeenCalledWith(9);
   });
 
   it("a cancelled drag neither loops nor seeks", () => {

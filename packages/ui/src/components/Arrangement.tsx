@@ -662,7 +662,11 @@ const Ruler = memo(function Ruler({ laneW, ppb, step, loop, total, onSeek, onLoo
     return cur && cur.pointer === e.pointerId ? cur : null;
   };
   const down = (e: PointerEvent<SVGSVGElement>) => {
-    if (e.button !== 0 || total <= 0 || pressRef.current) return;
+    if (e.button !== 0 || total <= 0) return;
+    // A press still holding its pointer owns the ruler. One that never got capture (or whose
+    // release landed elsewhere) is stale, and this press takes over.
+    const cur = pressRef.current;
+    if (cur && e.currentTarget.hasPointerCapture?.(cur.pointer)) return;
     capture(e);
     const bar = barAt(e);
     set({ pointer: e.pointerId, x0: e.clientX, from: bar, to: bar, drag: false });
