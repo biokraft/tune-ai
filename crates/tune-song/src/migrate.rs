@@ -51,12 +51,22 @@ pub fn migrate(src: &str) -> Result<Migration, Vec<SongError>> {
     rewrite(&mut doc, &song).ok_or_else(mismatch)?;
     let text = doc.to_string();
     match parse(&text) {
-        Ok(new) if new.version == FORMAT_VERSION && new.song == song => Ok(Migration::Migrated {
-            from: version,
-            text,
-        }),
+        Ok(new) if new.version == FORMAT_VERSION && same_song(&new.song, &song) => {
+            Ok(Migration::Migrated {
+                from: version,
+                text,
+            })
+        }
         _ => Err(mismatch()),
     }
+}
+
+/// Whether two songs are the same, in the same order. `Song`'s `==`
+/// compares its `IndexMap`s ignoring order, but track order sets the
+/// engine's mix and stem order; the canonical text writes every map (tracks,
+/// clips, mix, device and strip params) in model order.
+fn same_song(a: &Song, b: &Song) -> bool {
+    a == b && a.to_toml() == b.to_toml()
 }
 
 /// Rewrites the v1 document of `old` as v2. `None` when the document does
@@ -408,7 +418,18 @@ fn comments_in(text: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::comments_in;
+    use super::{comments_in, same_song};
+    use crate::parse_song;
+
+    #[test]
+    fn same_song_sees_track_order() {
+        let song = parse_song(include_str!("../tests/fixtures/mini.toml")).unwrap();
+        let mut reordered = song.clone();
+        reordered.tracks.reverse();
+        assert_eq!(reordered, song, "IndexMap equality ignores order");
+        assert!(!same_song(&reordered, &song));
+        assert!(same_song(&song.clone(), &song));
+    }
 
     #[test]
     fn comments_skip_strings() {
