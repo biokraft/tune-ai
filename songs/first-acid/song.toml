@@ -23,6 +23,7 @@
 # Levels and the mix: see [mix] below and the note at the end of the file.
 
 [song]
+version = 2
 name = "first-acid"
 # 145 BPM sits in the middle of the London/peak-time acid range (140-150):
 # fast enough to drive, slow enough that each 303 squelch has room to breathe.
@@ -63,12 +64,27 @@ gain_db = -5
 # 49 Hz is G1, the fifth of our root note C. A kick tuned to the key (root or
 # fifth) blends with the bassline instead of fighting it in the low end.
 params = { "kick.tune" = 49, "kick.drive" = 12 }
+play = [
+  { at = 1, clip = "kick4", bars = 16 },
+  { at = 17, clip = "kick4", bars = 16 },
+  { at = 33, clip = "kick4", bars = 32 },
+  { at = 81, clip = "kick4", bars = 16 },
+  { at = 97, clip = "kick4", bars = 16 },
+  { at = 113, clip = "kick4", bars = 16 },
+  { at = 129, clip = "kick4", bars = 16 },
+]
 
 [tracks.clap]
 instrument = "clap"
 gain_db = -9
 # The clap gets the most reverb (-14 dB send): a short tail on the backbeat.
 params = { "send.reverb" = -14 }
+play = [
+  { at = 33, clip = "clap24", bars = 32 },
+  { at = 81, clip = "clap24", bars = 16 },
+  { at = 97, clip = "clap24", bars = 16 },
+  { at = 113, clip = "clap24", bars = 16 },
+]
 
 [tracks.hat_closed]
 instrument = "hat_closed"
@@ -79,12 +95,28 @@ pan = -0.15
 # Just a hint of reverb on the hats (-28 dB closed, -24 dB open) so they sit
 # in the same room as the clap without washing out the top.
 params = { "send.reverb" = -28 }
+play = [
+  { at = 1, clip = "hats8", bars = 16 },
+  { at = 17, clip = "hats8", bars = 16 },
+  { at = 33, clip = "hats8", bars = 32 },
+  { at = 65, clip = "hats8", bars = 16 },
+  { at = 81, clip = "hats8", bars = 16 },
+  { at = 97, clip = "hats8", bars = 16 },
+  { at = 113, clip = "hats8", bars = 16 },
+  { at = 129, clip = "hats8", bars = 16 },
+]
 
 [tracks.hat_open]
 instrument = "hat_open"
 gain_db = -11
 pan = 0.15
 params = { "send.reverb" = -24 }
+play = [
+  { at = 33, clip = "open_off", bars = 32 },
+  { at = 81, clip = "open_off", bars = 16 },
+  { at = 97, clip = "open_off", bars = 16 },
+  { at = 113, clip = "open_off", bars = 16 },
+]
 
 [tracks.acid]
 instrument = "acid303"
@@ -121,34 +153,42 @@ params = { "acid303.cutoff" = 350, "acid303.resonance" = 85, "acid303.env_mod" =
 #    build, down again in the outro), so the line gets louder and nastier as
 #    the track builds without touching its fader.
 fx = [{ type = "eq", params = { "eq.low_cut" = 85, "eq.mid_freq" = 300, "eq.mid_gain" = 2 } }, { type = "distortion", mode = "soft", params = { "dist.drive" = 24 } }]
+play = [
+  { at = 17, clip = "acid_main", bars = 16 },
+  { at = 33, clip = "acid_main", bars = 32 },
+  { at = 65, clip = "acid_main", bars = 16 },
+  { at = 81, clip = "acid_main", bars = 16 },
+  { at = 97, clip = "acid_jump", bars = 16 },
+  { at = 113, clip = "acid_main", bars = 16 },
+]
 
 # -------------------------------------------------------------- patterns ----
 # Drum notation: `x` hit, `X` accented hit, `.` rest, one character per 16th.
 
-[patterns.kick4]
-track = "kick"
+[clips.kick4]
+kind = "drum"
 # Four on the floor: one kick on every beat. The heartbeat of techno.
 steps = "x...x...x...x..."
 
-[patterns.hats8]
-track = "hat_closed"
+[clips.hats8]
+kind = "drum"
 # Closed hats on every 8th note, accented on the offbeats (the "and" between
 # kicks). The accents make the hats push and pull against the kick: the groove.
 steps = "x.X.x.X.x.X.x.X."
 
-[patterns.open_off]
-track = "hat_open"
+[clips.open_off]
+kind = "drum"
 # Open hat exactly between the kicks: the classic "tss" offbeat that makes
 # people move. It fills the gap the kick leaves.
 steps = "..x...x...x...x."
 
-[patterns.clap24]
-track = "clap"
+[clips.clap24]
+kind = "drum"
 # Claps on beats 2 and 4, the backbeat.
 steps = "....x.......x..."
 
-[patterns.acid_main]
-track = "acid"
+[clips.acid_main]
+kind = "acid"
 # The main 303 line (the demo line from `task demo`), in C minor. One token per 16th:
 # `!` accent, `~` slide into the next step, `.` rest.
 # - It keeps coming back to C2, the root, so the ear always knows "home".
@@ -159,8 +199,8 @@ track = "acid"
 #   glides into itself instead of starting over.
 steps = "C2 C2! C3~ C2 . D#2 C2~ G2! . C2 C3 C2~ A#1 C2! . F2~"
 
-[patterns.acid_jump]
-track = "acid"
+[clips.acid_jump]
+kind = "acid"
 # The peak variation: nearly the same skeleton (still C2 on beat 1, the same
 # gaps on steps 5 and 9, F2~ at the end) but many notes jump up an octave.
 # Two slides go from high to low (D#3~ D#2, A#2~ A#1): long falling bends
@@ -185,27 +225,31 @@ steps = "C2 C3! C2~ C3 . D#3~ D#2 G2! . C2 C3! C2~ A#2~ A#1 C3! F2~"
 # and blend this track into the previous one without the two 303s clashing.
 name = "intro"
 bars = 16
-play = { kick = "kick4", hat_closed = "hats8" }
 
 [[sections]]
 # The 303 sneaks in almost closed: you feel the rhythm and the squelch before
 # you hear the notes. Opening it only a little over 16 bars builds tension.
 name = "intro_acid"
 bars = 16
-play = { kick = "kick4", hat_closed = "hats8", acid = "acid_main" }
 
-[[sections.automation]]
+[[automation]]
 param = "acid.acid303.cutoff"
+at = 17
+bars = 16
 points = [[0, 0.02], [16, 0.12]]
 
-[[sections.automation]]
+[[automation]]
 # Held at 80 % so the resonance does not dip when the build starts at 0.80.
 param = "acid.acid303.resonance"
+at = 17
+bars = 16
 points = [[0, 0.80]]
 
-[[sections.automation]]
+[[automation]]
 # Distortion 12 -> 15 dB: the line enters warm and only slightly dirty.
 param = "acid.dist.drive"
+at = 17
+bars = 16
 points = [[0, 0.25], [16, 0.3125]]
 
 [[sections]]
@@ -215,25 +259,32 @@ points = [[0, 0.25], [16, 0.3125]]
 # with it so the squelch gets sharper as it opens.
 name = "build"
 bars = 32
-play = { kick = "kick4", hat_closed = "hats8", hat_open = "open_off", clap = "clap24", acid = "acid_main" }
 
-[[sections.automation]]
+[[automation]]
 param = "acid.acid303.cutoff"
+at = 33
+bars = 32
 points = [[0, 0.12], [32, 0.55]]
 
-[[sections.automation]]
+[[automation]]
 param = "acid.acid303.resonance"
+at = 33
+bars = 32
 points = [[0, 0.80], [32, 0.85]]
 
-[[sections.automation]]
+[[automation]]
 # The echo grows from -24 to -15 dB: the space around the line widens.
 param = "acid.send.delay"
+at = 33
+bars = 32
 points = [[0, 0.6], [32, 0.75]]
 
-[[sections.automation]]
+[[automation]]
 # Distortion 15 -> 24 dB alongside the cutoff: this is what makes the build
 # build (about +1.4 LU over intro_acid, the last bars clearly hotter).
 param = "acid.dist.drive"
+at = 33
+bars = 32
 points = [[0, 0.3125], [32, 0.5]]
 
 [[sections]]
@@ -243,26 +294,33 @@ points = [[0, 0.3125], [32, 0.5]]
 # twice as hard when it comes back.
 name = "breakdown"
 bars = 16
-play = { hat_closed = "hats8", acid = "acid_main" }
 
-[[sections.automation]]
+[[automation]]
 param = "acid.acid303.cutoff"
+at = 65
+bars = 16
 points = [[0, 0.35], [16, 0.25]]
 
-[[sections.automation]]
+[[automation]]
 param = "acid.acid303.resonance"
+at = 65
+bars = 16
 points = [[0, 0.95]]
 
-[[sections.automation]]
+[[automation]]
 # Delay throws while the kick is out: the echo rises from -15 to -9 dB and
 # fills the empty room.
 param = "acid.send.delay"
+at = 65
+bars = 16
 points = [[0, 0.75], [16, 0.85]]
 
-[[sections.automation]]
+[[automation]]
 # Distortion pulled back to 15 dB and growling up to 18: the breakdown sits
 # about 3.7 LU under the drop, so the drop still lands.
 param = "acid.dist.drive"
+at = 65
+bars = 16
 points = [[0, 0.3125], [16, 0.375]]
 
 [[sections]]
@@ -271,14 +329,17 @@ points = [[0, 0.3125], [16, 0.375]]
 # "wow" gets bigger.
 name = "drop"
 bars = 16
-play = { kick = "kick4", hat_closed = "hats8", hat_open = "open_off", clap = "clap24", acid = "acid_main" }
 
-[[sections.automation]]
+[[automation]]
 param = "acid.acid303.cutoff"
+at = 81
+bars = 16
 points = [[0, 0.55], [16, 0.80]]
 
-[[sections.automation]]
+[[automation]]
 param = "acid.acid303.env_mod"
+at = 81
+bars = 16
 points = [[0, 0.60], [16, 0.70]]
 
 [[sections]]
@@ -286,15 +347,18 @@ points = [[0, 0.60], [16, 0.70]]
 # nearly all the way. This is the "hands in the air" moment of the track.
 name = "drop_peak"
 bars = 16
-play = { kick = "kick4", hat_closed = "hats8", hat_open = "open_off", clap = "clap24", acid = "acid_jump" }
 
-[[sections.automation]]
+[[automation]]
 param = "acid.acid303.cutoff"
+at = 97
+bars = 16
 points = [[0, 0.80], [16, 0.95]]
 
-[[sections.automation]]
+[[automation]]
 # Holds the drop's final env mod (70 %) so the peak does not lose its "wow".
 param = "acid.acid303.env_mod"
+at = 97
+bars = 16
 points = [[0, 0.70]]
 
 [[sections]]
@@ -303,22 +367,24 @@ points = [[0, 0.70]]
 # smoothly for the DJ's next track.
 name = "outro"
 bars = 16
-play = { kick = "kick4", hat_closed = "hats8", hat_open = "open_off", clap = "clap24", acid = "acid_main" }
 
-[[sections.automation]]
+[[automation]]
 param = "acid.acid303.cutoff"
+at = 113
+bars = 16
 points = [[0, 0.60], [16, 0.05]]
 
-[[sections.automation]]
+[[automation]]
 # Distortion 24 -> 12 dB with the closing filter: the build in reverse.
 param = "acid.dist.drive"
+at = 113
+bars = 16
 points = [[0, 0.5], [16, 0.25]]
 
 [[sections]]
 # 16 bars of just drums again, the mirror of the intro, so a DJ can mix out.
 name = "outro_drums"
 bars = 16
-play = { kick = "kick4", hat_closed = "hats8" }
 
 # Levels: measured with `tune analyze --sections` on the full render (bars
 # 1-144) of this file:
