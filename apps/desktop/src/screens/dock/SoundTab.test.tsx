@@ -63,10 +63,12 @@ describe("SoundTab", () => {
     expect(names).toEqual([...BIG, ...SMALL].map(sentence));
   });
 
-  it("picking hard fires set_fx_mode", () => {
+  it("the mode switch sends the device id", () => {
     const { fired } = setup();
     fireEvent.click(screen.getByRole("radio", { name: "Hard" }));
-    expect(fired).toEqual([{ cmd: "set_fx_mode", args: { track: "acid", mode: "hard" } }]);
+    expect(fired).toEqual([
+      { cmd: "set_fx_mode", args: { track: "acid", device: "dist", mode: "hard" } },
+    ]);
   });
 
   it("a kick shows one slider per param and no mode switch", () => {

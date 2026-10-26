@@ -59,6 +59,7 @@ fn sample_commands() -> Vec<Command> {
         },
         Command::SetFxMode {
             track: "acid".into(),
+            device: "dist".into(),
             mode: "hard".into(),
         },
         Command::SetAcidStep {
