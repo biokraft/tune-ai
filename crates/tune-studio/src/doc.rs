@@ -268,17 +268,23 @@ impl SongDoc {
         if let Some(start) = start {
             rerank(&mut doc, &arranged.song, start);
         }
-        self.commit(doc)?;
-        debug_assert_eq!(
-            self.song, arranged.song,
-            "the text describes the arranged song"
-        );
-        Ok(())
+        self.commit_as(doc, Some(&arranged.song))
     }
 
     /// Validates the edited copy and keeps it only when it is a valid song.
     fn commit(&mut self, doc: DocumentMut) -> Result<(), EditError> {
+        self.commit_as(doc, None)
+    }
+
+    /// [`commit`](Self::commit), and when `expected` is given, keeps the
+    /// copy only when its text describes exactly that song.
+    fn commit_as(&mut self, doc: DocumentMut, expected: Option<&Song>) -> Result<(), EditError> {
         let parsed = parse(&doc.to_string()).map_err(EditError::Invalid)?;
+        if expected.is_some_and(|song| *song != parsed.song) {
+            return Err(EditError::Internal(
+                "the edited file does not describe the arranged song".to_owned(),
+            ));
+        }
         self.doc = doc;
         self.song = parsed.song;
         Ok(())
@@ -1065,6 +1071,22 @@ mod tests {
             EditError::Internal("x".into()).to_string(),
             "internal error: x; the song was not changed (please report this)"
         );
+    }
+
+    #[test]
+    fn a_text_that_is_not_the_arranged_song_is_refused() {
+        let src = "[song]\nversion = 2\nname = \"x\"\nbpm = 120\n\n\
+                   [[sections]]\nname = \"a\"\nbars = 1\n";
+        let mut d = SongDoc::parse(src).unwrap();
+        let mut other = d.song().clone();
+        other.bpm = 121.0;
+        let edited: DocumentMut = src.replacen("bars = 1", "bars = 2", 1).parse().unwrap();
+        let err = d.commit_as(edited, Some(&other)).unwrap_err();
+        assert!(matches!(err, EditError::Internal(_)), "{err:?}");
+        assert_eq!(d.text(), src);
+        let same = d.song().clone();
+        let edited: DocumentMut = src.parse().unwrap();
+        d.commit_as(edited, Some(&same)).unwrap();
     }
 
     #[test]
