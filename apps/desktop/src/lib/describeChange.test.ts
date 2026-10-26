@@ -36,3 +36,21 @@ describe("describeChange on clips", () => {
     expect(change("clips.a1.steps", null, "C2 C3")).toBe("Pattern a1 added");
   });
 });
+
+describe("describeChange on v2 songs", () => {
+  it("says what a track plays in a section changed when it is not one clip", () => {
+    const placements = [{ at: 1, clip: "a1", bars: 1 }];
+    expect(change("sections[1].play.acid", "a1", placements)).toBe("Changed what acid plays in b");
+    expect(change("sections[0].play.kick", placements, null)).toBe("Changed what kick plays in a");
+    // One clip on both sides still reads as before.
+    expect(change("sections[1].play.acid", "a1", "a2")).toBe("b acid a1 → a2");
+  });
+  it("says the devices on a track changed, not that it was removed", () => {
+    const devices = { instrument: "acid303", fx: ["dist"] };
+    expect(change("tracks.acid", devices, { ...devices, fx: ["dist", "eq"] })).toBe(
+      "Changed the devices on acid",
+    );
+    expect(change("tracks.acid", null, devices)).toBe("Track acid added");
+    expect(change("tracks.acid", devices, null)).toBe("Track acid removed");
+  });
+});
