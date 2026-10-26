@@ -153,6 +153,8 @@ export type StudioState = {
   offered: Change[];
   /** Problems in the song file on disk; edits wait until they are fixed. */
   file_errors: ErrorView[];
+  /** The format version the song file was migrated from when opened, while one undo reverts it. */
+  migrated_from: number | null;
 };
 
 export type Source = "human" | "claude" | "external";

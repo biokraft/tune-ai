@@ -3,7 +3,6 @@
 //! up on both sides at once. `UPDATE_GOLDEN=1` rewrites the file.
 
 use std::collections::HashSet;
-use std::path::Path;
 
 use serde_json::{Value, json};
 use tune_studio::{
@@ -107,7 +106,11 @@ fn change(path: &str, old: Value, new: Value) -> Change {
 /// The state of the commented fixture song, with a fixed path (the real one
 /// is a temp dir).
 fn sample_state() -> StudioState {
-    let core = StudioCore::open(Path::new(COMMENTED)).expect("open the fixture");
+    // A copy: opening a song may write it.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("song.toml");
+    std::fs::copy(COMMENTED, &path).expect("copy the fixture");
+    let core = StudioCore::open(&path).expect("open the fixture");
     StudioState {
         path: Some("songs/mini/song.toml".into()),
         song: Some(core.view()),
@@ -122,6 +125,7 @@ fn sample_state() -> StudioState {
             column: Some(5),
             message: "expected a value".into(),
         }],
+        migrated_from: Some(1),
     }
 }
 

@@ -4,14 +4,13 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use jiff::Timestamp;
 use serde_json::Value;
 use tune_song::{FORMAT_VERSION, Migration};
 
-use crate::diff::{Change, diff_songs};
+use crate::diff::{Change, diff_songs, version_change};
 use crate::doc::SongDoc;
 use crate::error::{ErrorView, StudioError};
-use crate::log::{EditEntry, EditLog, Source, text_hash};
+use crate::log::{EditLog, Source, text_hash};
 use crate::path::SongPath;
 
 /// Splits `PATH=VALUE` at the first `=`. The value is a TOML value
@@ -73,11 +72,17 @@ pub struct SetOutcome {
     pub changes: Vec<Change>,
     /// FNV-1a hash of the file after the write.
     pub file_hash: String,
+    /// The format version the file was in when the write migrated it to
+    /// the newest; `None` when it was already the newest or nothing was
+    /// written.
+    pub migrated_from: Option<u32>,
 }
 
 /// Applies every assignment to one document, writes the file once and logs
 /// one entry per change, all carrying the file's hash. If any assignment
-/// fails nothing is written.
+/// fails nothing is written. A file in an older format is written in the
+/// newest, with a `song.version` change first; when no value changes,
+/// nothing is written and the file keeps its format.
 pub fn set_paths(
     song_path: &Path,
     assignments: &[(SongPath, Value)],
@@ -88,33 +93,36 @@ pub fn set_paths(
     let mut doc = SongDoc::parse(&text)
         .map_err(|errs| StudioError::Load(errs.iter().map(ErrorView::from).collect()))?;
     let before = doc.song().clone();
+    // The text as parsed: the migrated one for a file in an older format.
+    let start = doc.text();
     for (path, value) in assignments {
         doc.set(path, value)?;
     }
-    let changes = diff_songs(&before, doc.song());
     let new_text = doc.text();
-    let file_hash = text_hash(&new_text);
-    if new_text == text {
-        return Ok(SetOutcome { changes, file_hash });
+    if new_text == start {
+        return Ok(SetOutcome {
+            changes: Vec::new(),
+            file_hash: text_hash(&text),
+            migrated_from: None,
+        });
     }
+    let migrated_from = doc.migrated_from();
+    let changes: Vec<Change> = migrated_from
+        .and_then(|from| version_change(from, FORMAT_VERSION))
+        .into_iter()
+        .chain(diff_songs(&before, doc.song()))
+        .collect();
     write_atomic(song_path, &new_text)
         .map_err(|e| StudioError::Io(format!("cannot write {}: {e}", song_path.display())))?;
-    let ts = Timestamp::now();
-    let entries: Vec<EditEntry> = changes
-        .iter()
-        .map(|c| EditEntry {
-            ts,
-            source,
-            path: c.path.to_string(),
-            old: c.old.clone(),
-            new: c.new.clone(),
-            file_hash: Some(file_hash.clone()),
-        })
-        .collect();
+    let file_hash = text_hash(&new_text);
     EditLog::for_song(song_path)
-        .append(&entries)
+        .append_changes(source, &changes, &file_hash)
         .map_err(|e| StudioError::Io(format!("cannot write the edit log: {e}")))?;
-    Ok(SetOutcome { changes, file_hash })
+    Ok(SetOutcome {
+        changes,
+        file_hash,
+        migrated_from,
+    })
 }
 
 /// What [`migrate_file`] did.
@@ -158,16 +166,9 @@ pub fn migrate_file(
     write_atomic(song_path, &text)
         .map_err(|e| StudioError::Io(format!("cannot write {}: {e}", song_path.display())))?;
     let file_hash = text_hash(&text);
-    let entry = EditEntry {
-        ts: Timestamp::now(),
-        source,
-        path: "song.version".to_owned(),
-        old: Value::from(from),
-        new: Value::from(FORMAT_VERSION),
-        file_hash: Some(file_hash.clone()),
-    };
+    let changes: Vec<Change> = version_change(from, FORMAT_VERSION).into_iter().collect();
     EditLog::for_song(song_path)
-        .append(&[entry])
+        .append_changes(source, &changes, &file_hash)
         .map_err(|e| StudioError::Io(format!("cannot write the edit log: {e}")))?;
     Ok(MigrateOutcome::Migrated {
         from,

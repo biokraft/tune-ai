@@ -9,9 +9,15 @@ use tempfile::TempDir;
 use tune_studio::text_hash;
 
 fn fixture() -> (TempDir, PathBuf) {
+    fixture_of("commented.toml")
+}
+
+/// A temp copy of the studio fixture `name` as `song.toml`.
+fn fixture_of(name: &str) -> (TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let src =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-studio/tests/fixtures/commented.toml");
+    let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tune-studio/tests/fixtures")
+        .join(name);
     let song = dir.path().join("song.toml");
     fs::copy(src, &song).unwrap();
     (dir, song)
@@ -41,6 +47,7 @@ fn set_writes_and_logs_claude() {
         "--json",
     ]));
     assert_eq!(v["ok"], true);
+    assert_eq!(v["migrated_from"], Value::Null);
     assert_eq!(v["changes"][0]["old"], 500);
     assert_eq!(v["changes"][0]["new"], 820);
     let text = fs::read_to_string(&song).unwrap();
@@ -103,7 +110,71 @@ fn set_empty_value_removes_play() {
     ]));
     assert_eq!(v["changes"][0]["old"], "a1");
     assert_eq!(v["changes"][0]["new"], Value::Null);
-    assert!(!fs::read_to_string(&song).unwrap().contains("acid = \"a1\""));
+    assert!(!fs::read_to_string(&song).unwrap().contains("clip = \"a1\""));
+}
+
+#[test]
+fn set_on_v1_migrates_and_says_so() {
+    let (dir, song) = fixture_of("commented-v1.toml");
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "tracks.acid.acid303.cutoff=820",
+        "--json",
+    ]));
+    assert_eq!(v["migrated_from"], 1);
+    assert_eq!(v["changes"][0]["path"], "song.version");
+    assert_eq!(
+        (&v["changes"][0]["old"], &v["changes"][0]["new"]),
+        (&1.into(), &2.into())
+    );
+    assert_eq!(v["changes"][1]["path"], "tracks.acid.acid303.cutoff");
+    let text = fs::read_to_string(&song).unwrap();
+    let parsed = tune_song::parse(&text).expect("the file parses");
+    assert_eq!(parsed.version, 2);
+    assert!(text.contains("# the filter opens over the section\n[[automation]]"));
+    let log = fs::read_to_string(dir.path().join("edits.jsonl")).unwrap();
+    let first: Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
+    assert_eq!(
+        (&first["source"], &first["path"]),
+        (&"claude".into(), &"song.version".into())
+    );
+
+    // Text mode says it too.
+    let (_d, song) = fixture_of("commented-v1.toml");
+    let out = tune()
+        .args([
+            "set",
+            song.to_str().unwrap(),
+            "tracks.acid.acid303.cutoff=820",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "migrated the file from version 1 to 2\nset tracks.acid.acid303.cutoff 500 -> 820"
+    );
+}
+
+#[test]
+fn set_noop_on_v1_writes_nothing() {
+    let (dir, song) = fixture_of("commented-v1.toml");
+    let before = fs::read(&song).unwrap();
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "tracks.acid.acid303.cutoff=500",
+        "--json",
+    ]));
+    assert_eq!(v["changes"], serde_json::json!([]));
+    assert_eq!(v["migrated_from"], Value::Null);
+    assert_eq!(
+        v["file_hash"],
+        text_hash(&String::from_utf8(before.clone()).unwrap())
+    );
+    assert_eq!(fs::read(&song).unwrap(), before, "the file stays v1");
+    assert!(!dir.path().join("edits.jsonl").exists());
 }
 
 #[test]
@@ -203,7 +274,8 @@ fn changes_missing_log() {
 
 fn mixed_copy() -> (TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/mixed.toml");
+    let src =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/v2/mixed.toml");
     let song = dir.path().join("song.toml");
     fs::copy(src, &song).unwrap();
     (dir, song)

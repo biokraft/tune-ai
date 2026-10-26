@@ -240,6 +240,26 @@ fn subscribe_starts_with_state() {
 }
 
 #[test]
+fn state_reports_migrated_from_after_opening_v1() {
+    let v1 = include_str!("fixtures/commented-v1.toml");
+    let f = fixture(v1);
+    match f.events.recv_timeout(WAIT).expect("first event") {
+        Event::State(s) => {
+            assert_eq!(s.migrated_from, Some(1));
+            assert!(s.can_undo, "the migration is an undo step");
+        }
+        other => panic!("expected State, got {other:?}"),
+    }
+    assert_eq!(f.disk(), include_str!("fixtures/commented.toml"));
+    // A v2 song has none.
+    let f = fixture(MINI);
+    match f.events.recv_timeout(WAIT).expect("first event") {
+        Event::State(s) => assert_eq!(s.migrated_from, None),
+        other => panic!("expected State, got {other:?}"),
+    }
+}
+
+#[test]
 fn get_state_returns_current_state_and_changes_nothing() {
     let f = fixture(MINI);
     f.call(Command::SeekBar { bar: 1 });
