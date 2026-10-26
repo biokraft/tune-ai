@@ -73,7 +73,7 @@ export function OpenSongScreen({ send }: OpenSongScreenProps) {
           </p>
         )}
         {songs.kind === "ready" && songs.paths.length > 0 && (
-          <ul className="-mx-2 flex min-h-0 flex-col overflow-y-auto">
+          <ul className="-mx-2 flex min-h-0 flex-col overflow-y-auto overscroll-none">
             {songs.paths.map((path) => (
               <li key={path} className="border-t border-line first:border-t-0">
                 <button

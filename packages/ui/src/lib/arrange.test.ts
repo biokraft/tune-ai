@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   dropIndex,
   fitPxPerBar,
+  gridBars,
   HEADER_W,
   holdPoints,
   MAX_PX_PER_BAR,
@@ -103,5 +104,13 @@ describe("arrange", () => {
       [4, 1],
     ]);
     expect(holdPoints([], 4)).toEqual([]);
+  });
+});
+
+describe("gridBars", () => {
+  it("labels every step bars from 0, short of the end", () => {
+    expect(gridBars(32, 8)).toEqual([0, 8, 16, 24]);
+    expect(gridBars(33, 8)).toEqual([0, 8, 16, 24, 32]);
+    expect(gridBars(0, 8)).toEqual([]);
   });
 });

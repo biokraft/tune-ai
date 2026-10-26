@@ -115,7 +115,7 @@ export const StepsTab = memo(function StepsTab({
   }
   if (pattern.kind === "acid") {
     return (
-      <div className="min-h-0 overflow-x-auto p-3">
+      <div className="min-h-0 overflow-x-auto overscroll-none p-3">
         <LiveSequencer
           song={song}
           section={section}
@@ -134,7 +134,7 @@ export const StepsTab = memo(function StepsTab({
     );
   }
   return (
-    <div className="min-h-0 overflow-auto p-3">
+    <div className="min-h-0 overflow-auto overscroll-none p-3">
       <LiveDrumGrid song={song} section={section} rows={rows} fire={fire} />
     </div>
   );

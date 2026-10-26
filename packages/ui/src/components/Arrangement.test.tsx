@@ -17,6 +17,7 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
   const fns = {
     onSelect: vi.fn(),
     onSeek: vi.fn(),
+    onLoop: vi.fn(),
     onMove: vi.fn(),
     onResize: vi.fn(),
     onDuplicate: vi.fn(),
@@ -25,7 +26,7 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
     onShowTrack: vi.fn(),
     onMix: vi.fn(),
   };
-  const utils = render(
+  const ui = (more: Record<string, unknown>) => (
     <div>
       <button>outside</button>
       <Arrangement
@@ -45,10 +46,14 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
         openTrack={null}
         {...fns}
         {...extra}
+        {...more}
       />
-    </div>,
+    </div>
   );
-  return { ...fns, ...utils };
+  const utils = render(ui({}));
+  /** Re-renders with `more` on top of the first props, as a new playhead tick would. */
+  const update = (more: Record<string, unknown>) => utils.rerender(ui(more));
+  return { ...fns, ...utils, update };
 }
 
 const block = (i: number) => screen.getByTestId(`section-${i}`);
@@ -173,6 +178,12 @@ describe("Arrangement", () => {
     expect(filled(column)).toBe(true);
   });
 
+  it("scrolls the lanes without rubber-banding or chaining the scroll to the window", () => {
+    setup([sec("a", 0, 16)]);
+    const scroller = screen.getByRole("rowgroup", { name: "Tracks" }).parentElement!.parentElement!;
+    expect(scroller).toHaveClass("overflow-auto", "overscroll-none");
+  });
+
   it("lanes hold flat to the section edges and single points span the section", () => {
     const lanes = [
       {
@@ -200,7 +211,10 @@ describe("Arrangement", () => {
 
   it("playhead x", () => {
     setup([sec("a", 0, 16)], { playhead: 4.5 });
-    expect(screen.getByTestId("playhead")).toHaveAttribute("x1", "54");
+    const ph = screen.getByTestId("playhead");
+    expect(ph).toHaveAttribute("data-x", "54");
+    // A 2 px line centred on x: its left edge sits 1 px before it.
+    expect(ph.style.transform).toBe("translateX(53px)");
   });
 
   it("ruler ticks every 8 bars, one-based", () => {
@@ -319,13 +333,25 @@ describe("Arrangement", () => {
   it("the playhead glows and spans the ruler and the rows", () => {
     setup([sec("a", 0, 16)], { playhead: 2 });
     const ph = screen.getByTestId("playhead");
-    expect(ph).toHaveAttribute("stroke", "rgb(var(--play))");
-    expect(ph).toHaveAttribute("y1", "0");
+    expect(ph.tagName).toBe("DIV");
+    expect(ph).toHaveAttribute("aria-hidden", "true");
+    expect(ph).toHaveClass("pointer-events-none", "absolute", "top-0", "left-0", "z-[25]");
+    expect(ph.style.width).toBe("2px");
+    expect(ph.style.background).toBe("rgb(var(--play))");
+    expect(ph.style.boxShadow).toBe("0 0 6px rgb(var(--play) / .8)");
     // Ruler 24 + sections 32 + two 46 px rows.
-    expect(ph).toHaveAttribute("y2", String(24 + 32 + 2 * 46));
-    expect(ph.closest("svg")!.getAttribute("style")).toContain(
-      "drop-shadow(0 0 6px rgb(var(--play) / .8))",
-    );
+    expect(ph.style.height).toBe(`${24 + 32 + 2 * 46}px`);
+  });
+
+  it("draws the playhead without a CSS filter, which WebKit leaves as fog while it moves", () => {
+    setup([sec("a", 0, 16)], { playhead: 2 });
+    const ph = screen.getByTestId("playhead");
+    expect(ph.style.filter).toBe("");
+    expect(ph.getAttribute("style")).not.toMatch(/filter/);
+    expect(ph.style.willChange).toBe("transform");
+    for (let el: HTMLElement | null = ph; el; el = el.parentElement) {
+      expect(el.style.filter).toBe("");
+    }
   });
 
   it("labels the ruler every 8 bars at 12 px per bar", () => {
@@ -520,7 +546,7 @@ describe("Arrangement blocks", () => {
     expect(screen.getByText("↳ send.delay")).toBeInTheDocument();
     // Two lane rows push the drums row down.
     expect(blk("d1 in b").style.top).toBe(`${56 + 46 + 2 * 22 + 3}px`);
-    expect(screen.getByTestId("playhead")).toHaveAttribute("y2", String(56 + 2 * 46 + 2 * 22));
+    expect(screen.getByTestId("playhead").style.height).toBe(`${56 + 2 * 46 + 2 * 22}px`);
     // Each curve sits inside its own lane row.
     const polys = [...container.querySelectorAll('[data-testid="lane-overlay"] polyline')];
     expect(polys).toHaveLength(3);
@@ -592,5 +618,291 @@ describe("Arrangement blocks", () => {
       delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("Arrangement ruler", () => {
+  // 12 px per bar in jsdom (nothing measures the scroller), over two 16-bar sections.
+  const two = () => [sec("a", 0, 16), sec("b", 16, 16)];
+  const ruler = () => screen.getByTestId("ruler");
+  const at = (bar: number, into = 3) => ({ clientX: bar * 12 + into, pointerId: 1 });
+  const cap = () => screen.getByRole("slider", { name: "Playhead" });
+  /** Pointer capture as a browser grants it; jsdom has none. */
+  const fakeCapture = (el: Element) => {
+    const held = new Set<number>();
+    Object.assign(el, {
+      setPointerCapture: (id: number) => held.add(id),
+      releasePointerCapture: (id: number) => held.delete(id),
+      hasPointerCapture: (id: number) => held.has(id),
+    });
+  };
+
+  it("a click on the ruler seeks to the bar under the pointer", () => {
+    const { onSeek, onLoop } = setup(two());
+    expect(ruler()).toHaveClass("cursor-pointer");
+    fireEvent.pointerDown(ruler(), at(5));
+    fireEvent.pointerUp(ruler(), at(5));
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek).toHaveBeenCalledWith(5);
+    expect(onLoop).not.toHaveBeenCalled();
+  });
+
+  it("a press that moves less than the slop is still a click", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(5, 1));
+    fireEvent.pointerMove(ruler(), at(5, 3));
+    fireEvent.pointerUp(ruler(), at(5, 3));
+    expect(onSeek).toHaveBeenCalledWith(5);
+    expect(onLoop).not.toHaveBeenCalled();
+  });
+
+  it("only the left button acts", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), { ...at(5), button: 2 });
+    fireEvent.pointerUp(ruler(), { ...at(5), button: 2 });
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(onLoop).not.toHaveBeenCalled();
+  });
+
+  it("measures the pointer from the ruler's own left edge, so a scrolled timeline still hits", () => {
+    const { onSeek } = setup(two());
+    // Scrolled 120 px: the ruler's left edge sits 120 px left of the viewport's.
+    vi.spyOn(ruler(), "getBoundingClientRect").mockReturnValue({
+      left: -120,
+      top: 0,
+      right: 0,
+      bottom: 24,
+      width: 384,
+      height: 24,
+      x: -120,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    fireEvent.pointerDown(ruler(), { clientX: 3, pointerId: 1 });
+    fireEvent.pointerUp(ruler(), { clientX: 3, pointerId: 1 });
+    expect(onSeek).toHaveBeenCalledWith(10);
+  });
+
+  it("clamps a press past the last bar to the last bar", () => {
+    const { onSeek } = setup(two());
+    fireEvent.pointerDown(ruler(), at(40));
+    fireEvent.pointerUp(ruler(), at(40));
+    expect(onSeek).toHaveBeenCalledWith(31);
+  });
+
+  it("a drag across bars loops them, end exclusive, and does not seek", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(2));
+    fireEvent.pointerMove(ruler(), at(4));
+    fireEvent.pointerMove(ruler(), at(5));
+    fireEvent.pointerUp(ruler(), at(5));
+    expect(onLoop).toHaveBeenCalledTimes(1);
+    expect(onLoop).toHaveBeenCalledWith([2, 6]);
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it("a right-to-left drag gives the same range", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(5));
+    fireEvent.pointerMove(ruler(), at(2));
+    fireEvent.pointerUp(ruler(), at(2));
+    expect(onLoop).toHaveBeenCalledWith([2, 6]);
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it("a drag past the end loops up to the song's last bar", () => {
+    const { onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(28));
+    fireEvent.pointerMove(ruler(), at(50));
+    fireEvent.pointerUp(ruler(), at(50));
+    expect(onLoop).toHaveBeenCalledWith([28, 32]);
+  });
+
+  it("previews the range as a band while dragging, and drops it on release", () => {
+    setup(two());
+    expect(screen.queryByTestId("loop-preview")).toBeNull();
+    fireEvent.pointerDown(ruler(), at(2));
+    fireEvent.pointerMove(ruler(), at(5));
+    const band = screen.getByTestId("loop-preview");
+    expect(band).toHaveAttribute("x", String(2 * 12));
+    expect(band).toHaveAttribute("width", String(4 * 12));
+    fireEvent.pointerUp(ruler(), at(5));
+    expect(screen.queryByTestId("loop-preview")).toBeNull();
+  });
+
+  it("a second pointer pressed during a ruler press is ignored", () => {
+    const { onSeek, onLoop } = setup(two());
+    fakeCapture(ruler());
+    fireEvent.pointerDown(ruler(), at(2));
+    fireEvent.pointerDown(ruler(), { ...at(9), pointerId: 2 });
+    fireEvent.pointerMove(ruler(), { ...at(12), pointerId: 2 });
+    fireEvent.pointerUp(ruler(), { ...at(12), pointerId: 2 });
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(onLoop).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("loop-preview")).toBeNull();
+    fireEvent.pointerUp(ruler(), at(2));
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek).toHaveBeenCalledWith(2);
+    expect(onLoop).not.toHaveBeenCalled();
+  });
+
+  it("a press that never got the pointer does not block the next one", () => {
+    // jsdom grants no capture, as a browser may not: the first press's release lands elsewhere.
+    const { onSeek } = setup(two());
+    fireEvent.pointerDown(ruler(), at(2));
+    fireEvent.pointerDown(ruler(), { ...at(9), pointerId: 2 });
+    fireEvent.pointerUp(ruler(), { ...at(9), pointerId: 2 });
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek).toHaveBeenCalledWith(9);
+  });
+
+  it("a cancelled drag neither loops nor seeks", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(2));
+    fireEvent.pointerMove(ruler(), at(5));
+    fireEvent.pointerCancel(ruler(), at(5));
+    expect(onLoop).not.toHaveBeenCalled();
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("loop-preview")).toBeNull();
+  });
+
+  it("the playhead's cap is a slider over the song's bars", () => {
+    setup(two(), { playhead: 4.5 });
+    const c = cap();
+    expect(c).toHaveAttribute("aria-valuemin", "1");
+    expect(c).toHaveAttribute("aria-valuemax", "32");
+    expect(c).toHaveAttribute("aria-valuenow", "5");
+    expect(c).toHaveAttribute("tabindex", "0");
+    expect(c).toHaveClass("cursor-ew-resize", "pointer-events-auto");
+    // It rides the playhead by transform on its own layer, like the playhead line.
+    expect(c.style.transform).toBe(`translateX(${4.5 * 12 - 8}px)`);
+    expect(c.style.willChange).toBe("transform");
+    expect(c.getAttribute("style")).not.toMatch(/filter/);
+  });
+
+  it("dragging the cap moves the playhead bar by bar, ignores ticks, and seeks on release", () => {
+    const { onSeek, onLoop, update } = setup(two(), { playhead: 4.5 });
+    fireEvent.pointerDown(cap(), { clientX: 54, pointerId: 1 });
+    fireEvent.pointerMove(cap(), { clientX: 100, pointerId: 1 });
+    // 100 px is 8.3 bars: the nearest bar line is 8.
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(8 * 12));
+    expect(cap()).toHaveAttribute("aria-valuenow", "9");
+    update({ playhead: 5 });
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(8 * 12));
+    fireEvent.pointerUp(cap(), { clientX: 100, pointerId: 1 });
+    expect(onSeek).toHaveBeenCalledTimes(1);
+    expect(onSeek).toHaveBeenCalledWith(8);
+    expect(onLoop).not.toHaveBeenCalled();
+    // Released, it stays on the dropped bar until the next tick, with no flash back to bar 5...
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(8 * 12));
+    // ...then follows the ticks again.
+    update({ playhead: 8.0625 });
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(8.0625 * 12));
+    update({ playhead: 9 });
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(9 * 12));
+  });
+
+  it("a press on the cap never reaches the ruler: no loop, and only the cap's own seek", () => {
+    const { onSeek, onLoop } = setup(two(), { playhead: 4 });
+    const heard = vi.fn();
+    ruler().addEventListener("pointerdown", heard);
+    // A drag on the cap across the ruler moves the playhead; it never marks a loop.
+    fireEvent.pointerDown(cap(), { clientX: 48, pointerId: 1 });
+    fireEvent.pointerMove(cap(), { clientX: 120, pointerId: 1 });
+    expect(screen.queryByTestId("loop-preview")).toBeNull();
+    fireEvent.pointerUp(cap(), { clientX: 120, pointerId: 1 });
+    // A still press seeks once, from the cap.
+    fireEvent.pointerDown(cap(), { clientX: 50, pointerId: 1 });
+    fireEvent.pointerUp(cap(), { clientX: 50, pointerId: 1 });
+    expect(heard).not.toHaveBeenCalled();
+    expect(onLoop).not.toHaveBeenCalled();
+    expect(onSeek.mock.calls).toEqual([[10], [4]]);
+  });
+
+  it("a lost pointer capture mid cap-drag ends the drag: the playhead follows ticks again", () => {
+    const { onSeek, update } = setup(two(), { playhead: 4.5 });
+    fireEvent.pointerDown(cap(), { clientX: 54, pointerId: 1 });
+    fireEvent.pointerMove(cap(), { clientX: 100, pointerId: 1 });
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(8 * 12));
+    fireEvent.lostPointerCapture(cap(), { pointerId: 1 });
+    update({ playhead: 6 });
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(6 * 12));
+    fireEvent.pointerUp(cap(), { clientX: 100, pointerId: 1 });
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it("a cap that unmounts mid-drag lets go of the playhead", () => {
+    const { onSeek, update } = setup(two(), { playhead: 4.5 });
+    fireEvent.pointerDown(cap(), { clientX: 54, pointerId: 1 });
+    fireEvent.pointerMove(cap(), { clientX: 100, pointerId: 1 });
+    // An empty song has no cap.
+    update({ sections: [] });
+    expect(screen.queryByRole("slider", { name: "Playhead" })).toBeNull();
+    update({ sections: two(), playhead: 6 });
+    expect(screen.getByTestId("playhead")).toHaveAttribute("data-x", String(6 * 12));
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it("a lost pointer capture mid ruler-drag drops the preview and loops nothing", () => {
+    const { onSeek, onLoop } = setup(two());
+    fireEvent.pointerDown(ruler(), at(2));
+    fireEvent.pointerMove(ruler(), at(5));
+    expect(screen.getByTestId("loop-preview")).toBeInTheDocument();
+    fireEvent.lostPointerCapture(ruler(), { pointerId: 1 });
+    expect(screen.queryByTestId("loop-preview")).toBeNull();
+    fireEvent.pointerUp(ruler(), at(5));
+    expect(onLoop).not.toHaveBeenCalled();
+    expect(onSeek).not.toHaveBeenCalled();
+  });
+
+  it("a press on the cap that does not move seeks to the bar under the pointer, like the ruler", () => {
+    const { onSeek, onLoop } = setup(two(), { playhead: 4 });
+    // The cap's hit box straddles the bar line at 48 px: its left half lies in bar 3.
+    fireEvent.pointerDown(cap(), { clientX: 46, pointerId: 1 });
+    fireEvent.pointerUp(cap(), { clientX: 46, pointerId: 1 });
+    expect(onSeek).toHaveBeenLastCalledWith(3);
+    fireEvent.pointerDown(cap(), { clientX: 50, pointerId: 1 });
+    fireEvent.pointerMove(cap(), { clientX: 52, pointerId: 1 });
+    fireEvent.pointerUp(cap(), { clientX: 52, pointerId: 1 });
+    expect(onSeek).toHaveBeenLastCalledWith(4);
+    expect(onSeek).toHaveBeenCalledTimes(2);
+    expect(onLoop).not.toHaveBeenCalled();
+  });
+
+  it("a still press on the cap measures from the ruler's left edge, so a scrolled timeline hits", () => {
+    const { onSeek } = setup(two(), { playhead: 10 });
+    const band = ruler().parentElement!;
+    vi.spyOn(band, "getBoundingClientRect").mockReturnValue({
+      left: -120,
+      top: 0,
+      right: 0,
+      bottom: 56,
+      width: 384,
+      height: 56,
+      x: -120,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    fireEvent.pointerDown(cap(), { clientX: 2, pointerId: 1 });
+    fireEvent.pointerUp(cap(), { clientX: 2, pointerId: 1 });
+    expect(onSeek).toHaveBeenCalledWith(10);
+  });
+
+  it("arrow keys on the cap step the playhead a bar, clamped, and leave the sections alone", async () => {
+    const user = userEvent.setup();
+    const { onSeek, onMove, update } = setup(two(), { playhead: 4.5, selected: 0 });
+    act(() => cap().focus());
+    await user.keyboard("{ArrowRight}");
+    expect(onSeek).toHaveBeenLastCalledWith(5);
+    await user.keyboard("{ArrowLeft}");
+    expect(onSeek).toHaveBeenLastCalledWith(3);
+    await user.keyboard("{Alt>}{ArrowRight}{/Alt}");
+    expect(onMove).not.toHaveBeenCalled();
+    update({ playhead: 0 });
+    await user.keyboard("{ArrowLeft}");
+    expect(onSeek).toHaveBeenLastCalledWith(0);
+    update({ playhead: 31.5 });
+    await user.keyboard("{ArrowRight}");
+    expect(onSeek).toHaveBeenLastCalledWith(31);
   });
 });

@@ -240,6 +240,27 @@ describe("App", () => {
     expect(client.named("set_loop")[1]).toEqual({ cmd: "set_loop", args: { bars: null } });
   });
 
+  it("a click on the ruler seeks there", () => {
+    const { client } = setup();
+    const ruler = screen.getByTestId("ruler");
+    fireEvent.pointerDown(ruler, { clientX: 3 * 12 + 2, pointerId: 1 });
+    fireEvent.pointerUp(ruler, { clientX: 3 * 12 + 2, pointerId: 1 });
+    expect(client.named("seek_bar")).toEqual([{ cmd: "seek_bar", args: { bar: 3 } }]);
+    expect(client.named("set_loop")).toHaveLength(0);
+  });
+
+  it("a drag on the ruler loops that range and jumps to its start, without playing", () => {
+    const { client } = setup(stateEvent((s) => (s.loop_bars = null)));
+    const ruler = screen.getByTestId("ruler");
+    fireEvent.pointerDown(ruler, { clientX: 1 * 12 + 2, pointerId: 1 });
+    fireEvent.pointerMove(ruler, { clientX: 2 * 12 + 6, pointerId: 1 });
+    fireEvent.pointerUp(ruler, { clientX: 2 * 12 + 6, pointerId: 1 });
+    expect(client.sent()).toEqual([
+      { cmd: "set_loop", args: { bars: [1, 3] } },
+      { cmd: "seek_bar", args: { bar: 1 } },
+    ]);
+  });
+
   it("ignores shortcuts in text fields, popovers and handled events", () => {
     const { client } = setup();
     const input = document.createElement("input");
