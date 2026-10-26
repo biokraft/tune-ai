@@ -36,7 +36,7 @@ fn set(song: &Path, assignments: &[String]) -> Result<Success, Vec<Failure>> {
     })
 }
 
-fn failures(song: &Path, e: StudioError) -> Vec<Failure> {
+pub(crate) fn failures(song: &Path, e: StudioError) -> Vec<Failure> {
     match e {
         StudioError::Load(views) => views
             .into_iter()

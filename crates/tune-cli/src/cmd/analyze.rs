@@ -158,6 +158,9 @@ fn run_inner(a: &Args) -> Result<Success, Vec<Failure>> {
     }
     json.insert("png".into(), png.clone().map_or(Value::Null, Value::String));
     json.insert("notes".into(), json!(input.notes));
+    if let Some(from) = input.migrated_from {
+        json.insert("migrated_from".into(), Value::from(from));
+    }
     if !a.json {
         // stderr, like `tune render`: stdout stays the report.
         for n in &input.notes {

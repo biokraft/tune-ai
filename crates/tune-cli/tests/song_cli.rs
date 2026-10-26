@@ -470,6 +470,8 @@ fn limit_mode_does_not_print_clipper_lines() {
     assert!(!err.contains("clipper"), "{err}");
 }
 
+/// Render stdout and stderr, minus the v1 song's migration note (the
+/// limiter and clipper messages are what these tests look at).
 fn render_text(src: &Path) -> (String, String) {
     let dir = tempfile::tempdir().unwrap();
     let a = tune()
@@ -480,10 +482,13 @@ fn render_text(src: &Path) -> (String, String) {
         .assert()
         .success();
     let o = a.get_output();
-    (
-        String::from_utf8(o.stdout.clone()).unwrap(),
-        String::from_utf8(o.stderr.clone()).unwrap(),
-    )
+    let err = String::from_utf8(o.stderr.clone()).unwrap();
+    let err: String = err
+        .lines()
+        .filter(|l| !l.contains("tune migrate"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    (String::from_utf8(o.stdout.clone()).unwrap(), err)
 }
 
 fn mixed_with_gain(db: &str) -> (tempfile::TempDir, PathBuf) {
@@ -531,4 +536,125 @@ fn limit_text_line_leads_with_reduction() {
     assert!(out.starts_with("rendered bars 1.."), "{out}");
     assert!(out.contains("dBFS, limiter reduced peaks by "), "{out}");
     assert!(!out.contains("pre-clip"), "{out}");
+}
+
+fn v2(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tune-song/tests/fixtures/v2")
+        .join(name)
+}
+
+#[test]
+fn validate_v1_says_it_migrated_in_memory() {
+    let out = tune()
+        .arg("validate")
+        .arg(mini())
+        .arg("--json")
+        .assert()
+        .success();
+    assert_eq!(json_of(&out.get_output().stdout)["migrated_from"], 1);
+    let out = tune().arg("validate").arg(mini()).assert().success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("tune migrate"), "{stderr}");
+}
+
+#[test]
+fn validate_v2_has_no_migration_note() {
+    let out = tune()
+        .arg("validate")
+        .arg(v2("mini.toml"))
+        .arg("--json")
+        .assert()
+        .success();
+    assert!(
+        json_of(&out.get_output().stdout)
+            .get("migrated_from")
+            .is_none()
+    );
+    let out = tune()
+        .arg("validate")
+        .arg(v2("mini.toml"))
+        .assert()
+        .success();
+    assert!(out.get_output().stderr.is_empty());
+}
+
+#[test]
+fn info_lists_devices_and_placements() {
+    let out = tune()
+        .arg("info")
+        .arg(v2("mixed.toml"))
+        .arg("--json")
+        .assert()
+        .success();
+    let v = json_of(&out.get_output().stdout);
+    assert!(v.get("migrated_from").is_none());
+    let acid = v["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "acid")
+        .unwrap();
+    assert_eq!(
+        acid["devices"]["fx"],
+        json!([{"id": "dist", "type": "distortion"}, {"id": "eq", "type": "eq"}])
+    );
+    assert_eq!(
+        acid["devices"]["instrument"],
+        json!({"id": "acid303", "type": "acid303"})
+    );
+    assert_eq!(acid["instrument"], "acid303");
+    assert_eq!(
+        acid["placements"][0],
+        json!({"at": 3, "clip": "a1", "bars": 2, "offset": 0})
+    );
+    assert_eq!(
+        v["sections"][1]["play"],
+        json!({"kick": "k4", "acid": "a1", "hat": "h"})
+    );
+}
+
+#[test]
+fn info_text_shows_a_device_id_that_differs_from_its_module_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = std::fs::read_to_string(v2("mixed.toml")).unwrap().replace(
+        "{ type = \"eq\", params = { \"eq.low_cut\" = 85 } }]",
+        "{ type = \"eq\", params = { \"eq.low_cut\" = 85 } }, { type = \"eq\", id = \"eq2\" }]",
+    );
+    assert!(src.contains("eq2"));
+    let song = dir.path().join("song.toml");
+    std::fs::write(&song, &src).unwrap();
+    let out = tune().arg("info").arg(&song).assert().success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(text.contains("fx: distortion eq eq(eq2)"), "{text}");
+}
+
+#[test]
+fn render_v1_reports_migration() {
+    let dir = tempfile::tempdir().unwrap();
+    let wav = dir.path().join("out.wav");
+    let out = tune()
+        .arg("render")
+        .arg(mini())
+        .arg("--out")
+        .arg(&wav)
+        .arg("--json")
+        .assert()
+        .success();
+    assert_eq!(json_of(&out.get_output().stdout)["migrated_from"], 1);
+    let out = tune()
+        .arg("render")
+        .arg(v2("mini.toml"))
+        .arg("--out")
+        .arg(&wav)
+        .arg("--json")
+        .assert()
+        .success();
+    assert!(
+        json_of(&out.get_output().stdout)
+            .get("migrated_from")
+            .is_none()
+    );
 }

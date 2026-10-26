@@ -171,7 +171,7 @@ fn analyze_wav_with_song_map() {
 #[test]
 fn analyze_wav_past_the_song_end_is_noted() {
     let dir = tempfile::tempdir().unwrap();
-    let m = mini();
+    let m = mini_v2();
     let ms = m.to_str().unwrap();
     // mini is 4 bars of 2 s. 6 s from bar 3 holds bars 3-4 and 2 s past the end.
     write_sine(&dir.path().join("long.wav"), 48_000, 2, 6, -20.0);
@@ -582,4 +582,34 @@ fn analyze_by_ref_name() {
         .unwrap()
         .to_string();
     assert!(msg.contains("no reference named `x`; known: r"), "{msg}");
+}
+
+fn mini_v2() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tune-song/tests/fixtures/v2/mini.toml")
+        .canonicalize()
+        .unwrap()
+}
+
+#[test]
+fn analyze_sections_agree_on_v1_and_v2() {
+    let dir = tempfile::tempdir().unwrap();
+    let v1 = analyze_json(dir.path(), &[mini().to_str().unwrap(), "--sections"]);
+    let v2 = analyze_json(dir.path(), &[mini_v2().to_str().unwrap(), "--sections"]);
+    assert_eq!(v1["migrated_from"], 1);
+    assert!(v1["notes"][0].as_str().unwrap().contains("tune migrate"));
+    assert!(v2.get("migrated_from").is_none());
+    assert_eq!(v2["notes"], serde_json::json!([]));
+    let (a, b) = (
+        v1["sections"].as_array().unwrap(),
+        v2["sections"].as_array().unwrap(),
+    );
+    assert_eq!(a.len(), b.len());
+    assert!(!a.is_empty());
+    for (x, y) in a.iter().zip(b) {
+        assert_eq!(x["name"], y["name"]);
+        assert_eq!(x["start_bar"], y["start_bar"]);
+        assert_eq!(x["end_bar"], y["end_bar"]);
+        assert_eq!(x["integrated_lufs"], y["integrated_lufs"]);
+    }
 }

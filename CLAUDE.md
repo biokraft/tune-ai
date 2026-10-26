@@ -18,7 +18,7 @@ and lock-free live playback) driven through the `tune` CLI.
   (`SongPath`, comments kept), the edit log, undo, external-change merge, and
   the `Studio` actor the app talks to. Headless.
 - `crates/tune-cli` - the `tune` binary: `validate`, `info`, `params`,
-  `render`, `play`, `render-303`, `set`, `changes`, `serve`, `analyze`,
+  `render`, `play`, `render-303`, `set`, `migrate`, `changes`, `serve`, `analyze`,
   `compare`, `refs`. `ctrlc`, `tokio` and `axum` live only here (and in the
   Tauri host).
 - `crates/tune-analysis` - Claude's ears: decode, loudness (EBU R128), spectrum,

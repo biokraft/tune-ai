@@ -6,6 +6,7 @@ use std::path::Path;
 
 use jiff::Timestamp;
 use serde_json::Value;
+use tune_song::{FORMAT_VERSION, Migration};
 
 use crate::diff::{Change, diff_songs};
 use crate::doc::SongDoc;
@@ -114,6 +115,65 @@ pub fn set_paths(
         .append(&entries)
         .map_err(|e| StudioError::Io(format!("cannot write the edit log: {e}")))?;
     Ok(SetOutcome { changes, file_hash })
+}
+
+/// What [`migrate_file`] did.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MigrateOutcome {
+    /// The file is already in the newest format; nothing was touched.
+    Current,
+    Migrated {
+        /// The format the file was in.
+        from: u32,
+        /// The file in the newest format (written, unless it was a dry run).
+        text: String,
+        /// FNV-1a hash of the written file; `None` on a dry run.
+        file_hash: Option<String>,
+    },
+}
+
+/// Upgrades a song file to the newest format, keeping its comments. Writes
+/// atomically and logs one entry `{path: "song.version", old: from, new:
+/// <newest>}` with `source`, unless `dry_run`, which writes and logs nothing.
+/// An invalid file is left as it is and its errors are returned.
+pub fn migrate_file(
+    song_path: &Path,
+    source: Source,
+    dry_run: bool,
+) -> Result<MigrateOutcome, StudioError> {
+    let text = fs::read_to_string(song_path)
+        .map_err(|e| StudioError::Io(format!("cannot read {}: {e}", song_path.display())))?;
+    let migration = tune_song::migrate(&text)
+        .map_err(|errs| StudioError::Load(errs.iter().map(ErrorView::from).collect()))?;
+    let Migration::Migrated { from, text } = migration else {
+        return Ok(MigrateOutcome::Current);
+    };
+    if dry_run {
+        return Ok(MigrateOutcome::Migrated {
+            from,
+            text,
+            file_hash: None,
+        });
+    }
+    write_atomic(song_path, &text)
+        .map_err(|e| StudioError::Io(format!("cannot write {}: {e}", song_path.display())))?;
+    let file_hash = text_hash(&text);
+    let entry = EditEntry {
+        ts: Timestamp::now(),
+        source,
+        path: "song.version".to_owned(),
+        old: Value::from(from),
+        new: Value::from(FORMAT_VERSION),
+        file_hash: Some(file_hash.clone()),
+    };
+    EditLog::for_song(song_path)
+        .append(&[entry])
+        .map_err(|e| StudioError::Io(format!("cannot write the edit log: {e}")))?;
+    Ok(MigrateOutcome::Migrated {
+        from,
+        text,
+        file_hash: Some(file_hash),
+    })
 }
 
 /// Writes `text` to `<dir>/.song.toml.tune-tmp`, then renames it over
