@@ -9,10 +9,10 @@
 
 use serde_json::{Value, json};
 use toml_edit::{DocumentMut, InlineTable, Item, Table};
-use tune_dsp::{DIST_PARAMS, EQ_PARAMS, ParamSpec, STRIP_PARAMS, find_spec};
+use tune_dsp::{ParamSpec, STRIP_PARAMS, find_spec};
 use tune_song::{
-    FxSpec, InstrumentKind, MIX_TRACK_ID, PatternSteps, Song, SongError, Track, find_mix_param,
-    parse_song,
+    Device, MIX_TRACK_ID, PatternSteps, Registry, SettingSpec, Song, SongError, Track,
+    find_mix_param, parse_song,
 };
 
 use crate::path::{SongPath, TrackField};
@@ -225,7 +225,8 @@ impl SongDoc {
 /// is silent in a section; `None` when the target does not exist.
 ///
 /// The read-only aggregates are valued as follows: `tracks.<t>` is
-/// `{"instrument": …}`, `sections[<i>].lanes` is `[{track, param, points}]`
+/// `{"instrument": "<module>", "fx": [{"id": "<device id>", "type":
+/// "<module>"}, …]}`, `sections[<i>].lanes` is `[{track, param, points}]`
 /// and `sections` is `["<name>:<bars>", …]`.
 pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
     Some(match path {
@@ -241,12 +242,16 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
         }
         SongPath::TrackParam { track, param } => {
             let t = song.tracks.get(track)?;
-            let home = locate_param(t, param)?;
-            let explicit = match home {
-                ParamHome::Instrument(_) | ParamHome::Strip(_) => t.params.get(param),
-                ParamHome::Fx(i, _) => t.fx[i].params().get(param),
-            };
-            num(explicit.copied().unwrap_or(home.spec().default))
+            match locate(t, param)? {
+                Target::Param(home, local, spec) => num(home
+                    .device(t)
+                    .params
+                    .get(local)
+                    .copied()
+                    .unwrap_or(spec.default)),
+                Target::Strip(spec) => num(t.strip.get(param).copied().unwrap_or(spec.default)),
+                Target::Setting(home, spec) => Value::from(home.device(t).setting(spec.name)?),
+            }
         }
         SongPath::MixParam { param } => {
             let (_, _, spec) = find_mix_param(param)?;
@@ -254,15 +259,13 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
         }
         SongPath::MixMaster => Value::from(song.mix.master.name()),
         SongPath::MixDuckSource => song.duck_source().map_or(Value::Null, Value::from),
-        SongPath::FxMode { track } => {
-            let t = song.tracks.get(track)?;
-            let (_, FxSpec::Distortion { mode, .. }) = distortion(t)? else {
-                return None;
-            };
-            Value::from(mode.name())
-        }
         SongPath::Track { track } => {
-            json!({ "instrument": song.tracks.get(track)?.instrument.name() })
+            let t = song.tracks.get(track)?;
+            let fx: Vec<Value> =
+                t.fx.iter()
+                    .map(|d| json!({ "id": d.id, "type": d.module.name }))
+                    .collect();
+            json!({ "instrument": t.instrument.module.name, "fx": fx })
         }
         SongPath::Pattern { pattern } => match &song.patterns.get(pattern)?.steps {
             PatternSteps::Acid(p) => Value::from(p.to_string()),
@@ -316,54 +319,68 @@ fn as_integer(v: f64) -> Option<i64> {
     (v.fract() == 0.0 && v.abs() <= EXACT).then_some(v as i64)
 }
 
-/// Where a track's param lives.
-enum ParamHome {
-    Instrument(&'static ParamSpec),
-    /// A strip param (`send.delay`), kept in the track's `params` table.
-    Strip(&'static ParamSpec),
+/// Which device of a track.
+#[derive(Clone, Copy)]
+enum Home {
+    Instrument,
     /// Index into the track's fx chain.
-    Fx(usize, &'static ParamSpec),
+    Fx(usize),
 }
 
-impl ParamHome {
-    fn spec(&self) -> &'static ParamSpec {
+impl Home {
+    fn device(self, track: &Track) -> &Device {
         match self {
-            Self::Instrument(spec) | Self::Strip(spec) | Self::Fx(_, spec) => spec,
+            Self::Instrument => &track.instrument,
+            Self::Fx(i) => &track.fx[i],
         }
     }
 }
 
-/// Finds `param` on the instrument, then the strip, then each fx in chain
-/// order (the engine's order).
-fn locate_param(track: &Track, param: &str) -> Option<ParamHome> {
-    if let Ok((_, spec)) = find_spec(track.instrument.params(), param) {
-        return Some(ParamHome::Instrument(spec));
-    }
-    if let Ok((_, spec)) = find_spec(STRIP_PARAMS, param) {
-        return Some(ParamHome::Strip(spec));
-    }
-    track.fx.iter().enumerate().find_map(|(i, fx)| {
-        find_spec(fx.params_table(), param)
-            .ok()
-            .map(|(_, spec)| ParamHome::Fx(i, spec))
-    })
+/// What a track-relative id names.
+enum Target<'p> {
+    /// A device's param, with its local name (`cutoff`).
+    Param(Home, &'p str, &'static ParamSpec),
+    /// A strip param (`send.delay`), kept in the track's `params` table.
+    Strip(&'static ParamSpec),
+    /// A device's setting (`mode`), a key of its table.
+    Setting(Home, &'static SettingSpec),
 }
 
-/// Whether any instrument or effect has this param id.
-fn is_known_param(param: &str) -> bool {
-    InstrumentKind::ALL
-        .iter()
-        .map(|k| k.params())
-        .chain([DIST_PARAMS, EQ_PARAMS])
-        .any(|table| find_spec(table, param).is_ok())
+/// Resolves `<device id>.<name>` like the engine does: the instrument, the
+/// strip, then the fx device with that id. On a device, `name` is a param
+/// first, then a setting.
+fn locate<'p>(track: &Track, id: &'p str) -> Option<Target<'p>> {
+    let (device_id, name) = id.split_once('.')?;
+    let on = |home: Home| {
+        let module = home.device(track).module;
+        match module.param(name) {
+            Some((_, spec)) => Some(Target::Param(home, name, spec)),
+            None => module
+                .setting(name)
+                .map(|(_, spec)| Target::Setting(home, spec)),
+        }
+    };
+    if device_id == track.instrument.id {
+        return on(Home::Instrument);
+    }
+    if let Ok((_, spec)) = find_spec(STRIP_PARAMS, id) {
+        return Some(Target::Strip(spec));
+    }
+    let slot = track.fx.iter().position(|d| d.id == device_id)?;
+    on(Home::Fx(slot))
 }
 
-fn distortion(track: &Track) -> Option<(usize, &FxSpec)> {
-    track
-        .fx
-        .iter()
-        .enumerate()
-        .find(|(_, fx)| matches!(fx, FxSpec::Distortion { .. }))
+/// Whether some module, under its default device id, has this param or
+/// setting (`dist.drive`, `dist.mode`).
+fn is_known_param(id: &str) -> bool {
+    let Some((prefix, name)) = id.split_once('.') else {
+        return false;
+    };
+    let registry = Registry::builtin();
+    registry
+        .instruments()
+        .chain(registry.effects())
+        .any(|m| m.prefix == prefix && (m.param(name).is_some() || m.setting(name).is_some()))
 }
 
 /// Applies one `set` to `doc`, using `song` (which `doc` describes) to find
@@ -407,26 +424,42 @@ fn apply(
             let Some(t) = song.tracks.get(track) else {
                 return Err(missing());
             };
-            let home = match locate_param(t, param) {
-                Some(home) => home,
+            let target = match locate(t, param) {
+                Some(target) => target,
                 None if is_known_param(param) => return Err(missing()),
                 None => {
                     return Err(EditError::UnknownParam {
                         track: track.clone(),
-                        instrument: t.instrument.name(),
+                        instrument: t.instrument.module.name,
                         param: param.clone(),
                     });
                 }
             };
-            let v = toml_number(number()?);
-            let owner = match home {
-                ParamHome::Instrument(_) | ParamHome::Strip(_) => track_table(doc, track),
-                ParamHome::Fx(i, _) => fx_table(doc, track, i),
-            };
-            owner
-                .and_then(|o| o.child_or_new("params"))
-                .ok_or_else(missing)?
-                .put(param, v);
+            match target {
+                Target::Setting(Home::Fx(i), spec) => {
+                    let v = toml_edit::Value::from(string()?);
+                    fx_table(doc, track, i)
+                        .ok_or_else(missing)?
+                        .put(spec.name, v);
+                }
+                // A v1 instrument is a bare module name, with no table to
+                // hold a setting.
+                Target::Setting(Home::Instrument, _) => {
+                    return Err(EditError::ReadOnly(path.to_string()));
+                }
+                // Instrument and strip params share the track's `params`.
+                Target::Param(..) | Target::Strip(_) => {
+                    let v = toml_number(number()?);
+                    let owner = match target {
+                        Target::Param(Home::Fx(i), ..) => fx_table(doc, track, i),
+                        _ => track_table(doc, track),
+                    };
+                    owner
+                        .and_then(|o| o.child_or_new("params"))
+                        .ok_or_else(missing)?
+                        .put(param, v);
+                }
+            }
         }
         SongPath::MixParam { param } => {
             if find_mix_param(param).is_none() {
@@ -458,12 +491,6 @@ fn apply(
             }
             _ => return Err(bad("expected a track id or null")),
         },
-        SongPath::FxMode { track } => {
-            let t = song.tracks.get(track).ok_or_else(missing)?;
-            let (i, _) = distortion(t).ok_or_else(missing)?;
-            let v = toml_edit::Value::from(string()?);
-            fx_table(doc, track, i).ok_or_else(missing)?.put("mode", v);
-        }
         SongPath::Pattern { pattern } => {
             if !song.patterns.contains_key(pattern) {
                 return Err(missing());

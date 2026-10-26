@@ -235,7 +235,7 @@ fn strip_override_on_send() {
     let open = clip_mixed(|s| {
         drop_send_lane(s);
         let acid = s.tracks.get_mut("acid").unwrap();
-        acid.params.insert("send.delay".into(), 0.0);
+        acid.strip.insert("send.delay".into(), 0.0);
     });
     let (acid, send, _) = s.resolve_param("acid", "send.delay").unwrap();
     assert_eq!(send, ParamTarget::Strip(STRIP_SEND_DELAY));
@@ -283,8 +283,8 @@ fn strip_clear_restores_static_mid_section() {
     // an override clears, every frame matches an engine that never had one.
     let s = clip_mixed(|s| {
         let acid = s.tracks.get_mut("acid").unwrap();
-        acid.params.shift_remove("send.delay");
-        acid.params.shift_remove("send.reverb");
+        acid.strip.shift_remove("send.delay");
+        acid.strip.shift_remove("send.reverb");
         drop_lane(s, "acid", "send.delay");
     });
     let (acid, depth, _) = s.resolve_param("acid", "duck.depth").unwrap();

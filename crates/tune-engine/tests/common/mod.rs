@@ -5,7 +5,9 @@
 use std::sync::{Arc, Mutex};
 
 use tune_dsp::ParamSpec;
-use tune_engine::{Cell, CompiledSong, Effect, Engine, Instrument, StepCtx, TrackRuntime};
+use tune_engine::{
+    Cell, CompiledSong, CompiledTrack, Effect, Engine, Instrument, StepCtx, TrackRuntime,
+};
 use tune_song::{Song, parse_song};
 
 /// The shared `mini` fixture.
@@ -71,6 +73,8 @@ pub enum Event {
 #[derive(Default, Debug)]
 pub struct Log {
     pub events: Vec<Event>,
+    /// `process` calls so far (kept by [`ProbeFx`]).
+    pub samples: u64,
 }
 
 impl Log {
@@ -180,10 +184,12 @@ impl Instrument for Probe {
     }
 }
 
-/// An effect that records every `set_param_at` and passes audio through.
+/// An effect that records every `set_param_at` and its `process` count, and
+/// passes audio through (or outputs a constant, see [`ProbeFx::constant`]).
 pub struct ProbeFx {
     table: &'static [ParamSpec],
     samples: u64,
+    output: Option<f64>,
     log: SharedLog,
 }
 
@@ -194,10 +200,19 @@ impl ProbeFx {
             Self {
                 table,
                 samples: 0,
+                output: None,
                 log: log.clone(),
             },
             log,
         )
+    }
+
+    /// Like [`new`](Self::new), but every `process` returns `value` whatever
+    /// comes in, so what follows the probe does not depend on the instrument.
+    pub fn constant(table: &'static [ParamSpec], value: f64) -> (Self, SharedLog) {
+        let (mut fx, log) = Self::new(table);
+        fx.output = Some(value);
+        (fx, log)
     }
 }
 
@@ -214,7 +229,8 @@ impl Effect for ProbeFx {
     }
     fn process(&mut self, x: f64) -> f64 {
         self.samples += 1;
-        x
+        self.log.lock().unwrap().samples = self.samples;
+        self.output.unwrap_or(x)
     }
     fn reset(&mut self) {}
 }
@@ -233,29 +249,55 @@ pub fn probe_engine_fx(
     id: &str,
     probe_fx: bool,
 ) -> (Engine, SharedLog, Option<SharedLog>) {
-    let sr = f64::from(song.clock.sample_rate);
+    let slots: &[usize] = if probe_fx { &[0] } else { &[] };
+    let (engine, log, fx_logs) = probe_engine_slots(song, id, slots);
+    (engine, log, fx_logs.into_iter().next())
+}
+
+/// Like [`probe_engine`], with a [`ProbeFx`] in each of the probed track's
+/// fx `slots` (each with its device's param table); returns their logs in
+/// the order of `slots`.
+pub fn probe_engine_slots(
+    song: &Arc<CompiledSong>,
+    id: &str,
+    slots: &[usize],
+) -> (Engine, SharedLog, Vec<SharedLog>) {
     let mut log = None;
-    let mut fx_log = None;
+    let mut fx_logs = Vec::new();
+    let engine = engine_with(song, |t, rt| {
+        if t.id != id {
+            return;
+        }
+        let (probe, l) = Probe::new(t.instrument.module.params);
+        rt.instrument = Box::new(probe);
+        log = Some(l);
+        for &slot in slots {
+            let (fx, l) = ProbeFx::new(t.fx[slot].module.params);
+            rt.fx[slot] = Box::new(fx);
+            fx_logs.push(l);
+        }
+    });
+    let log = log.unwrap_or_else(|| panic!("no track `{id}`"));
+    (engine, log, fx_logs)
+}
+
+/// An engine for `song` whose runtimes are built as usual, then changed by
+/// `edit` (called once per track, in song order).
+pub fn engine_with(
+    song: &Arc<CompiledSong>,
+    mut edit: impl FnMut(&CompiledTrack, &mut TrackRuntime),
+) -> Engine {
+    let sr = f64::from(song.clock.sample_rate);
     let tracks = song
         .tracks
         .iter()
         .map(|t| {
             let mut rt = TrackRuntime::build(t, sr);
-            if t.id == id {
-                let (probe, l) = Probe::new(t.kind.params());
-                rt.instrument = Box::new(probe);
-                log = Some(l);
-                if probe_fx {
-                    let (fx, l) = ProbeFx::new(t.fx[0].spec.params_table());
-                    rt.fx[0] = Box::new(fx);
-                    fx_log = Some(l);
-                }
-            }
+            edit(t, &mut rt);
             rt
         })
         .collect();
-    let log = log.unwrap_or_else(|| panic!("no track `{id}`"));
-    (Engine::from_parts(song.clone(), tracks), log, fx_log)
+    Engine::from_parts(song.clone(), tracks)
 }
 
 /// Runs `engine` for `frames` frames in 4096-frame blocks and returns the

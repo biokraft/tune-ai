@@ -4676,6 +4676,7 @@ dependencies = [
  "thiserror 2.0.21",
  "toml 1.1.2+spec-1.1.0",
  "tune-dsp",
+ "tune-modules",
 ]
 
 [[package]]

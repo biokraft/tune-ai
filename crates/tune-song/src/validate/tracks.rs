@@ -1,22 +1,29 @@
-//! Tracks: the instrument, its fx chain and their params.
+//! Tracks: the instrument, its fx chain and their params, as devices of the
+//! registry's modules.
 
 use std::ops::RangeInclusive;
 
 use indexmap::{IndexMap, IndexSet};
-use tune_dsp::{DIST_PARAMS, DistortionMode, EQ_PARAMS, ParamSpec, STRIP_PARAMS, find_spec};
+use tune_dsp::{ParamSpec, STRIP_PARAMS, find_spec};
+use tune_modules::{ModuleDescriptor, Registry};
 
 use crate::error::Errors;
-use crate::model::{FxSpec, InstrumentKind, Track};
+use crate::model::{Device, Track};
 use crate::raw::{At, RawFx, RawTrack};
 
 const GAIN_DB: RangeInclusive<f64> = -60.0..=12.0;
 const PAN: RangeInclusive<f64> = -1.0..=1.0;
 
-pub(super) fn track(id: &At<String>, t: &RawTrack, errors: &mut Errors) -> Option<Track> {
-    let instrument = t.instrument.as_ref().and_then(|name| {
-        let kind = InstrumentKind::from_name(&name.value);
-        if kind.is_none() {
-            let expected: Vec<&str> = InstrumentKind::ALL.iter().map(|k| k.name()).collect();
+pub(super) fn track(
+    id: &At<String>,
+    t: &RawTrack,
+    registry: &Registry,
+    errors: &mut Errors,
+) -> Option<Track> {
+    let module = t.instrument.as_ref().and_then(|name| {
+        let module = instrument_module(registry, &name.value);
+        if module.is_none() {
+            let expected: Vec<&str> = registry.instruments().map(|m| m.name).collect();
             errors.at(
                 &name.span,
                 format!(
@@ -26,16 +33,21 @@ pub(super) fn track(id: &At<String>, t: &RawTrack, errors: &mut Errors) -> Optio
                 ),
             );
         }
-        kind
+        module
     });
 
-    let params = instrument.map(|kind| {
-        param_values(
-            &t.params,
-            &[kind.params(), STRIP_PARAMS],
-            kind.name(),
-            errors,
-        )
+    // The track's `params` hold the instrument's params and the strip's.
+    let params = module.map(|m| {
+        let values = param_values(&t.params, &[m.params, STRIP_PARAMS], m.name, errors);
+        let mut instrument = Device::new(m.prefix, m);
+        let mut strip = IndexMap::new();
+        for (id, v) in values {
+            match local_param(m, &id) {
+                Some(local) => instrument.params.insert(local.to_owned(), v),
+                None => strip.insert(id, v),
+            };
+        }
+        (instrument, strip)
     });
 
     let gain_db = ranged(
@@ -51,8 +63,10 @@ pub(super) fn track(id: &At<String>, t: &RawTrack, errors: &mut Errors) -> Optio
     let mut seen_types: IndexSet<&str> = IndexSet::new();
     let mut fx_ok = true;
     for raw in &t.fx {
+        // v1 names no device ids: a second entry of one type would repeat
+        // the first one's id.
         if let Some(kind) = &raw.kind
-            && FxSpec::TYPE_NAMES.contains(&kind.value.as_str())
+            && effect_module(registry, &kind.value).is_some()
             && !seen_types.insert(kind.value.as_str())
         {
             errors.at(
@@ -64,21 +78,41 @@ pub(super) fn track(id: &At<String>, t: &RawTrack, errors: &mut Errors) -> Optio
             );
             fx_ok = false;
         }
-        match fx_spec(raw, errors) {
-            Some(spec) => fx.push(spec),
+        match fx_device(raw, registry, errors) {
+            Some(device) => fx.push(device),
             None => fx_ok = false,
         }
     }
 
+    let (instrument, strip) = params?;
     Some(Track {
-        instrument: instrument?,
-        params: params?,
+        instrument,
+        fx: fx_ok.then_some(fx)?,
+        strip,
         gain_db: gain_db?,
         pan: pan?,
         mute: t.mute.as_ref().is_some_and(|m| m.value),
         solo: t.solo.as_ref().is_some_and(|s| s.value),
-        fx: fx_ok.then_some(fx)?,
     })
+}
+
+/// The instrument module called `name`.
+pub(super) fn instrument_module(
+    registry: &Registry,
+    name: &str,
+) -> Option<&'static ModuleDescriptor> {
+    registry.get(name).filter(|m| m.is_instrument())
+}
+
+/// The effect module called `name`.
+pub(super) fn effect_module(registry: &Registry, name: &str) -> Option<&'static ModuleDescriptor> {
+    registry.get(name).filter(|m| !m.is_instrument())
+}
+
+/// The local name of `module`'s param with full id `id` (`<prefix>.<local>`).
+fn local_param<'a>(module: &ModuleDescriptor, id: &'a str) -> Option<&'a str> {
+    let local = id.strip_prefix(module.prefix)?.strip_prefix('.')?;
+    module.param(local).map(|_| local)
 }
 
 /// `value` (or `default` when absent) when it lies in `range`.
@@ -139,79 +173,79 @@ pub(super) fn unknown_param(id: &str, owner: &str, tables: &[&[ParamSpec]]) -> S
     )
 }
 
-fn fx_spec(raw: &RawFx, errors: &mut Errors) -> Option<FxSpec> {
+/// One fx entry as a device of its effect module, with the module's prefix
+/// as id.
+fn fx_device(raw: &RawFx, registry: &Registry, errors: &mut Errors) -> Option<Device> {
     let kind = raw.kind.as_ref()?;
-    match kind.value.as_str() {
-        "distortion" => {
-            let mode = match &raw.mode {
-                None => Some(DistortionMode::Soft),
-                Some(m) => {
-                    let mode = DistortionMode::from_name(&m.value);
-                    if mode.is_none() {
-                        errors.at(
-                            &m.span,
-                            format!(
-                                "unknown distortion mode `{}` (expected soft, hard or overdrive)",
-                                m.value
-                            ),
-                        );
-                    }
-                    mode
-                }
-            };
-            let before = errors.len();
-            let params = param_values(&raw.params, &[DIST_PARAMS], "distortion", errors);
-            (errors.len() == before).then_some(())?;
-            Some(FxSpec::Distortion {
-                mode: mode?,
-                params,
-            })
-        }
-        "eq" => {
-            let before = errors.len();
-            if let Some(m) = &raw.mode {
-                errors.at(&m.span, "eq has no mode");
-            }
-            let params = param_values(&raw.params, &[EQ_PARAMS], "eq", errors);
-            (errors.len() == before).then_some(())?;
-            Some(FxSpec::Eq { params })
-        }
-        other => {
-            errors.at(
-                &kind.span,
+    let Some(module) = effect_module(registry, &kind.value) else {
+        let expected: Vec<&str> = registry.effects().map(|m| m.name).collect();
+        errors.at(
+            &kind.span,
+            format!(
+                "unknown fx type `{}` (expected one of {})",
+                kind.value,
+                expected.join(", ")
+            ),
+        );
+        return None;
+    };
+    let before = errors.len();
+    let mut device = Device::new(module.prefix, module);
+    for (name, value) in &raw.settings {
+        let Some((index, spec)) = module.setting(name) else {
+            errors.at(&value.span, format!("{} has no {name}", module.name));
+            continue;
+        };
+        match spec.values.iter().find(|v| **v == value.value) {
+            Some(v) => device.settings[index] = v,
+            None => errors.at(
+                &value.span,
                 format!(
-                    "unknown fx type `{other}` (expected one of {})",
-                    FxSpec::TYPE_NAMES.join(", ")
+                    "unknown {} {name} `{}` (expected {})",
+                    module.name,
+                    value.value,
+                    or_list(spec.values)
                 ),
-            );
-            None
+            ),
         }
+    }
+    let params = param_values(&raw.params, &[module.params], module.name, errors);
+    (errors.len() == before).then_some(())?;
+    for (id, v) in params {
+        let local = local_param(module, &id).expect("checked against the module's table");
+        device.params.insert(local.to_owned(), v);
+    }
+    Some(device)
+}
+
+/// `a`, `a or b`, `a, b or c`.
+fn or_list(values: &[&str]) -> String {
+    match values {
+        [] => String::new(),
+        [only] => (*only).to_owned(),
+        [init @ .., last] => format!("{} or {last}", init.join(", ")),
     }
 }
 
 /// What a declared track's raw entry says about the params it has.
 pub(super) struct TrackShape {
     /// `None` for a missing or unknown instrument.
-    pub(super) kind: Option<InstrumentKind>,
-    /// Param tables of its fx entries whose `type` is known.
-    pub(super) fx_tables: Vec<&'static [ParamSpec]>,
+    pub(super) instrument: Option<&'static ModuleDescriptor>,
+    /// The modules of its fx entries whose `type` is known.
+    pub(super) fx: Vec<&'static ModuleDescriptor>,
 }
 
 impl TrackShape {
-    pub(super) fn of(t: &RawTrack) -> Self {
+    pub(super) fn of(t: &RawTrack, registry: &Registry) -> Self {
         Self {
-            kind: t
+            instrument: t
                 .instrument
                 .as_ref()
-                .and_then(|i| InstrumentKind::from_name(&i.value)),
-            fx_tables: t
+                .and_then(|i| instrument_module(registry, &i.value)),
+            fx: t
                 .fx
                 .iter()
-                .filter_map(|fx| match fx.kind.as_ref()?.value.as_str() {
-                    "distortion" => Some(DIST_PARAMS),
-                    "eq" => Some(EQ_PARAMS),
-                    _ => None,
-                })
+                .filter_map(|fx| effect_module(registry, &fx.kind.as_ref()?.value))
                 .collect(),
         }
     }

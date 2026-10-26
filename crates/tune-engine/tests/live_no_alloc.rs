@@ -1,8 +1,9 @@
 //! Proves `LiveProcessor::process` and `Engine::process` neither allocate
 //! nor free memory, even across blocks that apply a swap (one that keeps the
-//! mix, one that rebuilds the delay for a new bpm and master-mode switches
-//! that crossfade between the clipper and the limiter), a seek, a loop wrap,
-//! the song end and knob overrides on tracks, strips and the mix.
+//! mix, one that rebuilds the delay for a new bpm, master-mode switches that
+//! crossfade between the clipper and the limiter, and swaps that add, reorder
+//! or replace devices), a seek, a loop wrap, the song end and knob overrides
+//! on tracks, strips and the mix.
 //!
 //! A counting global allocator counts every allocation, reallocation and
 //! deallocation made while the thread-local "audio" flag is set. The flag is
@@ -17,9 +18,10 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 use common::{MINI, MIXED, compile_song, compiled, song, variant_of};
-use tune_dsp::{DistortionMode, MASTER_GAIN, STRIP_SEND_DELAY};
+use tune_dsp::{MASTER_GAIN, STRIP_SEND_DELAY};
 use tune_engine::{CompiledSong, Engine, LiveProcessor, MIX_TRACK, ParamTarget, SongUpdate, live};
-use tune_song::{FxSpec, InstrumentKind, MasterMode, MixUnit, Track};
+use tune_modules::{CLAP, EQ, KICK, ModuleDescriptor};
+use tune_song::{Device, MasterMode, MixUnit, Track};
 
 struct Counting;
 
@@ -120,8 +122,8 @@ fn process_never_allocates_or_frees() {
     ALLOCS.with(|c| c.set(0));
     DEALLOCS.with(|c| c.set(0));
 
-    // B: drops `hat`, changes the acid distortion mode (fresh fx chain), adds
-    // a `clap` track (fresh runtime) and mutes the kick (kept runtime).
+    // B: drops `hat`, changes the acid distortion mode (a fresh distortion),
+    // adds a `clap` track (fresh runtime) and mutes the kick (kept runtime).
     let mut b = song(MINI);
     b.tracks.shift_remove("hat");
     b.patterns.shift_remove("h");
@@ -129,15 +131,11 @@ fn process_never_allocates_or_frees() {
         s.play.shift_remove("hat");
     }
     b.tracks.get_mut("kick").unwrap().mute = true;
-    let acid = b.tracks.get_mut("acid").unwrap();
-    let FxSpec::Distortion { mode, .. } = &mut acid.fx[0] else {
-        panic!("expected distortion")
-    };
-    *mode = DistortionMode::Hard;
+    b.tracks.get_mut("acid").unwrap().fx[0].settings[0] = "hard";
     b.tracks.insert(
         "clap".into(),
         Track {
-            instrument: InstrumentKind::Clap,
+            instrument: Device::new("clap", &CLAP),
             ..b.tracks["kick"].clone()
         },
     );
@@ -209,6 +207,31 @@ fn process_never_allocates_or_frees() {
     assert_eq!(ctl.swaps_applied(), 5);
     assert_eq!(ctl.overrides_active(), 0);
     assert_eq!(ctl.collect_garbage(), 1);
+
+    // Devices: an eq added to the acid and the kick, the acid's chain
+    // reordered (both devices kept, in new slots), then the kick keeping its
+    // id with a new instrument (its strip and fx kept).
+    let chain = |reversed: bool, kick: &'static ModuleDescriptor| {
+        compile_song(&variant_of(MINI, |s| {
+            let acid = s.tracks.get_mut("acid").unwrap();
+            acid.fx.push(Device::new("eq", &EQ));
+            if reversed {
+                acid.fx.reverse();
+            }
+            let k = s.tracks.get_mut("kick").unwrap();
+            k.fx.push(Device::new("eq", &EQ));
+            k.instrument = Device::new(kick.name, kick);
+        }))
+    };
+    for (i, next) in [chain(false, &KICK), chain(true, &KICK), chain(true, &CLAP)]
+        .into_iter()
+        .enumerate()
+    {
+        ctl.swap(next).unwrap();
+        audio(&mut p, &mut out, STEP, 512);
+        assert_eq!(ctl.swaps_applied(), 6 + i as u64);
+        assert_eq!(ctl.collect_garbage(), 1);
+    }
 
     assert_no_alloc();
 }

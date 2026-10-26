@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tune_dsp::STRIP_PARAMS;
-use tune_song::{MixUnit, Song, Track};
+use tune_song::{Device, MixUnit, Song, Track};
 
 use crate::doc::effective_value;
 use crate::path::{SongPath, TrackField};
@@ -29,7 +29,9 @@ pub struct Change {
 /// A changed section count or order gives one `sections` change. Otherwise
 /// sections are compared field by field (`bars`, `name`, `play.<t>`,
 /// `lanes`). A track that appears or disappears gives one `tracks.<t>`
-/// change with `null` on the missing side.
+/// change with `null` on the missing side; a track in both songs whose
+/// devices differ (a module, an id, the fx order) gives a `tracks.<t>`
+/// change first, then its param and setting changes.
 pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
     let mut out = Vec::new();
     let mut push = |path: SongPath, a: Option<Value>, b: Option<Value>| {
@@ -64,6 +66,12 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
     for name in union(old.tracks.keys(), new.tracks.keys()) {
         match (old.tracks.get(&name), new.tracks.get(&name)) {
             (Some(o), Some(n)) => {
+                // The devices themselves: modules and ids, in chain order.
+                let p = SongPath::Track {
+                    track: name.clone(),
+                };
+                let (a, b) = both(&p);
+                push(p, a, b);
                 for field in TrackField::ALL {
                     let p = SongPath::TrackField {
                         track: name.clone(),
@@ -86,11 +94,6 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
                     let (a, b) = both(&p);
                     push(p, a, b);
                 }
-                let p = SongPath::FxMode {
-                    track: name.clone(),
-                };
-                let (a, b) = both(&p);
-                push(p, a, b);
             }
             _ => {
                 let p = SongPath::Track { track: name };
@@ -147,17 +150,21 @@ fn union<'a>(
     out
 }
 
-/// Full ids of every param the track's instrument, strip and fx chain have.
+/// Track-relative ids of every param the track's instrument, strip and fx
+/// chain have, then of every device setting (`dist.mode`).
 fn param_ids(track: &Track) -> Vec<String> {
-    let mut ids: Vec<String> = track
-        .instrument
-        .params()
-        .iter()
-        .chain(STRIP_PARAMS)
-        .map(|s| s.id.to_owned())
-        .collect();
+    let params = |d: &Device| {
+        (0..d.module.params.len())
+            .map(|i| d.param_id(d.module.local_name(i)))
+            .collect::<Vec<_>>()
+    };
+    let mut ids = params(&track.instrument);
+    ids.extend(STRIP_PARAMS.iter().map(|s| s.id.to_owned()));
     for fx in &track.fx {
-        ids.extend(fx.params_table().iter().map(|s| s.id.to_owned()));
+        ids.extend(params(fx));
+    }
+    for d in std::iter::once(&track.instrument).chain(&track.fx) {
+        ids.extend(d.module.settings.iter().map(|s| d.param_id(s.name)));
     }
     ids
 }

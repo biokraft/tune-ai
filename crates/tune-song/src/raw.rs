@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde::de::{self, Deserializer, Visitor};
 use toml::Spanned;
 use toml::de::{DeTable, DeValue, ValueDeserializer};
+use tune_modules::Registry;
 
 use crate::error::Errors;
 
@@ -87,7 +88,8 @@ pub(crate) struct RawTrack {
 pub(crate) struct RawFx {
     pub span: Range<usize>,
     pub kind: Option<At<String>>,
-    pub mode: Option<At<String>>,
+    /// The setting keys the entry has (`mode`), by name.
+    pub settings: Vec<(&'static str, At<String>)>,
     pub params: Vec<(At<String>, At<f64>)>,
 }
 
@@ -115,8 +117,13 @@ pub(crate) struct RawPoint {
 }
 
 /// Walks the whole document. Returns what could be read; every problem with
-/// the file's shape is in `errors`.
-pub(crate) fn read(doc: &Spanned<DeTable<'_>>, errors: &mut Errors) -> RawSong {
+/// the file's shape is in `errors`. An fx entry may have every setting of
+/// any effect in `registry` as a key.
+pub(crate) fn read(
+    doc: &Spanned<DeTable<'_>>,
+    registry: &Registry,
+    errors: &mut Errors,
+) -> RawSong {
     let root = Fields::new(
         doc.get_ref(),
         doc.span(),
@@ -146,6 +153,7 @@ pub(crate) fn read(doc: &Spanned<DeTable<'_>>, errors: &mut Errors) -> RawSong {
         })
     });
 
+    let fx_keys = fx_keys(registry);
     let tracks = sub_tables(&root, "tracks", errors)
         .into_iter()
         .filter_map(|(id, v)| {
@@ -160,7 +168,7 @@ pub(crate) fn read(doc: &Spanned<DeTable<'_>>, errors: &mut Errors) -> RawSong {
                     pan: f.opt(errors, "pan", Kind::Num),
                     mute: f.opt(errors, "mute", Kind::Bool),
                     solo: f.opt(errors, "solo", Kind::Bool),
-                    fx: read_fx(&f, &what, errors),
+                    fx: read_fx(&f, &what, &fx_keys, errors),
                 },
             ))
         })
@@ -218,12 +226,29 @@ const TRACK_KEYS: &[&str] = &[
     "solo",
     "fx",
 ];
-const FX_KEYS: &[&str] = &["type", "mode", "params"];
 const PATTERN_KEYS: &[&str] = &["track", "steps"];
 const SECTION_KEYS: &[&str] = &["name", "bars", "play", "automation"];
 const LANE_KEYS: &[&str] = &["param", "points"];
 
-fn read_fx(f: &Fields<'_, '_>, what: &str, errors: &mut Errors) -> Vec<RawFx> {
+/// The keys an fx entry may have: `type`, every setting name of a registered
+/// effect (in registry order, each once), then `params`.
+fn fx_keys(registry: &Registry) -> Vec<&'static str> {
+    let mut keys = vec!["type"];
+    for name in registry.effects().flat_map(|m| m.settings).map(|s| s.name) {
+        if !keys.contains(&name) {
+            keys.push(name);
+        }
+    }
+    keys.push("params");
+    keys
+}
+
+fn read_fx(
+    f: &Fields<'_, '_>,
+    what: &str,
+    keys: &[&'static str],
+    errors: &mut Errors,
+) -> Vec<RawFx> {
     let Some(v) = f.get("fx") else {
         return Vec::new();
     };
@@ -232,11 +257,17 @@ fn read_fx(f: &Fields<'_, '_>, what: &str, errors: &mut Errors) -> Vec<RawFx> {
         .enumerate()
         .filter_map(|(i, v)| {
             let what = format!("fx {} of {what}", i + 1);
-            let fx = Fields::open(v, &what, FX_KEYS, errors)?;
+            let fx = Fields::open(v, &what, keys, errors)?;
+            let kind = fx.req(errors, "type", Kind::Str);
+            let settings = keys
+                .iter()
+                .filter(|k| !matches!(**k, "type" | "params"))
+                .filter_map(|&name| Some((name, fx.opt(errors, name, Kind::Str)?)))
+                .collect();
             Some(RawFx {
                 span: v.span(),
-                kind: fx.req(errors, "type", Kind::Str),
-                mode: fx.opt(errors, "mode", Kind::Str),
+                kind,
+                settings,
                 params: fx.num_table(errors, "params"),
             })
         })

@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 
 use indexmap::IndexMap;
 
-use crate::model::{FxSpec, PatternSteps, Song};
+use crate::model::{Device, PatternSteps, Song};
 
 impl Song {
     /// The song in canonical TOML form. Parsing the result gives back an equal
@@ -34,13 +34,17 @@ impl Song {
 
         for (id, track) in &self.tracks {
             let _ = write!(out, "\n[tracks.{}]\n", key(id));
-            let _ = writeln!(out, "instrument = \"{}\"", track.instrument.name());
+            // v1 names the instrument by module; its device id is the module's prefix.
+            let _ = writeln!(out, "instrument = {}", string(track.instrument.module.name));
             let _ = writeln!(out, "gain_db = {}", num(track.gain_db));
             let _ = writeln!(out, "pan = {}", num(track.pan));
             let _ = writeln!(out, "mute = {}", track.mute);
             let _ = writeln!(out, "solo = {}", track.solo);
-            if !track.params.is_empty() {
-                let _ = writeln!(out, "params = {}", num_table(&track.params));
+            // Instrument params first, then the strip's, in one table.
+            let mut params = device_params(&track.instrument);
+            params.extend(track.strip.iter().map(|(k, v)| (k.clone(), *v)));
+            if !params.is_empty() {
+                let _ = writeln!(out, "params = {}", num_table(&params));
             }
             if !track.fx.is_empty() {
                 let fx: Vec<String> = track.fx.iter().map(fx_inline).collect();
@@ -87,26 +91,28 @@ impl Song {
     }
 }
 
-fn fx_inline(fx: &FxSpec) -> String {
-    match fx {
-        FxSpec::Distortion { mode, params } => {
-            let mut parts = vec![
-                format!("type = {}", string(fx.type_name())),
-                format!("mode = {}", string(mode.name())),
-            ];
-            if !params.is_empty() {
-                parts.push(format!("params = {}", num_table(params)));
-            }
-            inline(&parts)
-        }
-        FxSpec::Eq { params } => {
-            let mut parts = vec![format!("type = {}", string(fx.type_name()))];
-            if !params.is_empty() {
-                parts.push(format!("params = {}", num_table(params)));
-            }
-            inline(&parts)
-        }
+/// `{ type = "<module>", <setting> = "<value>", …, params = { … } }`: every
+/// setting, then the explicit params.
+fn fx_inline(fx: &Device) -> String {
+    let mut parts = vec![format!("type = {}", string(fx.module.name))];
+    for (spec, value) in fx.module.settings.iter().zip(&fx.settings) {
+        parts.push(format!("{} = {}", key(spec.name), string(value)));
     }
+    let params = device_params(fx);
+    if !params.is_empty() {
+        parts.push(format!("params = {}", num_table(&params)));
+    }
+    inline(&parts)
+}
+
+/// A device's explicit params keyed by their track-relative ids
+/// (`<device id>.<param>`).
+fn device_params(device: &Device) -> IndexMap<String, f64> {
+    device
+        .params
+        .iter()
+        .map(|(local, v)| (device.param_id(local), *v))
+        .collect()
 }
 
 /// `{ a = 1, b = 2 }`, or `{}` when empty.

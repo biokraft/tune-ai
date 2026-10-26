@@ -3,13 +3,17 @@ mod common;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
-use common::{MINI, MIXED, compile_song, compiled, drop_lane, run, song, variant_of};
-use tune_dsp::{DistortionMode, db2amp};
+use common::{
+    Event, MINI, MIXED, Probe, ProbeFx, SharedLog, compile_song, compiled, drop_lane, engine_with,
+    probe_engine_slots, run, song, variant_of,
+};
+use tune_dsp::db2amp;
 use tune_engine::{
     AudioOut, CompiledSong, Engine, LiveError, LiveProcessor, ParamTarget, RenderOptions,
     SongUpdate, live, render,
 };
-use tune_song::{FxSpec, MasterMode};
+use tune_modules::{EQ, HAT_OPEN};
+use tune_song::{Device, MasterMode};
 
 /// One bar at 120 BPM and 48 kHz.
 const BAR: u64 = 96_000;
@@ -402,8 +406,9 @@ fn set_cutoff(s: &mut tune_song::Song, plain: f64) {
     s.tracks
         .get_mut("acid")
         .unwrap()
+        .instrument
         .params
-        .insert("acid303.cutoff".into(), plain);
+        .insert("cutoff".into(), plain);
 }
 
 fn mute_hat(s: &mut tune_song::Song) {
@@ -516,23 +521,18 @@ fn clearing_survives_a_replacing_swap() {
 }
 
 #[test]
-fn fx_overrides_follow_the_fx_chain() {
-    let hard = mini_with(|s| {
-        let FxSpec::Distortion { mode, .. } = &mut s.tracks.get_mut("acid").unwrap().fx[0] else {
-            panic!("expected distortion")
-        };
-        *mode = DistortionMode::Hard;
-    });
+fn fx_overrides_follow_their_device() {
+    let hard = mini_with(|s| s.tracks.get_mut("acid").unwrap().fx[0].settings[0] = "hard");
     let (mut ctl, mut p) = live(compiled(MINI), 0, None);
     ctl.set_override(ACID, CUTOFF, Some(2000.0)).unwrap();
     ctl.set_override(ACID, DRIVE, Some(30.0)).unwrap();
     play(&mut p, 1000, 512);
     assert_eq!(ctl.overrides_active(), 2);
-    // A kept fx chain keeps its overrides.
+    // A kept distortion keeps its overrides.
     ctl.swap(kick_muted()).unwrap();
     play(&mut p, STEP, 512);
     assert_eq!(ctl.overrides_active(), 2);
-    // A rebuilt fx chain starts without them; the instrument keeps its own.
+    // A rebuilt distortion starts without them; the instrument keeps its own.
     ctl.swap(hard).unwrap();
     play(&mut p, STEP, 512);
     assert_eq!(ctl.swaps_applied(), 2);
@@ -707,7 +707,7 @@ fn swap_builds_missing_units() {
         s.tracks
             .get_mut("acid")
             .unwrap()
-            .params
+            .strip
             .shift_remove("send.delay");
         drop_lane(s, "acid", "send.delay");
     });
@@ -725,7 +725,7 @@ fn swap_builds_missing_units() {
             s.tracks
                 .get_mut(t)
                 .unwrap()
-                .params
+                .strip
                 .shift_remove("send.reverb");
         }
     });
@@ -820,4 +820,117 @@ fn heard_after_swap(from: &Arc<CompiledSong>, to: &Arc<CompiledSong>) -> Vec<f32
     swap_and_play(&mut e, to);
     assert_eq!(e.mix_swaps_kept(), 0, "the mix is built anew");
     run(&mut e, BAR)
+}
+
+// ----- device identity across swaps -----
+
+/// The `set_param_at` values a probe logged at `sample`, by param index.
+fn params_at(log: &SharedLog, sample: u64) -> Vec<(usize, f64)> {
+    log.lock()
+        .unwrap()
+        .params()
+        .into_iter()
+        .filter(|&(s, _, _)| s == sample)
+        .map(|(_, index, plain)| (index, plain))
+        .collect()
+}
+
+fn samples(log: &SharedLog) -> u64 {
+    log.lock().unwrap().samples
+}
+
+/// `mixed` with the acid's chain `[dist, eq]` turned around.
+fn reordered_mixed() -> Arc<CompiledSong> {
+    mixed_with(|s| s.tracks.get_mut("acid").unwrap().fx.reverse())
+}
+
+#[test]
+fn swap_reordering_fx_keeps_both_devices() {
+    let a = compiled(MIXED);
+    let b = reordered_mixed();
+    assert_eq!(b.tracks[ACID].fx[1].id, "dist");
+    let (mut e, _, fx) = probe_engine_slots(&a, "acid", &[0, 1]);
+    let (dist, eq) = (&fx[0], &fx[1]);
+    // Bar 1 starts on a step: the swap lands on its first sample.
+    run(&mut e, BAR);
+    assert!(e.queue_swap(SongUpdate::new(b.clone())).is_none());
+    run(&mut e, BAR);
+    assert_eq!(e.swaps_applied(), 1);
+    // Both probes ran through the swap, each in its new slot, and got their
+    // own device's static params when it landed.
+    assert_eq!(samples(dist), 2 * BAR, "the distortion moved to slot 1");
+    assert_eq!(samples(eq), 2 * BAR, "the eq moved to slot 0");
+    let statics = |params: &[f64]| params.iter().copied().enumerate().collect::<Vec<_>>();
+    assert_eq!(params_at(dist, BAR), statics(&b.tracks[ACID].fx[1].params));
+    assert_eq!(params_at(eq, BAR), statics(&b.tracks[ACID].fx[0].params));
+}
+
+#[test]
+fn swap_changing_the_mode_rebuilds_only_that_device() {
+    let a = compiled(MIXED);
+    let hard = mixed_with(|s| s.tracks.get_mut("acid").unwrap().fx[0].settings[0] = "hard");
+    let (mut e, _, fx) = probe_engine_slots(&a, "acid", &[0, 1]);
+    let (dist, eq) = (&fx[0], &fx[1]);
+    run(&mut e, BAR);
+    assert!(e.queue_swap(SongUpdate::new(hard)).is_none());
+    run(&mut e, BAR);
+    assert_eq!(e.swaps_applied(), 1);
+    assert_eq!(samples(eq), 2 * BAR, "the eq is kept");
+    assert!(!params_at(eq, BAR).is_empty(), "statics re-applied");
+    assert_eq!(samples(dist), BAR, "the distortion is rebuilt");
+    assert!(params_at(dist, BAR).is_empty());
+}
+
+#[test]
+fn swap_changing_the_instrument_keeps_fx_and_strip() {
+    // The ride ducks under the kick through an eq; its eq probe outputs a
+    // constant, so what the ride adds to the mix depends on the probe, the
+    // ducker and the gain alone, not on the instrument.
+    let ride_eq = |s: &mut tune_song::Song| {
+        let ride = s.tracks.get_mut("ride").unwrap();
+        ride.fx.push(Device::new("eq", &EQ));
+        ride.strip.insert("duck.depth".into(), 12.0);
+        ride.strip.insert("duck.release".into(), 400.0);
+    };
+    let a = mixed_with(ride_eq);
+    let b = mixed_with(|s| {
+        ride_eq(s);
+        s.tracks.get_mut("ride").unwrap().instrument = Device::new("hat_open", &HAT_OPEN);
+    });
+    let probed = |song: &Arc<CompiledSong>| {
+        let mut logs = None;
+        let engine = engine_with(song, |t, rt| {
+            if t.id == "ride" {
+                let (probe, log) = Probe::new(t.instrument.module.params);
+                let (fx, fx_log) = ProbeFx::constant(t.fx[0].module.params, 0.25);
+                rt.instrument = Box::new(probe);
+                rt.fx[0] = Box::new(fx);
+                logs = Some((log, fx_log));
+            }
+        });
+        let (log, fx_log) = logs.expect("a ride track");
+        (engine, log, fx_log)
+    };
+    let (mut reference, _, _) = probed(&a);
+    let (mut e, instrument, fx) = probed(&a);
+    // The kick hits on step 16 (bar 1); the swap lands a step later, while
+    // the ride is still ducked.
+    let lead = BAR + 1000;
+    assert_bits(&run(&mut e, lead), &run(&mut reference, lead));
+    assert!(e.queue_swap(SongUpdate::new(b)).is_none());
+    let heard = run(&mut e, BAR);
+    assert_eq!(e.swaps_applied(), 1);
+    assert_eq!(e.mix_swaps_kept(), 1);
+    // The eq and the strip (its ducker mid-release) carry on as if no swap
+    // had happened.
+    assert_bits(&heard, &run(&mut reference, BAR));
+    assert_eq!(samples(&fx), lead + BAR, "the eq is kept");
+    // The instrument was rebuilt: the probe saw nothing from the swap on.
+    let swap_at = BAR + STEP;
+    let log = instrument.lock().unwrap();
+    assert!(log.events.iter().all(|e| match e {
+        Event::Step { sample, .. } | Event::Param { sample, .. } | Event::Reset { sample } =>
+            *sample < swap_at,
+    }));
+    assert!(!log.events.is_empty());
 }

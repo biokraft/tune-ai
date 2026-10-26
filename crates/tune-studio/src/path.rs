@@ -18,8 +18,10 @@ pub enum SongPath {
     Bpm,
     /// `tracks.<t>.gain_db|pan|mute|solo`
     TrackField { track: String, field: TrackField },
-    /// `tracks.<t>.<param id>`, an instrument, strip or fx param such as
-    /// `acid303.cutoff`, `send.delay` or `dist.drive`.
+    /// `tracks.<t>.<device>.<name>`: a param of the instrument or an fx
+    /// device such as `acid303.cutoff` or `dist.drive`, else a setting of
+    /// that device such as `dist.mode`; or a strip param such as
+    /// `send.delay`.
     TrackParam { track: String, param: String },
     /// `mix.<param id>`, a delay, reverb or master param such as
     /// `delay.feedback`.
@@ -29,8 +31,6 @@ pub enum SongPath {
     /// `mix.duck_source`: a track id, or `null` for the default (the first
     /// kick).
     MixDuckSource,
-    /// `tracks.<t>.dist.mode`
-    FxMode { track: String },
     /// `tracks.<t>` (read-only: the track as a whole)
     Track { track: String },
     /// `patterns.<p>.steps`
@@ -117,7 +117,6 @@ impl fmt::Display for SongPath {
             Self::MixParam { param } => write!(f, "mix.{param}"),
             Self::MixMaster => f.write_str("mix.master"),
             Self::MixDuckSource => f.write_str("mix.duck_source"),
-            Self::FxMode { track } => write!(f, "tracks.{track}.dist.mode"),
             Self::Track { track } => write!(f, "tracks.{track}"),
             Self::Pattern { pattern } => write!(f, "patterns.{pattern}.steps"),
             Self::SectionBars(i) => write!(f, "sections[{i}].bars"),
@@ -198,9 +197,6 @@ fn parse_track(rest: &str) -> Option<SongPath> {
     if let Some(field) = TrackField::from_key(field) {
         return Some(SongPath::TrackField { track, field });
     }
-    if field == "dist.mode" {
-        return Some(SongPath::FxMode { track });
-    }
     is_param_id(field).then(|| SongPath::TrackParam {
         track,
         param: field.to_owned(),
@@ -218,7 +214,7 @@ fn parse_mix(rest: &str) -> Option<SongPath> {
     }
 }
 
-/// A param id is `<prefix>.<name>`, e.g. `acid303.cutoff`.
+/// A param id is `<device or strip>.<name>`, e.g. `acid303.cutoff`.
 fn is_param_id(s: &str) -> bool {
     s.split_once('.')
         .is_some_and(|(prefix, name)| is_id(prefix) && is_id(name))

@@ -38,16 +38,16 @@ fn clip_variant(edit: impl FnOnce(&mut Song)) -> Song {
     })
 }
 
-fn set_param(s: &mut Song, track: &str, id: &str, plain: f64) {
+fn set_strip(s: &mut Song, track: &str, id: &str, plain: f64) {
     s.tracks
         .get_mut(track)
         .unwrap()
-        .params
+        .strip
         .insert(id.into(), plain);
 }
 
-fn remove_param(s: &mut Song, track: &str, id: &str) {
-    s.tracks.get_mut(track).unwrap().params.shift_remove(id);
+fn remove_strip(s: &mut Song, track: &str, id: &str) {
+    s.tracks.get_mut(track).unwrap().strip.shift_remove(id);
 }
 
 /// The whole song with stems.
@@ -92,7 +92,7 @@ fn compiles_mix_and_strip() {
 
     let acid = &s.tracks[1];
     assert_eq!(acid.strip, vec![-12.0, -18.0, 6.0, 80.0]);
-    assert_eq!(acid.params.len(), ACID303_PARAMS.len());
+    assert_eq!(acid.instrument.params.len(), ACID303_PARAMS.len());
     assert_eq!(s.tracks[2].strip, vec![-60.0, -20.0, 0.0, 80.0]);
 
     let b: Vec<(usize, ParamTarget)> = s.sections[1]
@@ -149,9 +149,9 @@ fn buses_inactive_without_sends() {
 
 #[test]
 fn lane_only_send_activates_bus() {
-    let lane_only = clip_variant(|s| remove_param(s, "acid", "send.delay"));
+    let lane_only = clip_variant(|s| remove_strip(s, "acid", "send.delay"));
     let no_lane = clip_variant(|s| {
-        remove_param(s, "acid", "send.delay");
+        remove_strip(s, "acid", "send.delay");
         drop_lane(s, "acid", "send.delay");
     });
     let (c, with_lane) = render_all(&lane_only);
@@ -173,11 +173,11 @@ fn send_reaches_delay_bus() {
     };
     let off = clip_variant(|s| {
         base(s);
-        remove_param(s, "acid", "send.delay");
+        remove_strip(s, "acid", "send.delay");
     });
     let on = clip_variant(|s| {
         base(s);
-        set_param(s, "acid", "send.delay", 0.0);
+        set_strip(s, "acid", "send.delay", 0.0);
         for (id, v) in [
             ("delay.feedback", 0.0),
             ("delay.low_cut", 20.0),
@@ -209,7 +209,7 @@ fn send_reaches_delay_bus() {
 
 #[test]
 fn ducking_follows_kick_hits() {
-    let depth = |db: f64| clip_variant(move |s| set_param(s, "acid", "duck.depth", db));
+    let depth = |db: f64| clip_variant(move |s| set_strip(s, "acid", "duck.depth", db));
     let (c, deep) = render_all(&depth(12.0));
     let (_, flat) = render_all(&depth(0.0));
     let (deep, flat) = (stem(&deep, "acid"), stem(&flat, "acid"));
@@ -244,7 +244,7 @@ fn ducking_follows_kick_hits() {
 
 #[test]
 fn muted_source_still_ducks() {
-    let depth12 = |s: &mut Song| set_param(s, "acid", "duck.depth", 12.0);
+    let depth12 = |s: &mut Song| set_strip(s, "acid", "duck.depth", 12.0);
     let (_, heard) = render_all(&clip_variant(depth12));
     let (_, muted) = render_all(&clip_variant(|s| {
         depth12(s);
@@ -260,7 +260,7 @@ fn no_source_hits_no_ducking() {
     // last release ends long before bar 2.)
     let depth = |db: f64| {
         clip_variant(move |s| {
-            set_param(s, "acid", "duck.depth", db);
+            set_strip(s, "acid", "duck.depth", db);
             s.sections[1].play.shift_remove("kick");
         })
     };
@@ -289,11 +289,11 @@ fn delay_send_is_post_fader() {
     };
     let off = clip_variant(|s| {
         base(s);
-        remove_param(s, "acid", "send.delay");
+        remove_strip(s, "acid", "send.delay");
     });
     let on = clip_variant(|s| {
         base(s);
-        set_param(s, "acid", "send.delay", 0.0);
+        set_strip(s, "acid", "send.delay", 0.0);
         for (id, v) in [
             ("delay.feedback", 0.0),
             ("delay.low_cut", 20.0),
@@ -337,7 +337,7 @@ fn mute_stops_sends() {
     let send = |db: f64| {
         clip_variant(move |s| {
             drop_lane(s, "acid", "send.delay");
-            set_param(s, "acid", "send.delay", db);
+            set_strip(s, "acid", "send.delay", db);
             s.tracks.get_mut("acid").unwrap().mute = true;
         })
     };
@@ -351,7 +351,7 @@ fn solo_keeps_returns() {
     let send = |db: f64| {
         clip_variant(move |s| {
             drop_lane(s, "acid", "send.delay");
-            set_param(s, "acid", "send.delay", db);
+            set_strip(s, "acid", "send.delay", db);
             s.tracks.get_mut("acid").unwrap().solo = true;
         })
     };

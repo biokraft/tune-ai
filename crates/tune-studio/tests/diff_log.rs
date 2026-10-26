@@ -95,7 +95,25 @@ fn diff_track_added() {
         vec![change(
             "tracks.clap",
             Value::Null,
-            json!({"instrument": "clap"})
+            json!({"instrument": "clap", "fx": []})
+        )]
+    );
+}
+
+#[test]
+fn reordered_fx_chain_is_a_track_change() {
+    const CHAIN: &str = "fx = [{ type = \"distortion\", mode = \"soft\", params = { \"dist.drive\" = 12 } }, { type = \"eq\", params = { \"eq.low_cut\" = 85 } }]";
+    const REVERSED: &str = "fx = [{ type = \"eq\", params = { \"eq.low_cut\" = 85 } }, { type = \"distortion\", mode = \"soft\", params = { \"dist.drive\" = 12 } }]";
+    assert!(MIXED.contains(CHAIN));
+    let reordered = MIXED.replace(CHAIN, REVERSED);
+    let dist = json!({"id": "dist", "type": "distortion"});
+    let eq = json!({"id": "eq", "type": "eq"});
+    assert_eq!(
+        diff_songs(&song(MIXED), &song(&reordered)),
+        vec![change(
+            "tracks.acid",
+            json!({"instrument": "acid303", "fx": [dist, eq]}),
+            json!({"instrument": "acid303", "fx": [eq, dist]})
         )]
     );
 }

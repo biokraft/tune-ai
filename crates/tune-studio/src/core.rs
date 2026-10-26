@@ -28,7 +28,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tune_dsp::DrumPattern;
 use tune_dsp::acid303::{AcidPattern, AcidStep};
-use tune_song::{PatternSteps, Song};
+use tune_song::{PatternSteps, Registry, Song};
 
 use crate::command::Command;
 use crate::diff::{Change, diff_songs, is_whole_replace};
@@ -625,9 +625,7 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
             doc.set(&path, &Value::from(round_significant(*value)))?;
         }
         Command::SetFxMode { track, mode } => {
-            let path = SongPath::FxMode {
-                track: track.clone(),
-            };
+            let path = fx_mode_path(doc.song(), track);
             doc.set(&path, &Value::from(mode.as_str()))?;
         }
         Command::SetAcidStep {
@@ -728,6 +726,30 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
     Ok(())
 }
 
+/// The `mode` setting of `track`'s first fx device that has one,
+/// `tracks.<t>.<device>.mode`. For a track without one it names the first
+/// built-in effect with a `mode` under its default id (`dist`), a path that
+/// then does not exist.
+fn fx_mode_path(song: &Song, track: &str) -> SongPath {
+    const MODE: &str = "mode";
+    let device = song
+        .tracks
+        .get(track)
+        .and_then(|t| t.fx.iter().find(|d| d.module.setting(MODE).is_some()))
+        .map(|d| d.id.as_str());
+    let id = device.unwrap_or_else(|| {
+        Registry::builtin()
+            .effects()
+            .find(|m| m.setting(MODE).is_some())
+            .expect("the built-in distortion has a mode")
+            .prefix
+    });
+    SongPath::TrackParam {
+        track: track.to_owned(),
+        param: format!("{id}.{MODE}"),
+    }
+}
+
 /// Whether an edit of one path can change the value at the other: the
 /// same path, or one holds the other (`sections` holds `sections[1].bars`,
 /// `tracks.acid` holds `tracks.acid.gain_db`).
@@ -748,7 +770,6 @@ fn holds(whole: &SongPath, part: &SongPath) -> bool {
             SongPath::Track { track },
             SongPath::TrackField { track: t, .. }
             | SongPath::TrackParam { track: t, .. }
-            | SongPath::FxMode { track: t }
             | SongPath::SectionPlay { track: t, .. },
         ) => t == track,
         _ => false,

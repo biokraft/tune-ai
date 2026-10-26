@@ -1,12 +1,12 @@
 //! The validated song model. Every map keeps song-file order.
 
 use indexmap::IndexMap;
-use tune_dsp::acid303::{ACID303_PARAMS, AcidPattern};
+use tune_dsp::acid303::AcidPattern;
 use tune_dsp::{
-    CLAP_PARAMS, DELAY_PARAMS, DIST_PARAMS, DistortionMode, DrumPattern, EQ_PARAMS,
-    HAT_CLOSED_PARAMS, HAT_OPEN_PARAMS, KICK_PARAMS, MASTER_PARAMS, ParamSpec, REVERB_PARAMS,
-    RIDE_PARAMS, STRIP_PARAMS, STRIP_SEND_DELAY, STRIP_SEND_REVERB, find_spec,
+    DELAY_PARAMS, DrumPattern, MASTER_PARAMS, ParamSpec, REVERB_PARAMS, STRIP_PARAMS,
+    STRIP_SEND_DELAY, STRIP_SEND_REVERB, find_spec,
 };
+use tune_modules::ModuleDescriptor;
 
 /// A whole song: header, tracks, patterns and the arrangement.
 #[derive(Clone, Debug, PartialEq)]
@@ -43,14 +43,15 @@ impl Song {
     }
 
     /// The track every `duck.depth` follows: the explicit `duck_source`, else
-    /// the first `kick` track; `None` when there is neither.
+    /// the first track whose instrument is a default duck source (a kick);
+    /// `None` when there is neither.
     pub fn duck_source(&self) -> Option<&str> {
         match &self.mix.duck_source {
             Some(id) => Some(id.as_str()),
             None => self
                 .tracks
                 .iter()
-                .find(|(_, t)| t.instrument == InstrumentKind::Kick)
+                .find(|(_, t)| t.instrument.module.default_duck_source())
                 .map(|(id, _)| id.as_str()),
         }
     }
@@ -63,7 +64,7 @@ impl Song {
             MixUnit::Reverb => STRIP_PARAMS[STRIP_SEND_REVERB].id,
             MixUnit::Master => return true,
         };
-        self.tracks.values().any(|t| t.params.contains_key(send))
+        self.tracks.values().any(|t| t.strip.contains_key(send))
             || self.sections.iter().any(|s| {
                 s.automation
                     .iter()
@@ -163,119 +164,76 @@ pub fn find_mix_param(id: &str) -> Option<(MixUnit, usize, &'static ParamSpec)> 
     })
 }
 
-/// Which voice a track plays.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum InstrumentKind {
-    Acid303,
-    Kick,
-    Clap,
-    HatClosed,
-    HatOpen,
-    Ride,
+/// One instance of a module on a track: the instrument or an effect.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Device {
+    /// Unique within the track; the prefix of its param ids
+    /// (`<id>.<param>`). A v1 file always uses the module's prefix.
+    pub id: String,
+    pub module: &'static ModuleDescriptor,
+    /// Every setting, in `module.settings` order, defaults filled in.
+    pub settings: Vec<&'static str>,
+    /// Explicit plain values only, keyed by local param name (`cutoff`, `drive`).
+    pub params: IndexMap<String, f64>,
 }
 
-impl InstrumentKind {
-    /// Every kind, in the order error messages list them.
-    pub const ALL: [Self; 6] = [
-        Self::Acid303,
-        Self::Kick,
-        Self::Clap,
-        Self::HatClosed,
-        Self::HatOpen,
-        Self::Ride,
-    ];
-
-    /// The `instrument` value in a song file; also the prefix of its param ids.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Acid303 => "acid303",
-            Self::Kick => "kick",
-            Self::Clap => "clap",
-            Self::HatClosed => "hat_closed",
-            Self::HatOpen => "hat_open",
-            Self::Ride => "ride",
+impl Device {
+    /// A device of `module` called `id`, with default settings and no
+    /// explicit params.
+    pub fn new(id: &str, module: &'static ModuleDescriptor) -> Self {
+        Self {
+            id: id.to_owned(),
+            module,
+            settings: module.default_settings(),
+            params: IndexMap::new(),
         }
     }
 
-    /// Parses [`name`](Self::name).
-    pub fn from_name(s: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|k| k.name() == s)
+    /// The track-relative id of param `local`: `<id>.<local>`.
+    pub fn param_id(&self, local: &str) -> String {
+        format!("{}.{local}", self.id)
     }
 
-    /// The instrument's parameter table.
-    pub fn params(self) -> &'static [ParamSpec] {
-        match self {
-            Self::Acid303 => ACID303_PARAMS,
-            Self::Kick => KICK_PARAMS,
-            Self::Clap => CLAP_PARAMS,
-            Self::HatClosed => HAT_CLOSED_PARAMS,
-            Self::HatOpen => HAT_OPEN_PARAMS,
-            Self::Ride => RIDE_PARAMS,
-        }
-    }
-
-    /// Drum tracks use the `x`/`X`/`.` step notation; acid303 uses notes.
-    pub fn is_drum(self) -> bool {
-        self != Self::Acid303
+    /// The value of setting `name`, if the module has it.
+    pub fn setting(&self, name: &str) -> Option<&'static str> {
+        let (index, _) = self.module.setting(name)?;
+        self.settings.get(index).copied()
     }
 }
 
-/// One mixer channel: an instrument, its static params and its fx chain.
+/// One mixer channel: an instrument, its fx chain and its strip.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Track {
-    pub instrument: InstrumentKind,
-    /// Only the values the file sets, in plain units, keyed by full param id:
-    /// instrument params (e.g. `acid303.cutoff`) and strip params
-    /// (`send.delay`, `duck.depth`, see `STRIP_PARAMS`). Everything else
-    /// stays at its default.
-    pub params: IndexMap<String, f64>,
+    pub instrument: Device,
+    pub fx: Vec<Device>,
+    /// Explicit strip params (`send.delay`, `duck.depth`, …, see
+    /// `STRIP_PARAMS`) in plain units, keyed by full id.
+    pub strip: IndexMap<String, f64>,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
     pub solo: bool,
-    pub fx: Vec<FxSpec>,
 }
 
-/// One effect in a track's chain.
-#[derive(Clone, Debug, PartialEq)]
-pub enum FxSpec {
-    Distortion {
-        mode: DistortionMode,
-        /// Explicit plain values only, keyed by full param id (`dist.drive`).
-        params: IndexMap<String, f64>,
-    },
-    /// The four-stage EQ (low cut, mid bell, high shelf, high cut).
-    Eq {
-        /// Explicit plain values only, keyed by full param id (`eq.low_cut`).
-        params: IndexMap<String, f64>,
-    },
-}
-
-impl FxSpec {
-    /// Every fx `type` name a song file accepts.
-    pub const TYPE_NAMES: [&'static str; 2] = ["distortion", "eq"];
-
-    /// The `type` value in a song file.
-    pub fn type_name(&self) -> &'static str {
-        match self {
-            Self::Distortion { .. } => "distortion",
-            Self::Eq { .. } => "eq",
-        }
+impl Track {
+    /// The instrument or the fx device called `id`.
+    pub fn device(&self, id: &str) -> Option<&Device> {
+        std::iter::once(&self.instrument)
+            .chain(&self.fx)
+            .find(|d| d.id == id)
     }
 
-    /// The effect's parameter table.
-    pub fn params_table(&self) -> &'static [ParamSpec] {
-        match self {
-            Self::Distortion { .. } => DIST_PARAMS,
-            Self::Eq { .. } => EQ_PARAMS,
+    /// The id a new device of `module` gets: its prefix, else `<prefix>2`,
+    /// `<prefix>3`, … (the first one no device of the track has).
+    pub fn next_device_id(&self, module: &ModuleDescriptor) -> String {
+        let prefix = module.prefix;
+        if self.device(prefix).is_none() {
+            return prefix.to_owned();
         }
-    }
-
-    /// The explicit plain values the file sets, keyed by full param id.
-    pub fn params(&self) -> &IndexMap<String, f64> {
-        match self {
-            Self::Distortion { params, .. } | Self::Eq { params } => params,
-        }
+        (2..)
+            .map(|n| format!("{prefix}{n}"))
+            .find(|id| self.device(id).is_none())
+            .expect("a track has finitely many devices")
     }
 }
 
