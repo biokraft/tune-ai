@@ -129,3 +129,27 @@ fn no_mix_writes_no_mix_table() {
     let text = parse(MINI).to_toml();
     assert!(!text.contains("[mix]"), "{text}");
 }
+
+#[test]
+#[should_panic(expected = "the v1 writer can only write placements and lanes aligned to sections")]
+fn v1_writer_refuses_a_placement_inside_a_section() {
+    let mut song = parse(MINI);
+    song.tracks.get_mut("kick").unwrap().play[0].bars = 1;
+    let _ = song.to_toml();
+}
+
+#[test]
+#[should_panic(expected = "the v1 writer can only write placements and lanes aligned to sections")]
+fn v1_writer_refuses_an_offset() {
+    let mut song = parse(MINI);
+    song.tracks.get_mut("kick").unwrap().play[0].offset_bars = 1;
+    let _ = song.to_toml();
+}
+
+#[test]
+#[should_panic(expected = "the v1 writer can only write placements and lanes aligned to sections")]
+fn v1_writer_refuses_a_stretch_across_sections() {
+    let mut song = parse(MINI);
+    song.automation[0].start_bar = 1;
+    let _ = song.to_toml();
+}

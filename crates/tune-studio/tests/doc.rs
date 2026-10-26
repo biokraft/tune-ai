@@ -2,6 +2,7 @@
 //! moves.
 
 use serde_json::{Value, json};
+use tune_song::SectionPlay;
 use tune_studio::{EditError, SongDoc, SongPath};
 
 const COMMENTED: &str = include_str!("fixtures/commented.toml");
@@ -197,14 +198,18 @@ fn set_mixer_fields() {
 fn play_null_removes_key() {
     let mut d = doc();
     d.set(&path("sections[1].play.acid"), &Value::Null).unwrap();
-    let play: Vec<&str> = d.song().sections[1]
-        .play
-        .keys()
-        .map(String::as_str)
-        .collect();
-    assert_eq!(play, ["kick", "hat"]);
+    let song = d.song();
+    let play = ["kick", "acid", "hat"].map(|t| song.section_play(1, t));
+    assert_eq!(
+        play,
+        [
+            SectionPlay::Clip("k4"),
+            SectionPlay::Silent,
+            SectionPlay::Clip("h")
+        ]
+    );
     d.set(&path("sections[0].play.acid"), &json!("a1")).unwrap();
-    assert_eq!(d.song().sections[0].play["acid"], "a1");
+    assert_eq!(d.song().section_play(0, "acid"), SectionPlay::Clip("a1"));
     assert!(
         d.text()
             .contains("play = { kick = \"k4\", hat = \"h\", acid = \"a1\" }"),
@@ -230,9 +235,9 @@ fn move_section_carries_comments_and_lanes() {
         "{text}"
     );
     let song = d.song();
-    assert_eq!(song.sections[0].automation.len(), 1);
-    assert_eq!(song.sections[0].automation[0].param, "acid303.cutoff");
-    assert!(song.sections[1].automation.is_empty());
+    assert_eq!(song.lanes_in(0).len(), 1);
+    assert_eq!(song.lanes_in(0)[0].param, "acid303.cutoff");
+    assert!(song.lanes_in(1).is_empty());
     for c in COMMENTS {
         assert!(text.contains(c), "lost `{c}`:\n{text}");
     }
@@ -274,8 +279,8 @@ fn duplicate_carries_lanes_in_order() {
     d.duplicate_section(1).unwrap();
     assert_eq!(names(&d), ["a", "b", "b"]);
     let song = d.song();
-    assert_eq!(song.sections[1].automation.len(), 1);
-    assert_eq!(song.sections[2].automation.len(), 1);
+    assert_eq!(song.lanes_in(1).len(), 1);
+    assert_eq!(song.lanes_in(2).len(), 1);
     // Each copy's lane follows its own header.
     let text = d.text();
     let tail = &text[text.find("# acid enters").unwrap()..];
@@ -369,7 +374,7 @@ fn get_effective() {
     assert_eq!(
         d.get(&path("sections[1].lanes")),
         Some(
-            json!([{ "track": "acid", "param": "acid303.cutoff", "points": [[0, 0.1], [2, 0.8]] }])
+            json!([{ "track": "acid", "param": "acid303.cutoff", "at": 3, "bars": 2, "points": [[0, 0.1], [2, 0.8]] }])
         )
     );
     assert_eq!(
@@ -379,6 +384,49 @@ fn get_effective() {
     assert_eq!(d.get(&path("tracks.kick.dist.drive")), None);
     assert_eq!(d.get(&path("tracks.clap.gain_db")), None);
     assert_eq!(d.get(&path("sections[5].bars")), None);
+}
+
+#[test]
+fn section_values_are_derived() {
+    let d = SongDoc::parse(include_str!("../../tune-song/tests/fixtures/mini.toml")).unwrap();
+    assert_eq!(d.get(&path("sections[1].play.acid")), Some(json!("a1")));
+    assert_eq!(d.get(&path("sections[0].play.acid")), Some(Value::Null));
+    assert_eq!(
+        d.get(&path("sections[1].lanes")),
+        Some(json!([{
+            "track": "acid",
+            "param": "acid303.cutoff",
+            "at": 3,
+            "bars": 2,
+            "points": [[0, 0.1], [2, 0.8]]
+        }]))
+    );
+    assert_eq!(d.get(&path("sections[0].lanes")), Some(json!([])));
+
+    // Shapes a v1 file cannot hold: a placement on part of a section, and
+    // a stretch across a section edge.
+    let mut song = d.song().clone();
+    song.tracks.get_mut("acid").unwrap().play = vec![tune_song::Placement {
+        start_bar: 3,
+        bars: 1,
+        clip: "a1".into(),
+        offset_bars: 1,
+    }];
+    song.automation[0].start_bar = 1;
+    let value = |path: &SongPath| tune_studio::effective_value(&song, path);
+    assert_eq!(
+        value(&path("sections[1].play.acid")),
+        Some(json!([{ "at": 4, "clip": "a1", "bars": 1, "offset": 1 }]))
+    );
+    let lane = json!([{
+        "track": "acid",
+        "param": "acid303.cutoff",
+        "at": 2,
+        "bars": 2,
+        "points": [[0, 0.1], [2, 0.8]]
+    }]);
+    assert_eq!(value(&path("sections[0].lanes")), Some(lane.clone()));
+    assert_eq!(value(&path("sections[1].lanes")), Some(lane));
 }
 
 #[test]
@@ -392,9 +440,9 @@ fn move_section_with_interleaved_tables() {
     d.move_section(0, 1).unwrap();
     assert_eq!(names(&d), ["b", "a"]);
     let song = d.song();
-    assert!(song.sections[0].automation.is_empty());
-    assert_eq!(song.sections[1].automation.len(), 1);
-    assert_eq!(song.sections[0].play["acid"], "p");
+    assert!(song.lanes_in(0).is_empty());
+    assert_eq!(song.lanes_in(1).len(), 1);
+    assert_eq!(song.section_play(0, "acid"), SectionPlay::Clip("p"));
     let text = d.text();
     assert!(
         text.contains("# lane of a\n[[sections.automation]]"),

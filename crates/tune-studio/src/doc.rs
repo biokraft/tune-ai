@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 use toml_edit::{DocumentMut, InlineTable, Item, Table};
 use tune_dsp::{ParamSpec, STRIP_PARAMS, find_spec};
 use tune_song::{
-    Device, MIX_TRACK_ID, Registry, SettingSpec, Song, SongError, Track, find_mix_param, parse_song,
+    Device, MIX_TRACK_ID, Registry, SectionPlay, SettingSpec, Song, SongError, Track,
+    find_mix_param, parse_song,
 };
 
 use crate::path::{SongPath, TrackField};
@@ -225,8 +226,12 @@ impl SongDoc {
 ///
 /// The read-only aggregates are valued as follows: `tracks.<t>` is
 /// `{"instrument": "<module>", "fx": [{"id": "<device id>", "type":
-/// "<module>"}, …]}`, `sections[<i>].lanes` is `[{track, param, points}]`
-/// and `sections` is `["<name>:<bars>", …]`.
+/// "<module>"}, …]}`, `sections[<i>].lanes` is `[{track, param, at, bars,
+/// points}]` for every lane stretch overlapping the section (`at` 1-based)
+/// and `sections` is `["<name>:<bars>", …]`. `sections[<i>].play.<t>` is
+/// `null` when the track is silent in the section, the clip id when one
+/// placement covers all of it, and otherwise `[{at, clip, bars, offset}]`
+/// for the placements overlapping it (`at` 1-based).
 pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
     Some(match path {
         SongPath::Bpm => num(song.bpm),
@@ -270,27 +275,48 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
         SongPath::SectionBars(i) => Value::from(song.sections.get(*i)?.bars),
         SongPath::SectionName(i) => Value::from(song.sections.get(*i)?.name.clone()),
         SongPath::SectionPlay { section, track } => {
-            let s = song.sections.get(*section)?;
+            song.sections.get(*section)?;
             song.tracks.get(track)?;
-            s.play
-                .get(track)
-                .map_or(Value::Null, |p| Value::from(p.clone()))
-        }
-        SongPath::SectionLanes(i) => Value::Array(
-            song.sections
-                .get(*i)?
-                .automation
-                .iter()
-                .map(|lane| {
-                    let points: Vec<Value> = lane
-                        .points
+            match song.section_play(*section, track) {
+                SectionPlay::Silent => Value::Null,
+                SectionPlay::Clip(clip) => Value::from(clip),
+                SectionPlay::Other(placements) => Value::Array(
+                    placements
                         .iter()
-                        .map(|(bar, value)| json!([num(*bar), num(*value)]))
-                        .collect();
-                    json!({ "track": lane.track, "param": lane.param, "points": points })
-                })
-                .collect(),
-        ),
+                        .map(|p| {
+                            json!({
+                                "at": p.start_bar + 1,
+                                "clip": p.clip,
+                                "bars": p.bars,
+                                "offset": p.offset_bars,
+                            })
+                        })
+                        .collect(),
+                ),
+            }
+        }
+        SongPath::SectionLanes(i) => {
+            song.sections.get(*i)?;
+            Value::Array(
+                song.lanes_in(*i)
+                    .into_iter()
+                    .map(|lane| {
+                        let points: Vec<Value> = lane
+                            .points
+                            .iter()
+                            .map(|(bar, value)| json!([num(*bar), num(*value)]))
+                            .collect();
+                        json!({
+                            "track": lane.track,
+                            "param": lane.param,
+                            "at": lane.start_bar + 1,
+                            "bars": lane.bars,
+                            "points": points,
+                        })
+                    })
+                    .collect(),
+            )
+        }
         SongPath::Sections => Value::Array(
             song.sections
                 .iter()

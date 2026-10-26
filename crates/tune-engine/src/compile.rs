@@ -1,6 +1,6 @@
 //! A validated [`Song`] compiled into the immutable form the engine plays:
-//! every id resolved to an index, every param table filled in, every
-//! pattern turned into engine cells.
+//! every id resolved to an index, every param table filled in, every clip
+//! turned into engine cells and the arrangement cut into regions.
 
 use tune_dsp::acid303::math::db2amp;
 use tune_dsp::{DrumHit, ParamSpec, STRIP_PARAMS, find_spec};
@@ -10,7 +10,7 @@ use tune_song::{Clip, Device, MIX_TRACK_ID, MasterMode, MixUnit, Song, Track, fi
 use crate::clock::{Clock, track_seed};
 use crate::mixer::pan_gains;
 
-/// A song ready to play. Tracks, patterns and sections keep song-file order.
+/// A song ready to play. Tracks, clips and sections keep song-file order.
 #[derive(Clone, Debug)]
 pub struct CompiledSong {
     pub name: String,
@@ -19,7 +19,12 @@ pub struct CompiledSong {
     pub tracks: Vec<CompiledTrack>,
     /// One cell per clip step, indexed like `Song::clips`.
     pub clips: Vec<Vec<Cell>>,
+    /// The named sections, for bar maps; the engine plays `regions`.
     pub sections: Vec<CompiledSection>,
+    /// The arrangement cut wherever a section, a placement or a lane
+    /// stretch starts or ends: in time order, the first at bar 0, together
+    /// covering the whole song.
+    pub regions: Vec<CompiledRegion>,
     pub mix: CompiledMix,
 }
 
@@ -103,25 +108,49 @@ impl CompiledDevice {
     }
 }
 
-/// A stretch of the arrangement.
+/// A named stretch of the arrangement.
 #[derive(Clone, Debug)]
 pub struct CompiledSection {
     pub name: String,
     pub start_bar: u32,
     pub bars: u32,
-    /// Clip index per track (indexed like `CompiledSong::tracks`);
-    /// `None` when the section does not play the track.
-    pub play: Vec<Option<usize>>,
+}
+
+/// Where a track's cells come from in a region: the placement playing
+/// there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CellSource {
+    /// Index into `CompiledSong::clips`.
+    pub clip: usize,
+    /// The placement's first step (`16 * start_bar`).
+    pub start_step: u64,
+    /// Steps into the clip at the placement's first step
+    /// (`16 * offset_bars`).
+    pub offset_steps: u64,
+}
+
+/// A stretch of bars over which no placement and no lane stretch starts or
+/// ends; it runs up to the next region's `start_bar` (or the song's end).
+#[derive(Clone, Debug)]
+pub struct CompiledRegion {
+    pub start_bar: u32,
+    /// Per track (indexed like `CompiledSong::tracks`); `None` when no
+    /// placement of the track covers the region.
+    pub cells: Vec<Option<CellSource>>,
+    /// The lane stretches covering the region, in `Song::automation` order.
     pub lanes: Vec<CompiledLane>,
 }
 
-/// An automation lane with its target resolved.
+/// A lane stretch with its target resolved.
 #[derive(Clone, Debug)]
 pub struct CompiledLane {
     pub track: usize,
     pub target: ParamTarget,
     pub spec: &'static ParamSpec,
-    /// `(bar offset from the section start, normalized value)`, bars never
+    pub start_bar: u32,
+    /// `clock.bar_start(start_bar)`.
+    pub start_sample: u64,
+    /// `(bar offset from start_bar, normalized value)`, bars never
     /// decreasing.
     pub points: Vec<(f64, f64)>,
 }
@@ -180,60 +209,53 @@ impl CompiledSong {
                 .get_index_of(id)
                 .unwrap_or_else(|| panic!("unknown track `{id}` in a validated song"))
         };
+        let clock = Clock::new(song.bpm, sample_rate);
+        let starts = song.section_start_bars();
         let sections = song
             .sections
             .iter()
-            .zip(song.section_start_bars())
-            .map(|(s, start_bar)| {
-                let mut play = vec![None; tracks.len()];
-                for (track, pattern) in &s.play {
-                    play[track_index(track)] = Some(
-                        song.clips
-                            .get_index_of(pattern)
-                            .unwrap_or_else(|| panic!("unknown pattern `{pattern}`")),
-                    );
-                }
-                let lanes = s
-                    .automation
-                    .iter()
-                    .map(|lane| {
-                        let unknown =
-                            || panic!("unknown lane param `{}` in a validated song", lane.param);
-                        let (track, target, spec) = if lane.track == MIX_TRACK_ID {
-                            let (target, spec) = resolve_mix(&lane.param).unwrap_or_else(unknown);
-                            (MIX_TRACK, target, spec)
-                        } else {
-                            let track = track_index(&lane.track);
-                            let (target, spec) =
-                                resolve(&tracks[track], &lane.param).unwrap_or_else(unknown);
-                            (track, target, spec)
-                        };
-                        CompiledLane {
-                            track,
-                            target,
-                            spec,
-                            points: lane.points.clone(),
-                        }
-                    })
-                    .collect();
-                CompiledSection {
-                    name: s.name.clone(),
-                    start_bar,
-                    bars: s.bars,
-                    play,
-                    lanes,
+            .zip(&starts)
+            .map(|(s, &start_bar)| CompiledSection {
+                name: s.name.clone(),
+                start_bar,
+                bars: s.bars,
+            })
+            .collect();
+        let lanes: Vec<CompiledLane> = song
+            .automation
+            .iter()
+            .map(|lane| {
+                let unknown = || panic!("unknown lane param `{}` in a validated song", lane.param);
+                let (track, target, spec) = if lane.track == MIX_TRACK_ID {
+                    let (target, spec) = resolve_mix(&lane.param).unwrap_or_else(unknown);
+                    (MIX_TRACK, target, spec)
+                } else {
+                    let track = track_index(&lane.track);
+                    let (target, spec) =
+                        resolve(&tracks[track], &lane.param).unwrap_or_else(unknown);
+                    (track, target, spec)
+                };
+                CompiledLane {
+                    track,
+                    target,
+                    spec,
+                    start_bar: lane.start_bar,
+                    start_sample: clock.bar_start(lane.start_bar),
+                    points: lane.points.clone(),
                 }
             })
             .collect();
+        let regions = regions(song, &starts, &lanes);
 
         let mix = compile_mix(song, &track_index);
         Self {
             name: song.name.clone(),
-            clock: Clock::new(song.bpm, sample_rate),
+            clock,
             total_bars: song.total_bars(),
             tracks,
             clips,
             sections,
+            regions,
             mix,
         }
     }
@@ -275,6 +297,63 @@ impl CompiledSong {
     pub fn end_sample(&self) -> u64 {
         self.clock.bar_start(self.total_bars)
     }
+}
+
+/// Cuts the arrangement of `song` (its sections starting at `section_starts`)
+/// into regions: bounds at bar 0, the end, every section start and every
+/// start and end of a placement or lane stretch, clipped to the song.
+/// `lanes` are `song.automation` compiled, in the same order.
+fn regions(song: &Song, section_starts: &[u32], lanes: &[CompiledLane]) -> Vec<CompiledRegion> {
+    let total = song.total_bars();
+    let placements = song.tracks.values().flat_map(|t| &t.play);
+    let mut bounds: Vec<u32> = [0, total]
+        .into_iter()
+        .chain(section_starts.iter().copied())
+        .chain(placements.flat_map(|p| [p.start_bar, p.start_bar + p.bars]))
+        .chain(
+            song.automation
+                .iter()
+                .flat_map(|l| [l.start_bar, l.start_bar + l.bars]),
+        )
+        .map(|b| b.min(total))
+        .collect();
+    bounds.sort_unstable();
+    bounds.dedup();
+    // Every bound but the end starts a region.
+    bounds.pop();
+    bounds
+        .into_iter()
+        .map(|a| {
+            let cells = song
+                .tracks
+                .values()
+                .map(|t| {
+                    let p = t.play.iter().find(|p| p.span().contains(&a))?;
+                    let clip = song
+                        .clips
+                        .get_index_of(&p.clip)
+                        .unwrap_or_else(|| panic!("unknown clip `{}`", p.clip));
+                    Some(CellSource {
+                        clip,
+                        start_step: 16 * u64::from(p.start_bar),
+                        offset_steps: 16 * u64::from(p.offset_bars),
+                    })
+                })
+                .collect();
+            let lanes = song
+                .automation
+                .iter()
+                .zip(lanes)
+                .filter(|(l, _)| l.span().contains(&a))
+                .map(|(_, compiled)| compiled.clone())
+                .collect();
+            CompiledRegion {
+                start_bar: a,
+                cells,
+                lanes,
+            }
+        })
+        .collect()
 }
 
 /// Track `id` of a song seeded with `song_seed`, every table filled in.
@@ -455,19 +534,81 @@ mod tests {
     }
 
     #[test]
-    fn sections_resolve_play_and_lanes() {
+    fn sections_keep_names_and_bars() {
         let s = mini();
-        assert_eq!(s.sections.len(), 2);
-        let (a, b) = (&s.sections[0], &s.sections[1]);
-        assert_eq!((a.name.as_str(), a.start_bar, a.bars), ("a", 0, 2));
-        assert_eq!((b.name.as_str(), b.start_bar, b.bars), ("b", 2, 2));
-        assert_eq!(a.play, vec![Some(0), None, Some(2)]);
-        assert_eq!(b.play, vec![Some(0), Some(1), Some(2)]);
+        let sections: Vec<_> = s
+            .sections
+            .iter()
+            .map(|x| (x.name.as_str(), x.start_bar, x.bars))
+            .collect();
+        assert_eq!(sections, [("a", 0, 2), ("b", 2, 2)]);
+    }
+
+    #[test]
+    fn regions_resolve_cells_and_lanes() {
+        let s = mini();
+        assert_eq!(s.regions.len(), 2);
+        let cell = |clip, start_step| {
+            Some(CellSource {
+                clip,
+                start_step,
+                offset_steps: 0,
+            })
+        };
+        let (a, b) = (&s.regions[0], &s.regions[1]);
+        assert_eq!(a.start_bar, 0);
+        assert_eq!(a.cells, vec![cell(0, 0), None, cell(2, 0)]);
         assert!(a.lanes.is_empty());
+        assert_eq!(b.start_bar, 2);
+        assert_eq!(b.cells, vec![cell(0, 32), cell(1, 32), cell(2, 32)]);
+        assert_eq!(b.lanes.len(), 1);
         let lane = &b.lanes[0];
         assert_eq!(lane.track, 1);
         assert_eq!(lane.target, ParamTarget::Instrument(2));
         assert_eq!(lane.spec.id, "acid303.cutoff");
+        assert_eq!(lane.start_bar, 2);
+        assert_eq!(lane.start_sample, 192_000);
         assert_eq!(lane.points, vec![(0.0, 0.1), (2.0, 0.8)]);
+    }
+
+    #[test]
+    fn v1_regions_are_the_sections() {
+        for src in [
+            include_str!("../../tune-song/tests/fixtures/first-acid-v1.toml"),
+            include_str!("../../tune-song/tests/fixtures/first-acid-mixed.toml"),
+        ] {
+            let song = tune_song::parse_song(src).unwrap();
+            let s = CompiledSong::new(&song, 48_000);
+            let regions: Vec<u32> = s.regions.iter().map(|r| r.start_bar).collect();
+            assert_eq!(regions, song.section_start_bars(), "{}", song.name);
+        }
+    }
+
+    #[test]
+    fn region_bounds_follow_placements_and_stretches() {
+        let mut song = tune_song::parse_song(MINI).unwrap();
+        // The acid plays bar 3 only, with a one-bar offset; the lane covers
+        // bars 2..3 and crosses into section `b`.
+        song.tracks.get_mut("acid").unwrap().play = vec![tune_song::Placement {
+            start_bar: 2,
+            bars: 1,
+            clip: "a1".into(),
+            offset_bars: 1,
+        }];
+        song.automation[0].start_bar = 1;
+        song.automation[0].bars = 2;
+        let s = CompiledSong::new(&song, 48_000);
+        let starts: Vec<u32> = s.regions.iter().map(|r| r.start_bar).collect();
+        assert_eq!(starts, [0, 1, 2, 3]);
+        let acid: Vec<_> = s.regions.iter().map(|r| r.cells[1]).collect();
+        let played = Some(CellSource {
+            clip: 1,
+            start_step: 32,
+            offset_steps: 16,
+        });
+        assert_eq!(acid, [None, None, played, None]);
+        let lanes: Vec<usize> = s.regions.iter().map(|r| r.lanes.len()).collect();
+        assert_eq!(lanes, [0, 1, 1, 0]);
+        assert_eq!(s.regions[1].lanes[0].start_sample, 96_000);
     }
 }

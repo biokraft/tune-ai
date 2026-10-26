@@ -3,7 +3,7 @@
 //!
 //! This module checks the header, the mix, ducking, ids and the song
 //! length; [`tracks`] checks tracks, their fx and their params, and
-//! [`arrange`] patterns, sections and lanes.
+//! [`arrange`] clips, sections, placements and lanes.
 
 mod arrange;
 mod tracks;
@@ -94,13 +94,28 @@ pub(crate) fn validate(raw: RawSong, registry: &Registry, errors: &mut Errors) -
         }
     }
 
+    // v1: each section's `play` entries become placements over the whole
+    // section, appended to their tracks in section order, and its lanes
+    // become stretches over it, in file order. Once a section is broken
+    // the later start bars are off, but then no song is built.
     let mut sections = Vec::new();
+    let mut automation = Vec::new();
+    let mut start_bar = 0;
     match &raw.sections {
         Some(list) if !list.is_empty() => {
             for (i, s) in list.iter().enumerate() {
-                if let Some(sec) = section(i, s, &shapes, &pattern_owner, &duck, errors) {
-                    sections.push(sec);
+                let Some(v1) = section(i, start_bar, s, &shapes, &pattern_owner, &duck, errors)
+                else {
+                    continue;
+                };
+                start_bar += v1.section.bars;
+                sections.push(v1.section);
+                for (track, placement) in v1.play {
+                    if let Some(t) = tracks.get_mut(&track) {
+                        t.play.push(placement);
+                    }
                 }
+                automation.extend(v1.lanes);
             }
         }
         _ => errors.global("a song needs at least one section ([[sections]])"),
@@ -138,6 +153,7 @@ pub(crate) fn validate(raw: RawSong, registry: &Registry, errors: &mut Errors) -
         tracks,
         clips,
         sections,
+        automation,
         mix: mix?,
     })
 }

@@ -9,15 +9,16 @@ use indexmap::IndexMap;
 use crate::model::{Clip, Device, Song};
 
 impl Song {
-    /// The track a v1 file names as the owner of clip `id`: the first track
-    /// whose section `play` uses it, else the first whose instrument plays
-    /// its kind.
+    /// The track a v1 file names as the owner of clip `id`: the track of
+    /// the earliest placement of it (the first in track order on a tie),
+    /// else the first track whose instrument plays its kind.
     fn v1_owner(&self, id: &str, clip: &Clip) -> &str {
         let used = self
-            .sections
+            .tracks
             .iter()
-            .flat_map(|s| &s.play)
-            .find(|(_, c)| c.as_str() == id)
+            .flat_map(|(t, track)| track.play.iter().map(move |p| (t, p)))
+            .filter(|(_, p)| p.clip == id)
+            .min_by_key(|(_, p)| p.start_bar)
             .map(|(t, _)| t.as_str());
         used.or_else(|| {
             self.tracks
@@ -80,17 +81,44 @@ impl Song {
             let _ = writeln!(out, "steps = {}", string(&clip.steps_text()));
         }
 
-        for section in &self.sections {
+        // v1 keeps placements and lanes in sections, so each must cover
+        // exactly one section (and start at the clip's first bar).
+        let starts = self.section_start_bars();
+        let aligned = |start_bar: u32, bars: u32| {
+            starts
+                .iter()
+                .zip(&self.sections)
+                .any(|(&s, section)| s == start_bar && section.bars == bars)
+        };
+        let all_aligned = self
+            .tracks
+            .values()
+            .flat_map(|t| &t.play)
+            .all(|p| p.offset_bars == 0 && aligned(p.start_bar, p.bars))
+            && self.automation.iter().all(|l| aligned(l.start_bar, l.bars));
+        assert!(
+            all_aligned,
+            "the v1 writer can only write placements and lanes aligned to sections"
+        );
+        for (section, start) in self.sections.iter().zip(starts.iter().copied()) {
             out.push_str("\n[[sections]]\n");
             let _ = writeln!(out, "name = {}", string(&section.name));
             let _ = writeln!(out, "bars = {}", section.bars);
-            let play: Vec<String> = section
-                .play
+            let covers = |start_bar: u32, bars: u32| start_bar == start && bars == section.bars;
+            let play: Vec<String> = self
+                .tracks
                 .iter()
-                .map(|(t, p)| format!("{} = {}", key(t), string(p)))
+                .filter_map(|(t, track)| {
+                    let p = track.play.iter().find(|p| covers(p.start_bar, p.bars))?;
+                    Some(format!("{} = {}", key(t), string(&p.clip)))
+                })
                 .collect();
             let _ = writeln!(out, "play = {}", inline(&play));
-            for lane in &section.automation {
+            for lane in self
+                .automation
+                .iter()
+                .filter(|l| covers(l.start_bar, l.bars))
+            {
                 out.push_str("\n[[sections.automation]]\n");
                 let _ = writeln!(
                     out,
