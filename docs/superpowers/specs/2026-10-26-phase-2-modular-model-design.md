@@ -1,7 +1,7 @@
 # tune-ai Phase 2 — Modular model and engine foundations
 
 Date: 2026-10-26
-Status: draft, awaiting the producer's approval
+Status: approved by the producer 2026-10-26
 Roadmap: `docs/roadmap.md`, Phase 2
 Parent spec: `docs/superpowers/specs/2026-10-20-tune-ai-design.md`
 
