@@ -296,9 +296,9 @@ fn commands_map_to_paths() {
         (Command::DuplicateSection { index: 0 }, vec!["sections"]),
         (Command::DeleteSection { index: 0 }, vec!["sections"]),
         (
-            // Section `b`'s lane stretch moves with it: its `at` changes.
+            // Section `b`'s lane stretch moves with it, unchanged within `b`.
             Command::ResizeSection { index: 0, bars: 8 },
-            vec!["sections[0].bars", "sections[1].lanes"],
+            vec!["sections[0].bars"],
         ),
         (
             Command::SetSectionPlay {
