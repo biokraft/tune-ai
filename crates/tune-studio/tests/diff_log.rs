@@ -129,6 +129,82 @@ fn shifted_lanes_are_not_lane_changes() {
     );
 }
 
+/// The mini song with the acid playing part of section `b` from bar 2 of
+/// its clip, and a cutoff stretch across the `a`/`b` edge.
+fn partial() -> String {
+    let text = MINI
+        .replacen(
+            "play = [{ at = 3, clip = \"a1\", bars = 2 }]",
+            "play = [{ at = 3, clip = \"a1\", bars = 1, offset = 1 }]",
+            1,
+        )
+        .replacen(
+            "at = 3\nbars = 2\npoints = [[0, 0.1], [2, 0.8]]",
+            "at = 2\nbars = 3\npoints = [[0, 0.2], [1, 0.4], [3, 0.6]]",
+            1,
+        );
+    assert_ne!(text, MINI);
+    text
+}
+
+/// A placement on part of a later section, moved by a resize, is not a
+/// change of what plays there; a real change of it is.
+#[test]
+fn shifted_partial_plays_are_not_play_changes() {
+    let old = song(&partial());
+    assert!(matches!(
+        old.section_play(1, "acid"),
+        tune_song::SectionPlay::Other(_)
+    ));
+    let mut d = SongDoc::parse(&partial()).unwrap();
+    d.set(&path("sections[0].bars"), &json!(6)).unwrap();
+    let paths: Vec<String> = diff_songs(&old, d.song())
+        .iter()
+        .map(|c| c.path.to_string())
+        .collect();
+    assert_eq!(paths, ["sections[0].bars", "sections[0].lanes"]);
+
+    let edited =
+        SongDoc::parse(&partial().replacen("bars = 1, offset = 1", "bars = 1", 1)).unwrap();
+    let paths: Vec<String> = diff_songs(&old, edited.song())
+        .iter()
+        .map(|c| c.path.to_string())
+        .collect();
+    assert_eq!(paths, ["sections[1].play.acid"]);
+}
+
+/// A stretch across a section edge is split there by a resize; the part
+/// inside the later section is unchanged, so its lanes are too.
+#[test]
+fn a_stretch_split_at_an_edge_is_not_a_lane_change() {
+    let old = song(&partial());
+    assert_eq!(old.lanes_in(0).len(), 1);
+    assert_eq!(old.lanes_in(1).len(), 1);
+    for bars in [1, 4] {
+        let resized = tune_song::resize_section(&old, 0, bars).unwrap().song;
+        // Split at the edge; a shrink drops the part past `a`'s new end.
+        let pieces = if bars == 1 { 1 } else { 2 };
+        assert_eq!(resized.automation.len(), pieces);
+        let paths: Vec<String> = diff_songs(&old, &resized)
+            .iter()
+            .map(|c| c.path.to_string())
+            .collect();
+        assert_eq!(
+            paths,
+            ["sections[0].bars", "sections[0].lanes"],
+            "{bars} bars"
+        );
+    }
+    // A change of the part inside `b` is a change of `b`'s lanes.
+    let mut edited = old.clone();
+    edited.automation[0].points[2].1 = 0.9;
+    let paths: Vec<String> = diff_songs(&old, &edited)
+        .iter()
+        .map(|c| c.path.to_string())
+        .collect();
+    assert_eq!(paths, ["sections[1].lanes"]);
+}
+
 #[test]
 fn diff_track_added() {
     let text = format!("{MINI}\n[tracks.clap]\ninstrument = \"clap\"\n");
