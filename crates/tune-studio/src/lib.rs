@@ -25,7 +25,7 @@ pub use core::{
     ExternalChange, OWN_WRITE_RING, PendingEdit, StudioCore, UNDO_DEPTH, UndoEntry, WRITE_DEBOUNCE,
 };
 pub use diff::{Change, diff_songs, is_whole_replace};
-pub use doc::{EditError, SongDoc, effective_value};
+pub use doc::{EditError, SongDoc, effective_value, placement_json};
 pub use error::{ErrorView, StudioError};
 pub use log::{EditEntry, EditLog, Source, text_hash};
 pub use path::{SongPath, TrackField};
