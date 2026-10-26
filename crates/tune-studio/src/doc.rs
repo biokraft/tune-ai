@@ -61,6 +61,10 @@ pub enum EditError {
     TooLong,
     #[error("the edit would make the song invalid:\n{}", summary(.0))]
     Invalid(Vec<SongError>),
+    /// The studio could not carry out an edit it accepted: a bug, never a
+    /// problem with the file.
+    #[error("internal error: {0}; the song was not changed (please report this)")]
+    Internal(String),
 }
 
 /// Why a section operation was refused, as an edit error. `path` is the
@@ -252,7 +256,9 @@ impl SongDoc {
         if arranged.song == self.song {
             return Ok(());
         }
-        let broken = || EditError::NoSuchTarget(SongPath::Sections.to_string());
+        let broken = || {
+            EditError::Internal("the section edit could not be written into the file".to_owned())
+        };
         let mut doc = self.doc.clone();
         normalize_positions(&mut doc);
         let start = block_start(&doc);
@@ -1055,6 +1061,10 @@ mod tests {
         for (error, message) in cases {
             assert_eq!(error.to_string(), message);
         }
+        assert_eq!(
+            EditError::Internal("x".into()).to_string(),
+            "internal error: x; the song was not changed (please report this)"
+        );
     }
 
     #[test]
