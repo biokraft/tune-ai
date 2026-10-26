@@ -2,8 +2,8 @@
 //! nor free memory, even across blocks that apply a swap (one that keeps the
 //! mix, one that rebuilds the delay for a new bpm, master-mode switches that
 //! crossfade between the clipper and the limiter, and swaps that add,
-//! reorder, replace or remove devices), a seek, a loop wrap, the song end and
-//! knob overrides on tracks, strips and the mix.
+//! reorder, replace or remove devices or move a placement), a seek, a loop
+//! wrap, the song end and knob overrides on tracks, strips and the mix.
 //!
 //! A counting global allocator counts every allocation, reallocation and
 //! deallocation made while the thread-local "audio" flag is set. The flag is
@@ -357,5 +357,78 @@ fn master_switches_swap_without_alloc() {
     assert_eq!(ctl.collect_garbage(), 1);
     audio(&mut p, &mut out, STEP, 512);
 
+    assert_no_alloc();
+}
+
+/// A v2 song: the acid through the chain `fx`, the kick's first placement at
+/// 1-based bar `kick_at`.
+fn v2_song(fx: &str, kick_at: u32) -> Arc<CompiledSong> {
+    compiled(&format!(
+        r#"
+[song]
+version = 2
+name = "v2"
+bpm = 120
+seed = 7
+
+[tracks.kick]
+instrument = "kick"
+play = [
+  {{ at = {kick_at}, clip = "k4", bars = 1 }},
+  {{ at = 3, clip = "k4", bars = 2 }},
+]
+
+[tracks.acid]
+instrument = "acid303"
+fx = [{fx}]
+play = [{{ at = 1, clip = "a1", bars = 4, offset = 1 }}]
+
+[clips.k4]
+kind = "drum"
+steps = "x...x...x...X..."
+
+[clips.a1]
+kind = "acid"
+steps = "C2 C2! C3~ C2 . D#2 C2~ G2!"
+
+[[sections]]
+name = "a"
+bars = 4
+
+[[automation]]
+param = "acid.eq2.mid_gain"
+at = 2
+bars = 2
+points = [[0, 0.2], [2, 0.8]]
+"#
+    ))
+}
+
+#[test]
+fn device_and_placement_swaps_never_allocate() {
+    const STEP: u64 = 6000;
+    const EQ: &str = r#"{ type = "eq", params = { "eq.low_cut" = 85 } }"#;
+    const EQ2: &str = r#"{ type = "eq", id = "eq2", params = { "eq2.mid_gain" = 3 } }"#;
+    const DIST: &str = r#"{ type = "distortion", params = { "dist.drive" = 20 } }"#;
+    let songs = [
+        // A device added at the end of the chain.
+        v2_song(&format!("{EQ}, {EQ2}, {DIST}"), 1),
+        // One removed.
+        v2_song(&format!("{EQ2}, {DIST}"), 1),
+        // Two eqs, then the same two the other way round.
+        v2_song(&format!("{EQ}, {EQ2}"), 1),
+        v2_song(&format!("{EQ2}, {EQ}"), 1),
+        // The kick's first placement one bar later.
+        v2_song(&format!("{EQ2}, {EQ}"), 2),
+    ];
+    let (mut ctl, mut p) = live(v2_song(&format!("{EQ}, {EQ2}"), 1), 0, None);
+    let mut out = vec![0.0f32; 2 * 4096];
+    audio(&mut p, &mut out, 1000, 512);
+    for (i, next) in songs.into_iter().enumerate() {
+        ctl.swap(next).unwrap();
+        audio(&mut p, &mut out, STEP, 512);
+        assert_eq!(ctl.swaps_applied(), 1 + i as u64);
+        assert_eq!(ctl.collect_garbage(), 1);
+    }
     assert_no_alloc();
 }

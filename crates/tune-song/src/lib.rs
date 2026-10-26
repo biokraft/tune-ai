@@ -2,8 +2,9 @@
 //! validation.
 //!
 //! A song file is the shared source of truth that both the producer (through
-//! the app) and Claude (as text) edit, so [`parse_song`] reports every
-//! mistake at once, each with a 1-based `line:column`.
+//! the app) and Claude (as text) edit, so [`parse`] reports every mistake
+//! at once, each with a 1-based `line:column`. It reads format versions 1
+//! and 2; [`Song::to_toml`] writes version 2.
 
 #![forbid(unsafe_code)]
 
@@ -23,16 +24,27 @@ pub use model::{
 };
 pub use tune_modules::{ClipKind, ModuleDescriptor, Registry, SettingSpec};
 pub use watch::{RawReload, Reload, SongWatcher};
+pub use write::placements_toml;
 
-/// Parses and validates a song file against the built-in modules. On
-/// failure every problem is returned, ordered by position.
-pub fn parse_song(src: &str) -> Result<Song, Vec<SongError>> {
-    parse_song_with(src, Registry::builtin())
+/// The newest song format version, the one [`Song::to_toml`] writes.
+pub const FORMAT_VERSION: u32 = 2;
+
+/// A parsed song and the format version its text was written in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Parsed {
+    pub song: Song,
+    pub version: u32,
 }
 
-/// Like [`parse_song`], with the modules of `registry`: an instrument or an
-/// fx `type` must name one of them.
-pub fn parse_song_with(src: &str, registry: &Registry) -> Result<Song, Vec<SongError>> {
+/// Parses and validates a song file (format 1 or 2) against the built-in
+/// modules. On failure every problem is returned, ordered by position.
+pub fn parse(src: &str) -> Result<Parsed, Vec<SongError>> {
+    parse_with(src, Registry::builtin())
+}
+
+/// Like [`parse`], with the modules of `registry`: an instrument or an fx
+/// `type` must name one of them.
+pub fn parse_with(src: &str, registry: &Registry) -> Result<Parsed, Vec<SongError>> {
     let mut errors = error::Errors::default();
     let doc = match toml::de::DeTable::parse(src) {
         Ok(doc) => doc,
@@ -44,18 +56,31 @@ pub fn parse_song_with(src: &str, registry: &Registry) -> Result<Song, Vec<SongE
             return Err(errors.finish(src));
         }
     };
-    let raw = raw::read(&doc, registry, &mut errors);
+    let Some(raw) = raw::read(&doc, registry, &mut errors) else {
+        return Err(errors.finish(src));
+    };
+    let version = raw.version;
     match validate::validate(raw, registry, &mut errors) {
-        Some(song) if errors.is_empty() => Ok(song),
+        Some(song) if errors.is_empty() => Ok(Parsed { song, version }),
         _ => Err(errors.finish(src)),
     }
 }
 
+/// [`parse`], keeping only the song.
+pub fn parse_song(src: &str) -> Result<Song, Vec<SongError>> {
+    parse(src).map(|p| p.song)
+}
+
 /// Reads and parses the song file at `path`.
-pub fn load_song(path: &Path) -> Result<Song, LoadError> {
+pub fn load(path: &Path) -> Result<Parsed, LoadError> {
     let src = std::fs::read_to_string(path).map_err(|source| LoadError::Io {
         path: path.to_owned(),
         source,
     })?;
-    parse_song(&src).map_err(LoadError::Invalid)
+    parse(&src).map_err(LoadError::Invalid)
+}
+
+/// [`load`], keeping only the song.
+pub fn load_song(path: &Path) -> Result<Song, LoadError> {
+    load(path).map(|p| p.song)
 }

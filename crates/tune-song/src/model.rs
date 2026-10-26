@@ -244,6 +244,12 @@ impl Device {
         format!("{}.{local}", self.id)
     }
 
+    /// The local name of the track-relative param id `id` when it names one
+    /// of this device's params (`eq2.low_cut` on device `eq2` is `low_cut`).
+    pub fn local_param<'a>(&self, id: &'a str) -> Option<&'a str> {
+        self.module.local_param(&self.id, id)
+    }
+
     /// The value of setting `name`, if the module has it.
     pub fn setting(&self, name: &str) -> Option<&'static str> {
         let (index, _) = self.module.setting(name)?;

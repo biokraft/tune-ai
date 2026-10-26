@@ -3,7 +3,7 @@
 //! Claude writes commented song files for the producer to learn from, so an
 //! edit must change only the value it names. [`SongDoc`] keeps the file as a
 //! `toml_edit` document next to its validated [`Song`]. Every mutation runs
-//! on a copy, re-parses the copy's text with [`parse_song`] and is committed
+//! on a copy, re-parses the copy's text with [`parse`] and is committed
 //! only when that succeeds, so the two always agree and the text is always a
 //! valid song.
 
@@ -12,7 +12,7 @@ use toml_edit::{DocumentMut, InlineTable, Item, Table};
 use tune_dsp::{ParamSpec, STRIP_PARAMS, find_spec};
 use tune_song::{
     Device, MIX_TRACK_ID, Registry, SectionPlay, SettingSpec, Song, SongError, Track,
-    find_mix_param, parse_song,
+    find_mix_param, parse,
 };
 
 use crate::path::{SongPath, TrackField};
@@ -40,6 +40,11 @@ pub enum EditError {
     LastSection,
     #[error("the edit would make the song invalid:\n{}", summary(.0))]
     Invalid(Vec<SongError>),
+    /// Until the studio edits version 2 text, an edit of the arrangement
+    /// (sections, what plays, patterns) is refused on a v2 file rather than
+    /// leaving its placements and lanes behind.
+    #[error("`{0}` is not yet supported on v2 files")]
+    NotYetOnV2(String),
 }
 
 fn summary(errors: &[SongError]) -> String {
@@ -56,12 +61,14 @@ fn summary(errors: &[SongError]) -> String {
 pub struct SongDoc {
     doc: DocumentMut,
     song: Song,
+    /// The format version of the text.
+    version: u32,
 }
 
 impl SongDoc {
     /// Parses and validates a song file, keeping its formatting for edits.
     pub fn parse(text: &str) -> Result<Self, Vec<SongError>> {
-        let song = parse_song(text)?;
+        let parsed = parse(text)?;
         let doc = text.parse::<DocumentMut>().map_err(|e| {
             vec![SongError {
                 line: None,
@@ -69,7 +76,11 @@ impl SongDoc {
                 message: e.message().trim_end().to_owned(),
             }]
         })?;
-        Ok(Self { doc, song })
+        Ok(Self {
+            doc,
+            song: parsed.song,
+            version: parsed.version,
+        })
     }
 
     /// The file's text: the original bytes plus the edits made since.
@@ -80,6 +91,20 @@ impl SongDoc {
     /// The validated song the text describes.
     pub fn song(&self) -> &Song {
         &self.song
+    }
+
+    /// The format version the text is written in.
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
+    /// Refuses `what` (an arrangement edit) on a v2 file.
+    fn v1_only(&self, what: impl FnOnce() -> String) -> Result<(), EditError> {
+        if self.version == 1 {
+            Ok(())
+        } else {
+            Err(EditError::NotYetOnV2(what()))
+        }
     }
 
     /// The effective value at `path` (defaults filled in), or `None` when the
@@ -99,6 +124,12 @@ impl SongDoc {
         if path.is_read_only() {
             return Err(EditError::ReadOnly(path.to_string()));
         }
+        if matches!(
+            path,
+            SongPath::SectionBars(_) | SongPath::SectionPlay { .. } | SongPath::Pattern { .. }
+        ) {
+            self.v1_only(|| path.to_string())?;
+        }
         let mut doc = self.doc.clone();
         apply(&mut doc, &self.song, path, value)?;
         self.commit(doc)
@@ -108,6 +139,7 @@ impl SongDoc {
     /// The section's leading comments and its `[[sections.automation]]`
     /// tables move with it.
     pub fn move_section(&mut self, from: usize, to: usize) -> Result<(), EditError> {
+        self.v1_only(|| "moving a section".to_owned())?;
         let len = self.song.sections.len();
         for index in [from, to] {
             if index >= len {
@@ -147,6 +179,7 @@ impl SongDoc {
     /// Inserts a copy of section `index` (comments and lanes included) right
     /// after it.
     pub fn duplicate_section(&mut self, index: usize) -> Result<(), EditError> {
+        self.v1_only(|| "duplicating a section".to_owned())?;
         let len = self.song.sections.len();
         if index >= len {
             return Err(EditError::OutOfBounds { index, len });
@@ -191,6 +224,7 @@ impl SongDoc {
     /// Removes section `index` with its comments and lanes. The last section
     /// cannot be removed.
     pub fn delete_section(&mut self, index: usize) -> Result<(), EditError> {
+        self.v1_only(|| "deleting a section".to_owned())?;
         let len = self.song.sections.len();
         if index >= len {
             return Err(EditError::OutOfBounds { index, len });
@@ -213,9 +247,10 @@ impl SongDoc {
 
     /// Validates the edited copy and keeps it only when it is a valid song.
     fn commit(&mut self, doc: DocumentMut) -> Result<(), EditError> {
-        let song = parse_song(&doc.to_string()).map_err(EditError::Invalid)?;
+        let parsed = parse(&doc.to_string()).map_err(EditError::Invalid)?;
         self.doc = doc;
-        self.song = song;
+        self.song = parsed.song;
+        self.version = parsed.version;
         Ok(())
     }
 }

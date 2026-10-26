@@ -228,17 +228,22 @@ pub(super) struct Fields<'a, 'i> {
 }
 
 impl<'a, 'i> Fields<'a, 'i> {
-    /// Wraps `table`, recording every key not in `allowed` as an error.
-    pub(super) fn new(
+    /// Wraps `table`, recording every key not in `allowed` as an error. A
+    /// key listed in `hints` (key, message) gets that message instead of the
+    /// unknown-field one.
+    pub(super) fn hinted(
         table: &'a DeTable<'i>,
         span: Range<usize>,
         what: &str,
         allowed: &[&str],
+        hints: &[(&str, &str)],
         errors: &mut Errors,
     ) -> Self {
         for key in table.keys() {
             let k: &str = key.get_ref();
-            if !allowed.contains(&k) {
+            if let Some((_, hint)) = hints.iter().find(|(h, _)| *h == k) {
+                errors.at(&key.span(), *hint);
+            } else if !allowed.contains(&k) {
                 let expected = allowed
                     .iter()
                     .map(|a| format!("`{a}`"))
@@ -257,15 +262,27 @@ impl<'a, 'i> Fields<'a, 'i> {
         }
     }
 
-    /// Like [`new`](Self::new) for a value that must be a table.
+    /// Like [`hinted`](Self::hinted) without hints, for a value that must be
+    /// a table.
     pub(super) fn open(
         v: &'a Spanned<DeValue<'i>>,
         what: &str,
         allowed: &[&str],
         errors: &mut Errors,
     ) -> Option<Self> {
+        Self::open_hinted(v, what, allowed, &[], errors)
+    }
+
+    /// Like [`open`](Self::open), with the `hints` of [`hinted`](Self::hinted).
+    pub(super) fn open_hinted(
+        v: &'a Spanned<DeValue<'i>>,
+        what: &str,
+        allowed: &[&str],
+        hints: &[(&str, &str)],
+        errors: &mut Errors,
+    ) -> Option<Self> {
         match v.get_ref().as_table() {
-            Some(t) => Some(Self::new(t, v.span(), what, allowed, errors)),
+            Some(t) => Some(Self::hinted(t, v.span(), what, allowed, hints, errors)),
             None => {
                 errors.at(
                     &v.span(),

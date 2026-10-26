@@ -16,5 +16,6 @@ tune-modules = { path = "../tune-modules" }
 tune-song = { path = "../tune-song" }
 
 [dev-dependencies]
+indexmap = "2.14"
 tempfile = "3"
 tune-analysis = { path = "../tune-analysis" }

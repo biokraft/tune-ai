@@ -27,7 +27,7 @@ impl fmt::Display for SongError {
 
 impl std::error::Error for SongError {}
 
-/// Why [`load_song`](crate::load_song) failed.
+/// Why [`load`](crate::load) or [`load_song`](crate::load_song) failed.
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
     #[error("cannot read {}: {source}", path.display())]
