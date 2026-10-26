@@ -2,7 +2,6 @@ use tune_dsp::ParamError;
 use tune_dsp::acid303::AcidStep;
 use tune_engine::{Cell, Clock, Instrument, StepCtx, hit_seed, track_seed};
 use tune_modules::{ACID303, KICK, Registry};
-use tune_song::InstrumentKind;
 
 fn rms(x: &[f64]) -> f64 {
     (x.iter().map(|v| v * v).sum::<f64>() / x.len() as f64).sqrt()
@@ -88,18 +87,15 @@ fn set_param_by_id() {
 
 #[test]
 fn params_tables() {
-    let registry = Registry::builtin();
-    for k in InstrumentKind::ALL {
-        let a: Vec<_> = registry
-            .get(k.name())
-            .unwrap()
-            .make_instrument(48_000.0, &[])
+    for m in Registry::builtin().instruments() {
+        let a: Vec<_> = m
+            .make_instrument(48_000.0, &m.default_settings())
             .unwrap()
             .params()
             .iter()
             .map(|p| p.id)
             .collect();
-        let b: Vec<_> = k.params().iter().map(|p| p.id).collect();
-        assert_eq!(a, b, "{k:?}");
+        let b: Vec<_> = m.params.iter().map(|p| p.id).collect();
+        assert_eq!(a, b, "{m:?}");
     }
 }

@@ -9,45 +9,12 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use tune_dsp::{ParamSpec, STRIP_PARAMS};
-use tune_modules::{BUILTIN, Cell, Effect, Instrument, ModuleDescriptor, StepCtx};
-use tune_song::{FxSpec, InstrumentKind};
+use tune_modules::{Cell, Effect, Instrument, StepCtx};
 
 use crate::clock::hit_seed;
-use crate::compile::{CompiledFx, CompiledSong, CompiledTrack, MIX_TRACK, ParamTarget};
+use crate::compile::{CompiledDevice, CompiledSong, CompiledTrack, MIX_TRACK, ParamTarget};
 use crate::live::SongUpdate;
 use crate::mixer::{Meter, MixRuntime, Strip};
-
-/// The built-in module called `name`. A bridge from the song model's
-/// closed kinds to the registry.
-fn module_named(name: &str) -> &'static ModuleDescriptor {
-    BUILTIN
-        .iter()
-        .copied()
-        .find(|m| m.name == name)
-        .unwrap_or_else(|| panic!("no built-in module `{name}`"))
-}
-
-/// A fresh instrument of `kind` with every param at its default.
-fn make_instrument(kind: InstrumentKind, sample_rate: f64) -> Box<dyn Instrument> {
-    module_named(kind.name())
-        .make_instrument(sample_rate, &[])
-        .unwrap_or_else(|| panic!("`{}` is not an instrument", kind.name()))
-}
-
-/// A fresh effect for `fx` with its mode set; params stay at their defaults.
-fn make_effect(fx: &FxSpec, sample_rate: f64) -> Box<dyn Effect> {
-    let mode;
-    let settings: &[&'static str] = match fx {
-        FxSpec::Distortion { mode: m, .. } => {
-            mode = [m.name()];
-            &mode
-        }
-        FxSpec::Eq { .. } => &[],
-    };
-    module_named(fx.type_name())
-        .make_effect(sample_rate, settings)
-        .unwrap_or_else(|| panic!("`{}` is not an effect", fx.type_name()))
-}
 
 /// The live DSP objects of one track, with its knob overrides.
 pub struct TrackRuntime {
@@ -59,24 +26,35 @@ pub struct TrackRuntime {
     overrides: Vec<f64>,
     /// One override per strip param, like `overrides`.
     strip_overrides: Vec<f64>,
-    /// One override table per fx slot, like `overrides`. It travels with
-    /// the fx chain: a swap that rebuilds the chain drops it.
+    /// One override table per fx slot, like `overrides`. Each travels with
+    /// its device: a swap that rebuilds a device drops it.
     fx_overrides: Vec<Vec<f64>>,
 }
 
 impl TrackRuntime {
     /// Fresh instrument and fx chain for `track`, with its static params set
-    /// and room for an override on every param (none set).
+    /// and room for an override on every param (none set). Each device's
+    /// factory gets the device's settings, which in a compiled song are
+    /// always filled in from the module's own values (what the factories
+    /// require).
     pub fn build(track: &CompiledTrack, sample_rate: f64) -> Self {
+        let instrument = &track.instrument;
         let mut rt = Self {
-            instrument: make_instrument(track.kind, sample_rate),
+            instrument: instrument
+                .module
+                .make_instrument(sample_rate, &instrument.settings)
+                .unwrap_or_else(|| panic!("`{}` is not an instrument", instrument.module.name)),
             fx: track
                 .fx
                 .iter()
-                .map(|fx| make_effect(&fx.spec, sample_rate))
+                .map(|fx| {
+                    fx.module
+                        .make_effect(sample_rate, &fx.settings)
+                        .unwrap_or_else(|| panic!("`{}` is not an effect", fx.module.name))
+                })
                 .collect(),
             strip: Strip::new(sample_rate),
-            overrides: vec![f64::NAN; track.params.len()],
+            overrides: vec![f64::NAN; instrument.params.len()],
             strip_overrides: vec![f64::NAN; STRIP_PARAMS.len()],
             fx_overrides: track
                 .fx
@@ -90,7 +68,7 @@ impl TrackRuntime {
 
     /// Sets every instrument, strip and fx param to the track's static value.
     fn apply_static(&mut self, track: &CompiledTrack) {
-        for (index, &plain) in track.params.iter().enumerate() {
+        for (index, &plain) in track.instrument.params.iter().enumerate() {
             self.instrument.set_param_at(index, plain);
         }
         for (index, &plain) in track.strip.iter().enumerate() {
@@ -160,7 +138,8 @@ impl TrackRuntime {
         for (index, plain) in self.overrides.iter_mut().enumerate() {
             if !plain.is_nan() {
                 *plain = f64::NAN;
-                self.instrument.set_param_at(index, track.params[index]);
+                self.instrument
+                    .set_param_at(index, track.instrument.params[index]);
             }
         }
         for (index, plain) in self.strip_overrides.iter_mut().enumerate() {
@@ -231,16 +210,11 @@ impl Instrument for Vacant {
     fn reset(&mut self) {}
 }
 
-/// Whether two fx chains are built alike: the same effects in the same
-/// slots, each with what its constructor takes (a distortion's mode). Params
-/// may differ; the static reset after a swap sets them.
-fn same_fx_chain(a: &[CompiledFx], b: &[CompiledFx]) -> bool {
-    a.len() == b.len()
-        && a.iter().zip(b).all(|(x, y)| match (&x.spec, &y.spec) {
-            (FxSpec::Distortion { mode: m, .. }, FxSpec::Distortion { mode: n, .. }) => m == n,
-            (FxSpec::Eq { .. }, FxSpec::Eq { .. }) => true,
-            _ => false,
-        })
+/// Whether a swap may keep the running `a` for `b`: the same id, module
+/// and settings (what the factory takes). Params may differ; the static
+/// reset after a swap sets them.
+fn same_device(a: &CompiledDevice, b: &CompiledDevice) -> bool {
+    a.id == b.id && a.module == b.module && a.settings == b.settings
 }
 
 /// Plays a [`CompiledSong`]: arrangement, automation, mixer, buses and the
@@ -331,9 +305,11 @@ impl Engine {
     /// The swap applies only once the previous one has been taken with
     /// [`take_retired_swap`](Self::take_retired_swap), so the engine never
     /// drops a song itself. Applying it, at step boundary `k`:
-    /// - every new track takes the old runtime with the same id and
-    ///   instrument kind (keeping the old fx chain if it is built alike, see
-    ///   `same_fx_chain`); other tracks get the update's fresh runtimes;
+    /// - every new track takes the old runtime with the same id (its strip
+    ///   and ducker), and in it every device that is the same device as one
+    ///   of the old track's (same id, module and settings, see
+    ///   `same_device`), wherever it moved in the chain; any other device,
+    ///   and every other track, comes fresh from the update;
     /// - the mix keeps each unit the new song can use and takes the
     ///   update's fresh one for the rest, the old one going back in the
     ///   retired update: the delay is replaced when its bus appears or goes
@@ -351,11 +327,11 @@ impl Engine {
     /// A finished engine applies a swap at once and stays finished at the
     /// new end; [`seek`](Self::seek) restarts it.
     ///
-    /// Knob overrides travel with the runtimes a swap keeps (an fx chain's
-    /// overrides only when the chain is kept, strip overrides with the
-    /// track, mix overrides with the engine). An update made to clear the
-    /// overrides clears them all when it lands; an update that replaces such
-    /// a pending one inherits that.
+    /// Knob overrides travel with what a swap keeps (a device's overrides
+    /// with the device, strip overrides with the track, mix overrides with
+    /// the engine). An update made to clear the overrides clears them all
+    /// when it lands; an update that replaces such a pending one inherits
+    /// that.
     pub fn queue_swap(&mut self, mut update: Box<SongUpdate>) -> Option<Box<SongUpdate>> {
         debug_assert_eq!(
             update.song.clock.sample_rate, self.song.clock.sample_rate,
@@ -443,7 +419,7 @@ impl Engine {
     fn restore_static(&mut self, track: usize, target: ParamTarget) {
         let tracks = &self.song.tracks;
         let plain = match target {
-            ParamTarget::Instrument(index) => tracks[track].params[index],
+            ParamTarget::Instrument(index) => tracks[track].instrument.params[index],
             ParamTarget::Fx { slot, index } => tracks[track].fx[slot].params[index],
             ParamTarget::Strip(index) => tracks[track].strip[index],
             ParamTarget::Mix { unit, index } => {
@@ -672,21 +648,32 @@ impl Engine {
         debug_assert!(u.spare.is_empty() && u.spare.capacity() >= u.song.tracks.len());
         for (j, new) in u.song.tracks.iter().enumerate() {
             let fresh = u.tracks[j].take().expect("one fresh runtime per track");
-            let old = self
-                .song
-                .tracks
-                .iter()
-                .position(|t| t.id == new.id && t.kind == new.kind);
+            let old = self.song.tracks.iter().position(|t| t.id == new.id);
             let rt = match old {
                 None => fresh,
                 Some(i) => {
+                    let old = &self.song.tracks[i];
                     let mut kept =
                         std::mem::replace(&mut self.tracks[i], TrackRuntime::placeholder());
                     let mut unused = fresh;
-                    if !same_fx_chain(&self.song.tracks[i].fx, &new.fx) {
-                        std::mem::swap(&mut kept.fx, &mut unused.fx);
-                        std::mem::swap(&mut kept.fx_overrides, &mut unused.fx_overrides);
+                    if !same_device(&old.instrument, &new.instrument) {
+                        std::mem::swap(&mut kept.instrument, &mut unused.instrument);
+                        std::mem::swap(&mut kept.overrides, &mut unused.overrides);
                     }
+                    // Deal every kept device into its new slot of the fresh
+                    // chain, then take that chain; the old one goes back
+                    // with the devices nobody kept.
+                    for (slot, fx) in new.fx.iter().enumerate() {
+                        if let Some(k) = old.fx.iter().position(|o| same_device(o, fx)) {
+                            std::mem::swap(&mut unused.fx[slot], &mut kept.fx[k]);
+                            std::mem::swap(
+                                &mut unused.fx_overrides[slot],
+                                &mut kept.fx_overrides[k],
+                            );
+                        }
+                    }
+                    std::mem::swap(&mut kept.fx, &mut unused.fx);
+                    std::mem::swap(&mut kept.fx_overrides, &mut unused.fx_overrides);
                     u.tracks[j] = Some(unused);
                     kept
                 }

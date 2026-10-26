@@ -603,3 +603,28 @@ play = { acid = "p" }
     assert!(!steps[31].2.next_has_gate);
     assert!(!steps[15].2.next_has_gate);
 }
+
+/// The distortion's `mode` setting reaches the voice: the same hot acid
+/// through `soft` and through `hard` sounds different, so a setting dropped
+/// between the song and the factory fails here.
+#[test]
+fn distortion_mode_reaches_the_voice() {
+    let mode = |m: &'static str| {
+        let mut s = song(MINI);
+        let acid = s.tracks.get_mut("acid").unwrap();
+        acid.fx[0].settings[0] = m;
+        acid.fx[0].params.insert("drive".into(), 36.0);
+        compile_song(&s)
+    };
+    let (soft, hard) = (mode("soft"), mode("hard"));
+    assert_eq!(hard.tracks[1].fx[0].settings, ["hard"]);
+    // Section `b` (bars 2 and 3) plays the acid.
+    let acid_bars = |s| {
+        let mut e = Engine::new(s);
+        e.seek(2);
+        run_stems(&mut e, BAR).1.swap_remove(1)
+    };
+    let (a, b) = (acid_bars(soft), acid_bars(hard));
+    assert!(rms(&a) > 0.01, "the acid plays");
+    assert!(a != b, "soft and hard clip the same hot input differently");
+}

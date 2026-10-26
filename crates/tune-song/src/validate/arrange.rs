@@ -3,6 +3,7 @@
 use indexmap::{IndexMap, IndexSet};
 use tune_dsp::acid303::{AcidPattern, PatternError};
 use tune_dsp::{DrumPattern, DrumPatternError, ParamSpec, STRIP_DUCK_DEPTH, STRIP_PARAMS};
+use tune_modules::ClipKind;
 
 use super::tracks::{TrackShape, find_in, unknown_param};
 use super::{BARS, Duck, unknown_track};
@@ -23,8 +24,8 @@ pub(super) fn pattern(
     };
     let steps = p.steps.as_ref()?;
     // An unknown instrument already has its own error.
-    let kind = shape.kind?;
-    let parsed = if kind.is_drum() {
+    let module = shape.instrument?;
+    let parsed = if module.plays(ClipKind::Drum) {
         DrumPattern::parse(&steps.value)
             .map(PatternSteps::Drum)
             .map_err(|e| match e {
@@ -226,13 +227,13 @@ fn resolve(
         return None;
     };
     // An unknown instrument already has its own error.
-    let kind = shape.kind?;
-    let mut tables = vec![kind.params(), STRIP_PARAMS];
-    tables.extend(shape.fx_tables.iter().copied());
+    let module = shape.instrument?;
+    let mut tables = vec![module.params, STRIP_PARAMS];
+    tables.extend(shape.fx.iter().map(|m| m.params));
     if find_in(&tables, param_id).is_none() {
         errors.at(
             &p.span,
-            unknown_param(param_id, kind.name(), &[kind.params(), STRIP_PARAMS]),
+            unknown_param(param_id, module.name, &[module.params, STRIP_PARAMS]),
         );
         return None;
     }

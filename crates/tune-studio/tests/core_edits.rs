@@ -640,7 +640,7 @@ fn set_param_on_mix_commits() {
     };
     let changes = core.apply_edit(&send, t0).unwrap();
     assert_eq!(changes[0].path.to_string(), "tracks.hat.send.reverb");
-    assert_eq!(core.song().tracks["hat"].params["send.reverb"], -20.0);
+    assert_eq!(core.song().tracks["hat"].strip["send.reverb"], -20.0);
 
     // An unknown mix id is refused.
     let bad = Command::SetParam {
