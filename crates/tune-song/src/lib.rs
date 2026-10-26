@@ -11,6 +11,7 @@
 mod error;
 mod model;
 mod raw;
+pub mod toml_doc;
 mod validate;
 mod watch;
 mod write;

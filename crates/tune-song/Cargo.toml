@@ -13,6 +13,7 @@ notify = "=8.2.0"
 serde = "1.0.228"
 thiserror = "2"
 toml = { version = "=1.1.2", default-features = false, features = ["std", "serde", "parse", "preserve_order"] }
+toml_edit = { version = "=0.25.17", default-features = false, features = ["parse", "display"] }
 tune-dsp = { path = "../tune-dsp" }
 tune-modules = { path = "../tune-modules" }
 
