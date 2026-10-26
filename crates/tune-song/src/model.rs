@@ -1,6 +1,6 @@
 //! The validated song model. Every map keeps song-file order.
 
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 
 use indexmap::IndexMap;
 use tune_dsp::acid303::AcidPattern;
@@ -353,7 +353,22 @@ impl Placement {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Section {
     pub name: String,
+    /// In [`SECTION_BARS`].
     pub bars: u32,
+}
+
+/// The bars a section may have.
+pub const SECTION_BARS: RangeInclusive<u32> = 1..=1024;
+
+/// Why a section of `bars` bars (outside [`SECTION_BARS`]) is refused:
+/// "bars must be 1 to 1024, got <bars>". The validator, the section
+/// operations and the studio all say it this way.
+pub fn section_bars_error(bars: i64) -> String {
+    format!(
+        "bars must be {} to {}, got {bars}",
+        SECTION_BARS.start(),
+        SECTION_BARS.end()
+    )
 }
 
 /// What one track plays in one section (see [`Song::section_play`]).

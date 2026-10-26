@@ -15,13 +15,14 @@ use tune_dsp::{ParamSpec, STRIP_DUCK_DEPTH, STRIP_PARAMS};
 use tune_modules::{ClipKind, ModuleDescriptor, Registry};
 
 use crate::error::Errors;
-use crate::model::{MIX_TRACK_ID, MasterMode, Mix, MixUnit, Song};
+use crate::model::{MIX_TRACK_ID, MasterMode, Mix, MixUnit, SECTION_BARS, Song};
 use crate::raw::{At, RawMix, RawSong};
 
 use tracks::{TrackShape, param_values, track};
 
 const BPM: RangeInclusive<f64> = 40.0..=300.0;
-const BARS: RangeInclusive<i64> = 1..=1024;
+/// [`SECTION_BARS`], for the raw (signed) values of a file.
+const BARS: RangeInclusive<i64> = *SECTION_BARS.start() as i64..=*SECTION_BARS.end() as i64;
 const SAMPLE_RATE: RangeInclusive<i64> = 8_000..=384_000;
 const MAX_SECONDS: f64 = 30.0 * 60.0;
 
