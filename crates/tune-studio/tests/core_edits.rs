@@ -849,17 +849,47 @@ fn open_v1_in_a_readonly_dir_still_opens() {
     let log_exists = dir.join("edits.jsonl").exists();
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let core = opened.expect("opens");
+    let mut core = opened.expect("opens");
     assert_eq!(bytes, FIXTURE_V1, "nothing was written");
     assert!(!log_exists, "nothing was logged");
     let error = core.migration_error().expect("the reason is kept");
-    assert!(error.contains("cannot write"), "{error}");
+    assert!(
+        error.starts_with("the song was upgraded to the new file format in memory but not saved: ")
+            && error.contains("cannot write"),
+        "{error}"
+    );
     assert_eq!(core.migrated_from(), None);
     assert!(!core.can_undo(), "nothing was pushed");
     assert_eq!(
         core.song(),
         tune_studio::SongDoc::parse(FIXTURE).unwrap().song()
     );
+
+    // Once the folder is writable again, the next edit saves v2 and the
+    // error is gone.
+    core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
+    let changes = core.flush().unwrap();
+    assert_eq!(changes[0].path.to_string(), "song.version");
+    assert_eq!(core.migration_error(), None);
+    assert!(disk(&s).contains("[song]\nversion = 2\n"));
+}
+
+/// The edit log failing after the migration was written says so in its
+/// own words; the migration is still one undo step.
+#[test]
+fn open_v1_with_an_unwritable_log_says_the_log_failed() {
+    let s = song_with(FIXTURE_V1);
+    fs::create_dir(s.path.parent().unwrap().join("edits.jsonl")).unwrap();
+    let core = open(&s);
+    assert_eq!(disk(&s), FIXTURE);
+    let error = core.migration_error().expect("the log failure is kept");
+    assert!(
+        error.starts_with(
+            "the song was upgraded and saved, but the edit log could not be written: "
+        ),
+        "{error}"
+    );
+    assert_eq!(core.migrated_from(), Some(1));
 }
 
 /// A resize out of the validator's range is refused with its wording, and

@@ -512,13 +512,10 @@ impl Actor {
         Ok(())
     }
 
-    /// Why the open song's migration could not be written back, as the
-    /// producer reads it.
+    /// What went wrong with the open song's migration, while it stands.
     fn migration_error(&self) -> Option<String> {
-        let error = self.song.as_ref()?.core.migration_error()?;
-        Some(format!(
-            "the song was upgraded to the new file format in memory but not saved: {error}"
-        ))
+        let song = self.song.as_ref()?;
+        song.core.migration_error().map(str::to_owned)
     }
 
     /// Opens `path`; if it does not parse, watches it and waits for a fix.

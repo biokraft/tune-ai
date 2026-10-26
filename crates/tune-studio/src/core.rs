@@ -139,7 +139,8 @@ pub struct StudioCore {
     /// The version the file was migrated from when opened, and the undo
     /// step the migration made.
     migration: Option<(u32, UndoEntry)>,
-    /// Why writing the open-time migration back failed.
+    /// Why writing the open-time migration back (or logging it) failed,
+    /// until the next successful write.
     migration_error: Option<String>,
 }
 
@@ -188,14 +189,18 @@ impl StudioCore {
         let hash = match self.write(&text) {
             Ok(hash) => hash,
             Err(e) => {
-                self.migration_error = Some(e.to_string());
+                self.migration_error = Some(format!(
+                    "the song was upgraded to the new file format in memory but not saved: {e}"
+                ));
                 return;
             }
         };
         let changes: Vec<Change> = version_change(from, FORMAT_VERSION).into_iter().collect();
-        if let Err(e) = self.log_changes(Source::External, &changes, &hash) {
+        if let Err(e) = self.log.append_changes(Source::External, &changes, &hash) {
             // The file is migrated either way; say that the log missed it.
-            self.migration_error = Some(e.to_string());
+            self.migration_error = Some(format!(
+                "the song was upgraded and saved, but the edit log could not be written: {e}"
+            ));
         }
         let before = std::mem::replace(&mut self.disk_text, text.clone());
         self.disk_version = FORMAT_VERSION;
@@ -219,7 +224,8 @@ impl StudioCore {
 
     /// Why the migrated text could not be written back when the song was
     /// opened (the song is open, migrated in memory), or why the edit log
-    /// missed the migration; `None` when it went well or there was none.
+    /// missed the migration, as a sentence for the producer; `None` when it
+    /// went well, there was none, or the studio has written the file since.
     pub fn migration_error(&self) -> Option<&str> {
         self.migration_error.as_deref()
     }
@@ -623,6 +629,9 @@ impl StudioCore {
     fn write(&mut self, text: &str) -> Result<String, StudioError> {
         write_atomic(&self.path, text)
             .map_err(|e| StudioError::Io(format!("cannot write {}: {e}", self.path.display())))?;
+        // The file now holds the newest format, whatever the open-time
+        // migration could not do.
+        self.migration_error = None;
         let hash = text_hash(text);
         if self.own_writes.len() == OWN_WRITE_RING {
             self.own_writes.pop_front();
