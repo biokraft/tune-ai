@@ -117,6 +117,7 @@ impl SongDoc {
     /// [`migrated_from`](Self::migrated_from) the file's version. Errors are
     /// positioned in `text` either way.
     pub fn parse(text: &str) -> Result<Self, Vec<SongError>> {
+        // The given text is parsed first so that errors carry its positions.
         let parsed = parse(text)?;
         let (migrated, migrated_from) = if parsed.version == FORMAT_VERSION {
             (None, None)
@@ -126,20 +127,22 @@ impl SongDoc {
                 Migration::Current => (None, None),
             }
         };
-        let doc = migrated
-            .as_deref()
-            .unwrap_or(text)
-            .parse::<DocumentMut>()
-            .map_err(|e| {
-                vec![SongError {
-                    line: None,
-                    column: None,
-                    message: e.message().trim_end().to_owned(),
-                }]
-            })?;
+        // The song is the one the document's own text describes, so the two
+        // agree by construction.
+        let (text, song) = match migrated.as_deref() {
+            Some(migrated) => (migrated, parse(migrated)?.song),
+            None => (text, parsed.song),
+        };
+        let doc = text.parse::<DocumentMut>().map_err(|e| {
+            vec![SongError {
+                line: None,
+                column: None,
+                message: e.message().trim_end().to_owned(),
+            }]
+        })?;
         Ok(Self {
             doc,
-            song: parsed.song,
+            song,
             migrated_from,
         })
     }
