@@ -9,7 +9,7 @@ const MINI: &str = include_str!("fixtures/mini.toml");
 const MIXED: &str = include_str!("fixtures/mixed.toml");
 const FIRST_ACID: &str = include_str!("fixtures/first-acid-v1.toml");
 const FIRST_ACID_MIXED: &str = include_str!("fixtures/first-acid-mixed.toml");
-const COMMENTED: &str = include_str!("../../tune-studio/tests/fixtures/commented.toml");
+const COMMENTED: &str = include_str!("../../tune-studio/tests/fixtures/commented-v1.toml");
 
 /// The v1 fixtures that have a committed v2 copy in `fixtures/v2/`.
 const FIXTURES: [(&str, &str); 4] = [
@@ -25,7 +25,7 @@ const SOURCES: [(&str, &str); 5] = [
     ("mixed", MIXED),
     ("first-acid-v1", FIRST_ACID),
     ("first-acid-mixed", FIRST_ACID_MIXED),
-    ("commented", COMMENTED),
+    ("commented-v1", COMMENTED),
 ];
 
 const MINI_V2: &str = r#"# Shared fixture: tune-song, tune-engine and tune-cli tests all read this file.
