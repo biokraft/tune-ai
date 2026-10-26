@@ -1,5 +1,7 @@
 //! The modules a song may use, looked up by name.
 
+use std::sync::LazyLock;
+
 use crate::builtin::{ACID303, CLAP, DISTORTION, EQ, HAT_CLOSED, HAT_OPEN, KICK, RIDE};
 use crate::descriptor::ModuleDescriptor;
 
@@ -23,24 +25,35 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// Every module in [`BUILTIN`].
-    pub fn builtin() -> Self {
-        BUILTIN.iter().fold(
-            Self {
+    /// Every module in [`BUILTIN`], built once and shared.
+    pub fn builtin() -> &'static Self {
+        static BUILTIN_REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
+            let mut registry = Registry {
                 modules: Vec::new(),
-            },
-            |registry, module| registry.with(module),
-        )
+            };
+            for module in BUILTIN {
+                registry.push(module);
+            }
+            registry
+        });
+        &BUILTIN_REGISTRY
     }
 
-    /// Adds `module` at the end.
+    /// A copy of this registry with `module` added at the end.
     ///
     /// # Panics
     ///
     /// On a duplicate name ("module `x` is already registered"), an
     /// instrument whose prefix is not its name, or a param id without
     /// `"<prefix>."`.
-    pub fn with(mut self, module: &'static ModuleDescriptor) -> Self {
+    pub fn with(&self, module: &'static ModuleDescriptor) -> Self {
+        let mut registry = self.clone();
+        registry.push(module);
+        registry
+    }
+
+    /// Adds `module` at the end, with the checks of [`with`](Self::with).
+    fn push(&mut self, module: &'static ModuleDescriptor) {
         let name = module.name;
         assert!(
             self.get(name).is_none(),
@@ -62,7 +75,6 @@ impl Registry {
             );
         }
         self.modules.push(module);
-        self
     }
 
     /// The module called `name`.

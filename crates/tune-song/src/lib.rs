@@ -27,7 +27,7 @@ pub use watch::{RawReload, Reload, SongWatcher};
 /// Parses and validates a song file against the built-in modules. On
 /// failure every problem is returned, ordered by position.
 pub fn parse_song(src: &str) -> Result<Song, Vec<SongError>> {
-    parse_song_with(src, &Registry::builtin())
+    parse_song_with(src, Registry::builtin())
 }
 
 /// Like [`parse_song`], with the modules of `registry`: an instrument or an
