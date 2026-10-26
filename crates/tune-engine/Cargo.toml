@@ -12,6 +12,7 @@ hound = "3.5"
 rtrb = "=0.3.4"
 thiserror = "2"
 tune-dsp = { path = "../tune-dsp" }
+tune-modules = { path = "../tune-modules" }
 tune-song = { path = "../tune-song" }
 
 [dev-dependencies]
