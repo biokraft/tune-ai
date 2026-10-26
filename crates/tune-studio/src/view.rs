@@ -4,7 +4,7 @@
 use indexmap::IndexMap;
 use serde::Serialize;
 use tune_dsp::{Curve, ParamSpec, STRIP_PARAMS};
-use tune_song::{Clip, ClipKind, Device, MasterMode, MixUnit, SectionPlay, Song};
+use tune_song::{Clip, ClipKind, Device, Lane, MasterMode, MixUnit, Placement, SectionPlay, Song};
 
 use crate::command::DrumHitDto;
 use crate::diff::Change;
@@ -67,7 +67,11 @@ pub struct MixView {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct TrackView {
     pub id: String,
+    /// The instrument's module name, e.g. `acid303`.
     pub instrument: String,
+    /// The instrument's device id: the module name unless the file names
+    /// another, and the prefix of its param ids.
+    pub instrument_id: String,
     /// The clip kinds the instrument plays (`"acid"`, `"drum"`).
     pub plays: Vec<String>,
     pub gain_db: f64,
@@ -79,6 +83,22 @@ pub struct TrackView {
     /// The strip params (sends and ducking), in `STRIP_PARAMS` order.
     pub strip: Vec<ParamView>,
     pub fx: Vec<FxView>,
+    /// What the track plays, in time order.
+    pub placements: Vec<PlacementView>,
+}
+
+/// One clip placed on a track.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PlacementView {
+    /// 0-based.
+    pub start_bar: u32,
+    pub bars: u32,
+    pub clip: String,
+    /// Bars into the clip at which the placement starts playing it.
+    pub offset: u32,
+    /// The first section whose `play` shows this placement (it alone plays
+    /// there, over the whole section); `None` when no section's does.
+    pub in_section: Option<usize>,
 }
 
 /// A param's spec plus its value in this song: everything a knob needs.
@@ -103,6 +123,8 @@ pub struct ParamView {
 /// One effect in a track's chain.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct FxView {
+    /// The device id, e.g. `eq` or `eq2`: the prefix of its param ids.
+    pub id: String,
     /// The fx `type`, e.g. `distortion` or `eq`.
     pub kind: String,
     /// The distortion mode; empty for an eq, which has none.
@@ -143,17 +165,23 @@ pub struct SectionView {
     /// Track id to clip id, in track order, for each track that plays one
     /// clip over the whole section.
     pub play: IndexMap<String, String>,
-    /// The lane stretches that cover exactly this section.
+    /// The lane stretches that overlap this section, in file order.
     pub lanes: Vec<LaneView>,
 }
 
-/// An automation lane: `points` are `[bar offset, normalized value]`.
+/// One automation stretch as one section shows it.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct LaneView {
     pub track: String,
     /// Full param id, e.g. `acid303.cutoff`.
     pub param: String,
+    /// `[bar offset, normalized value]`, the offsets from the section start
+    /// (below 0 or past the section for a stretch that crosses its edge).
     pub points: Vec<[f64; 2]>,
+    /// The stretch's part of the section, in bars from its start:
+    /// `0 <= from < to <= bars`.
+    pub from: f64,
+    pub to: f64,
 }
 
 /// The device setting an [`FxView`] shows as its `mode`.
@@ -172,6 +200,7 @@ impl From<&Song> for SongView {
                 .map(|(id, t)| TrackView {
                     id: id.clone(),
                     instrument: t.instrument.module.name.to_owned(),
+                    instrument_id: t.instrument.id.clone(),
                     plays: ClipKind::ALL
                         .into_iter()
                         .filter(|&k| t.instrument.module.plays(k))
@@ -184,6 +213,7 @@ impl From<&Song> for SongView {
                     params: device_param_views(&t.instrument),
                     strip: param_views(STRIP_PARAMS, &t.strip),
                     fx: t.fx.iter().map(fx_view).collect(),
+                    placements: t.play.iter().map(|p| placement_view(song, id, p)).collect(),
                 })
                 .collect(),
             patterns: song
@@ -226,19 +256,53 @@ impl From<&Song> for SongView {
                         })
                         .collect(),
                     lanes: song
-                        .automation
-                        .iter()
-                        .filter(|l| song.covers_section(i, l.span()))
-                        .map(|l| LaneView {
-                            track: l.track.clone(),
-                            param: l.param.clone(),
-                            points: l.points.iter().map(|&(b, v)| [b, v]).collect(),
-                        })
+                        .lanes_in(i)
+                        .into_iter()
+                        .map(|l| lane_view(l, start_bar, s.bars))
                         .collect(),
                 })
                 .collect(),
             mix: mix_view(song),
         }
+    }
+}
+
+/// Placement `p` of `track`, with the first section that shows it: one it
+/// overlaps where the track plays one clip over the whole section, which
+/// can then only be this placement.
+fn placement_view(song: &Song, track: &str, p: &Placement) -> PlacementView {
+    let span = p.span();
+    let in_section = song
+        .sections
+        .iter()
+        .zip(song.section_start_bars())
+        .enumerate()
+        .position(|(i, (s, start))| {
+            start < span.end
+                && span.start < start + s.bars
+                && matches!(song.section_play(i, track), SectionPlay::Clip(_))
+        });
+    PlacementView {
+        start_bar: p.start_bar,
+        bars: p.bars,
+        clip: p.clip.clone(),
+        offset: p.offset_bars,
+        in_section,
+    }
+}
+
+/// Stretch `lane` as the section starting at `start` (0-based) and `bars`
+/// long shows it: its points shifted to the section start, clipped to the
+/// section by `from` and `to`.
+fn lane_view(lane: &Lane, start: u32, bars: u32) -> LaneView {
+    let shift = f64::from(lane.start_bar) - f64::from(start);
+    let span = lane.span();
+    LaneView {
+        track: lane.track.clone(),
+        param: lane.param.clone(),
+        points: lane.points.iter().map(|&(b, v)| [b + shift, v]).collect(),
+        from: f64::from(span.start.max(start) - start),
+        to: f64::from(span.end.min(start + bars) - start),
     }
 }
 
@@ -265,6 +329,7 @@ fn fx_view(fx: &Device) -> FxView {
         .setting(MODE)
         .map_or(&[][..], |(_, spec)| spec.values);
     FxView {
+        id: fx.id.clone(),
         kind: fx.module.name.to_owned(),
         mode: fx.setting(MODE).unwrap_or_default().to_owned(),
         modes: modes.iter().map(|m| (*m).to_owned()).collect(),

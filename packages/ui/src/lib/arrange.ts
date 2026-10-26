@@ -1,9 +1,34 @@
+/** One automation stretch as one section shows it. */
+export type LaneView = {
+  track: string;
+  param: string;
+  /** `[bar offset from the section start, normalized value]`; may lie outside the section. */
+  points: [number, number][];
+  /** The stretch's part of the section, in bars from its start: `0 <= from < to <= bars`. */
+  from: number;
+  to: number;
+};
+
 export type SectionView = {
   name: string;
   start_bar: number;
   bars: number;
+  /** Track id to clip id, for each track that plays one clip over the whole section. */
   play: Record<string, string>;
-  lanes: { track: string; param: string; points: [number, number][] }[];
+  /** The stretches that overlap the section. */
+  lanes: LaneView[];
+};
+
+/** One clip placed on a track. */
+export type PlacementView = {
+  /** 0-based. */
+  start_bar: number;
+  bars: number;
+  clip: string;
+  /** Bars into the clip at which the placement starts playing it. */
+  offset: number;
+  /** The section whose `play` shows this placement, or null when none does. */
+  in_section: number | null;
 };
 
 /** Bar width when nothing is measured (jsdom, first paint). */

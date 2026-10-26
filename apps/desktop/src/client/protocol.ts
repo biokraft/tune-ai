@@ -1,7 +1,7 @@
 // Hand-written mirror of the studio wire protocol (crates/tune-studio: command.rs,
 // view.rs, studio.rs, core.rs). The golden file crates/tune-studio/tests/fixtures/protocol.json
 // pins the format for both sides; protocol.test.ts checks the names against it.
-import type { AcidStep, DrumHit, ParamSpecView, SectionView } from "@tune/ui";
+import type { AcidStep, DrumHit, ParamSpecView, PlacementView, SectionView } from "@tune/ui";
 
 // ---- Commands -------------------------------------------------------------------------------
 
@@ -92,11 +92,25 @@ export type ErrorView = { line: number | null; column: number | null; message: s
 
 export type ParamView = ParamSpecView;
 
-export type FxView = { kind: string; mode: string; modes: string[]; params: ParamView[] };
+export type FxView = {
+  /** The device id (`eq`, `eq2`): the prefix of its param ids. */
+  id: string;
+  /** The module name (`distortion`, `eq`). */
+  kind: string;
+  /** The distortion mode; empty for a device without one. */
+  mode: string;
+  modes: string[];
+  params: ParamView[];
+};
+
+export type { PlacementView };
 
 export type TrackView = {
   id: string;
+  /** The instrument's module name (`acid303`). */
   instrument: string;
+  /** The instrument's device id: the prefix of its param ids. */
+  instrument_id: string;
   /** The clip kinds the instrument plays (`"acid"`, `"drum"`). */
   plays: string[];
   gain_db: number;
@@ -107,6 +121,8 @@ export type TrackView = {
   /** The strip params (sends and ducking), in `STRIP_PARAMS` order. */
   strip: ParamView[];
   fx: FxView[];
+  /** What the track plays, in time order. */
+  placements: PlacementView[];
 };
 
 /** The `[mix]` table: the master stage, the duck source and the shared buses. */
