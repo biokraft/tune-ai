@@ -15,7 +15,9 @@ pub enum Command {
     ListSongs,
     /// The current [`StudioState`](crate::StudioState), as the call's
     /// result. Changes nothing; a client calls it right after subscribing,
-    /// in case it missed the first `state` event.
+    /// in case it missed the first `state` event. For the same reason, a
+    /// migration the studio could not save is reported again, as an `error`
+    /// event.
     GetState,
     OpenSong {
         path: String,
