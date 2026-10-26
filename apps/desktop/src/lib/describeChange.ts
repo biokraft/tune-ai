@@ -80,6 +80,10 @@ export function describeChange(c: Change, song: SongView | null): string {
       case "lanes":
         return `${name} automation`;
       default:
+        // Placements that are not one clip over the section have no short form.
+        if (Array.isArray(c.old) || Array.isArray(c.new)) {
+          return `Changed what ${section[3]} plays in ${name}`;
+        }
         return `${name} ${section[3]} ${span(c.old, c.new)}`;
     }
   }
@@ -97,7 +101,11 @@ export function describeChange(c: Change, song: SongView | null): string {
   const track = TRACK.exec(c.path);
   if (track) {
     const [, t, rest] = track as unknown as [string, string, string | undefined];
-    if (rest === undefined) return c.old === null ? `Track ${t} added` : `Track ${t} removed`;
+    if (rest === undefined) {
+      if (c.old === null) return `Track ${t} added`;
+      if (c.new === null) return `Track ${t} removed`;
+      return `Changed the devices on ${t}`;
+    }
     switch (rest) {
       case "gain_db":
         return `${t} gain ${span(c.old, c.new, "dB")}`;
