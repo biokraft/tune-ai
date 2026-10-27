@@ -791,3 +791,285 @@ fn a_stretch_moved_again_is_kept_with_its_original() {
     assert_eq!(s.value("automation.acid.acid303.cutoff"), left);
     assert_eq!(left, json!([stretch(2)]));
 }
+
+// ----- review round 1: list items and containers someone else touched -----
+
+fn kept_item(t: &str, item: Value, by: Option<Source>) -> KeptTarget {
+    KeptTarget {
+        item: Some(item),
+        ..kept(t, by)
+    }
+}
+
+fn lane_stretch(at: u32, bars: u32, points: Value) -> Value {
+    json!({ "at": at, "bars": bars, "points": points })
+}
+
+/// p1: the producer's ⌘Z then ⌘⇧Z re-did the run's placement: it is the
+/// producer's now and stays.
+#[test]
+fn a_placement_the_producer_redid_is_kept() {
+    let mut s = open();
+    s.agent("r1", &[place("acid", "a1", 1, 1)]);
+    s.core.undo(Source::Human).unwrap();
+    s.core.redo(Source::Human).unwrap();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept,
+        vec![kept_item(
+            "tracks.acid.play",
+            placement(1, "a1", 1),
+            Some(Source::Human)
+        )]
+    );
+    assert_eq!(
+        s.value("tracks.acid.play"),
+        json!([placement(1, "a1", 1), placement(3, "a1", 2)])
+    );
+}
+
+/// p1b: the same for a value.
+#[test]
+fn a_value_the_producer_redid_is_kept() {
+    let mut s = open();
+    s.agent("r1", &[cutoff(820.0)]);
+    s.core.undo(Source::Human).unwrap();
+    s.core.redo(Source::Human).unwrap();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept,
+        vec![kept("tracks.acid.acid303.cutoff", Some(Source::Human))]
+    );
+    assert_eq!(s.value("tracks.acid.acid303.cutoff"), json!(820));
+}
+
+/// p2: the producer's ⌘Z then ⌘⇧Z re-did the run's removal: the placement
+/// does not come back.
+#[test]
+fn a_removal_the_producer_redid_is_kept() {
+    let mut s = open();
+    s.agent(
+        "r1",
+        &[Action::RemovePlacement {
+            track: "kick".into(),
+            at: 3,
+        }],
+    );
+    s.core.undo(Source::Human).unwrap();
+    s.core.redo(Source::Human).unwrap();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept,
+        vec![kept_item(
+            "tracks.kick.play",
+            placement(3, "k4", 2),
+            Some(Source::Human)
+        )]
+    );
+    assert_eq!(s.value("tracks.kick.play"), json!([placement(1, "k4", 2)]));
+}
+
+/// p3: the producer removed the run's placement and placed an identical
+/// one: that one is the producer's and stays.
+#[test]
+fn an_identical_placement_the_producer_made_is_kept() {
+    let mut s = open();
+    s.agent("r1", &[place("acid", "a1", 1, 1)]);
+    s.human(Action::RemovePlacement {
+        track: "acid".into(),
+        at: 1,
+    });
+    s.human(place("acid", "a1", 1, 1));
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept,
+        vec![kept_item(
+            "tracks.acid.play",
+            placement(1, "a1", 1),
+            Some(Source::Human)
+        )]
+    );
+    assert_eq!(
+        s.value("tracks.acid.play"),
+        json!([placement(1, "a1", 1), placement(3, "a1", 2)])
+    );
+}
+
+/// p3b: the producer put the removed placement back and removed it again:
+/// it stays removed.
+#[test]
+fn a_placement_the_producer_removed_again_stays_removed() {
+    let mut s = open();
+    let remove = Action::RemovePlacement {
+        track: "kick".into(),
+        at: 3,
+    };
+    s.agent("r1", std::slice::from_ref(&remove));
+    s.human(place("kick", "k4", 3, 2));
+    s.human(remove);
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept,
+        vec![kept_item(
+            "tracks.kick.play",
+            placement(3, "k4", 2),
+            Some(Source::Human)
+        )]
+    );
+    assert_eq!(s.value("tracks.kick.play"), json!([placement(1, "k4", 2)]));
+}
+
+/// p4: the producer's section edit moved every bar: a removed placement
+/// would come back at a bar that now means something else.
+#[test]
+fn a_removed_placement_is_kept_after_the_sections_changed() {
+    let mut s = open();
+    s.agent(
+        "r1",
+        &[Action::RemovePlacement {
+            track: "kick".into(),
+            at: 3,
+        }],
+    );
+    s.human(Action::AddSection {
+        name: "intro".into(),
+        bars: 4,
+        index: Some(0),
+    });
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept,
+        vec![kept_item(
+            "tracks.kick.play",
+            placement(3, "k4", 2),
+            Some(Source::Human)
+        )]
+    );
+    assert_eq!(s.text(), text);
+}
+
+/// p6: the producer made a new track under the removed one's name: the
+/// old track's lane stays away from it.
+#[test]
+fn a_track_the_producer_made_again_gets_no_old_lanes() {
+    let mut s = open();
+    s.agent(
+        "r1",
+        &[Action::RemoveTrack {
+            track: "acid".into(),
+        }],
+    );
+    s.human(Action::AddTrack {
+        track: "acid".into(),
+        instrument: "acid303".into(),
+    });
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let lane = lane_stretch(3, 2, json!([[0, 0.1], [2, 0.8]]));
+    assert_eq!(
+        u.kept,
+        vec![
+            kept_item("automation.acid.acid303.cutoff", lane, Some(Source::Human)),
+            kept("tracks.acid", Some(Source::Human)),
+        ]
+    );
+    assert_eq!(s.text(), text);
+}
+
+/// p7: the producer made a new clip under the removed one's name: the old
+/// clip's placements do not come back to play it.
+#[test]
+fn a_clip_the_producer_made_again_gets_no_old_placements() {
+    let mut s = open();
+    s.agent("r1", &[Action::RemoveClip { clip: "a1".into() }]);
+    s.human(Action::AddClip {
+        clip: "a1".into(),
+        kind: "acid".into(),
+        steps: Some("C3 . . .".into()),
+        bars: None,
+        notes: None,
+    });
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept,
+        vec![
+            kept_item(
+                "tracks.acid.play",
+                placement(3, "a1", 2),
+                Some(Source::Human)
+            ),
+            kept("clips.a1", Some(Source::Human)),
+        ]
+    );
+    assert_eq!(s.text(), text);
+}
+
+/// p8: the studio was reopened between the run's edits: the log still
+/// holds the whole run.
+#[test]
+fn a_run_spanning_a_reopen_reverts() {
+    let mut s = open();
+    s.agent("r1", &[cutoff(820.0)]);
+    s.core = StudioCore::open(&s.path).unwrap();
+    s.agent("r1", &[set("song.bpm", json!(130))]);
+    let u = s.undo_run("r1");
+    assert_eq!(
+        u.reverted,
+        reverted(&["song.bpm", "tracks.acid.acid303.cutoff"])
+    );
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(target_changes(&fixture_song(), s.core.song()), vec![]);
+}
+
+/// p9: the producer added an effect under the removed one's id: the old
+/// effect's lane stays away from it.
+#[test]
+fn an_effect_the_producer_made_again_gets_no_old_lanes() {
+    let mut s = open();
+    let points = vec![[0.0, 0.2], [2.0, 0.6]];
+    s.human(Action::AddLane {
+        param: "acid.dist.drive".into(),
+        at: 1,
+        bars: 2,
+        points,
+    });
+    s.agent(
+        "r1",
+        &[Action::RemoveEffect {
+            track: "acid".into(),
+            device: "dist".into(),
+        }],
+    );
+    s.human(Action::AddEffect {
+        track: "acid".into(),
+        module: "distortion".into(),
+        id: None,
+        index: None,
+    });
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let lane = lane_stretch(1, 2, json!([[0, 0.2], [2, 0.6]]));
+    assert_eq!(
+        u.kept,
+        vec![kept_item(
+            "automation.acid.dist.drive",
+            lane,
+            Some(Source::Human)
+        )]
+    );
+    // The chain holds `dist` again, as before the run (its params are
+    // targets of their own): nothing to do there.
+    assert_eq!(u.already, vec![target("tracks.acid.fx")]);
+    assert_eq!(s.text(), text);
+}
