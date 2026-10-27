@@ -627,6 +627,43 @@ fn old_logs_read_unchanged() {
     assert_eq!(log.read_records().unwrap(), vec![record]);
 }
 
+/// A line that says it is an action record but does not read as one is an
+/// error naming its line (1-based, blank lines counted), never skipped: a
+/// run undo that missed a record would undo part of the run unnoticed.
+#[test]
+fn a_damaged_record_is_an_error() {
+    let s = song();
+    let file = s.path.with_file_name("edits.jsonl");
+    let entry = r#"{"ts":"2026-10-21T22:15:01.000Z","source":"human","path":"song.bpm","old":120,"new":121}"#;
+    let damaged = r#"{"ts":"2026-10-27T10:00:01.000Z","source":"claude","record":"action","actions":["set_value"],"run":"r1"}"#;
+    // Not JSON, or another kind of record: skipped as before.
+    let other = r#"{"ts":"2026-10-27T10:00:02.000Z","source":"claude","record":"note"}"#;
+    let text = [entry, "", PINNED, "not json", other, damaged, entry].join("\n");
+    fs::write(&file, text + "\n").unwrap();
+    let log = EditLog::for_song(&s.path);
+    let err = log.read_records().unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "the edit log has a damaged record at line 6"
+    );
+    // Entries read as before.
+    assert_eq!(log.read_since(None).unwrap().len(), 2);
+
+    // A record cut off mid-line is damaged too.
+    let cut = &PINNED[..PINNED.len() / 2];
+    fs::write(&file, [entry, cut].join("\n")).unwrap();
+    let err = log.read_records().unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "the edit log has a damaged record at line 2"
+    );
+
+    // Without the damaged line, the good record reads.
+    let text = [entry, "", PINNED, "not json", other, entry].join("\n");
+    fs::write(&file, text).unwrap();
+    assert_eq!(log.read_records().unwrap(), vec![pinned_record()]);
+}
+
 const PINNED: &str = r#"{"ts":"2026-10-27T10:00:00.000Z","source":"claude","record":"action","actions":["set_value"],"run":"r1","run_title":"open the filter","targets":[{"target":"tracks.acid.acid303.cutoff","old":500,"new":820}],"file_hash":"…"}"#;
 
 fn pinned_record() -> ActionRecord {

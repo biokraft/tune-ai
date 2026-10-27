@@ -229,13 +229,36 @@ impl EditLog {
     }
 
     /// Every action record, in file order; lines that are not records are
-    /// skipped.
+    /// skipped. A line that says `"record": "action"` but does not read as
+    /// one is an [`io::ErrorKind::InvalidData`] error naming its line
+    /// (1-based), so a run undo never misses a record unnoticed.
     pub fn read_records(&self) -> io::Result<Vec<ActionRecord>> {
-        Ok(self
-            .read_lines()?
-            .iter()
-            .filter_map(|l| serde_json::from_str::<ActionRecord>(l).ok())
-            .collect())
+        let text = match fs::read(&self.file) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let mut records = Vec::new();
+        for (i, line) in text.lines().enumerate() {
+            let damaged = || {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("the edit log has a damaged record at line {}", i + 1),
+                )
+            };
+            let Ok(value) = serde_json::from_str::<Value>(line) else {
+                // A cut-off record line still says what it is.
+                if line.contains(r#""record":"action""#) {
+                    return Err(damaged());
+                }
+                continue;
+            };
+            if value.get("record").and_then(Value::as_str) != Some("action") {
+                continue;
+            }
+            records.push(serde_json::from_value(value).map_err(|_| damaged())?);
+        }
+        Ok(records)
     }
 
     /// Entries with `ts > since` (all when `None`), oldest first. Lines that
