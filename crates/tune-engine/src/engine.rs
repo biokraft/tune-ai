@@ -740,7 +740,11 @@ impl Engine {
     ///   [`Effect::copy_state_to`]), with no events, lanes or overrides; an
     ///   added track fades in and a removed one fades out. A track with a
     ///   kept device that cannot copy its state switches at once. Value,
-    ///   step and clip edits switch at the step, as before;
+    ///   step and clip edits switch at the step, as before. The fade covers
+    ///   the instrument and fx chain only: the blend feeds the track's
+    ///   strip, so a structural swap that also changes the track's gain,
+    ///   pan or a send (or its duck, mute or solo) switches those at once,
+    ///   as a value swap does, and the old path plays at the new values;
     /// - the retired update, which holds the old paths, comes back from
     ///   [`take_retired_swap`](Self::take_retired_swap) only once the fade
     ///   is over, so the next swap waits for it;
