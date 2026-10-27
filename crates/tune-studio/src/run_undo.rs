@@ -306,9 +306,9 @@ pub fn undo_run(
     Ok(out)
 }
 
-/// For a part of a track (a lane param's stretches) outside the unit of
-/// the run's plan of that whole track: `Some` with its `by` when that
-/// plan is kept. A track the run removed that someone made again (by hand
+/// For a part of a track (a lane param's stretches, its slot in a scene)
+/// outside the unit of the run's plan of that whole track: `Some` with its
+/// `by` when that plan is kept. A track the run removed that someone made again (by hand
 /// too) is kept, and what the run took with it must not come back onto
 /// theirs. The track's plan is decided now: the reverts before its turn
 /// (its parts, in the same write) do not change its value.
@@ -320,7 +320,9 @@ fn track_kept(
     records: &[ActionRecord],
     run: &str,
 ) -> Option<Option<Source>> {
-    let Target::Lanes { track, .. } = &p.target else {
+    let (Target::Lanes { track, .. } | Target::Value(SongPath::SceneSlot { track, .. })) =
+        &p.target
+    else {
         return None;
     };
     let k = plans

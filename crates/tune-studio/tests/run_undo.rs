@@ -2494,3 +2494,37 @@ fn a_scene_shifted_by_a_scene_added_above_is_kept() {
     assert_eq!(s.text(), text);
     assert_eq!(s.scenes(), ["intro", "drop", "break"]);
 }
+
+// ----- review round 3: scenes -----
+
+/// M1 (p19): with the studio closed, the run removed a track and the
+/// producer made a track under its id by hand, with a new scene slotting
+/// it. The run's old slot does not come back onto their track.
+#[test]
+fn a_removed_tracks_slot_stays_off_a_track_made_by_hand() {
+    let f = closed_on(SESSION);
+    f.agent(
+        "r1",
+        &[Action::RemoveTrack {
+            track: "acid".into(),
+        }],
+    );
+    f.hand(
+        "[clips.k4]",
+        "[tracks.acid]\ninstrument = \"acid303\"\n\n[clips.k4]",
+    );
+    f.hand(
+        "[[sections]]",
+        "[scenes.jam]\nslots = { acid = \"a1\" }\n\n[[sections]]",
+    );
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let names = kept_targets(&u, None);
+    for t in ["scenes.groove.slots.acid", "tracks.acid"] {
+        assert!(names.contains(&t.to_owned()), "{t}: {names:?}");
+    }
+    assert_eq!(f.text(), text);
+    assert_eq!(f.value("scenes.groove.slots.acid"), Value::Null);
+    assert_eq!(f.value("scenes.jam.slots.acid"), json!("a1"));
+}

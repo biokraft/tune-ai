@@ -414,8 +414,9 @@ The producer may have the studio (app or browser) open on the same song.
   back where it sits now, its comments kept. Scenes go back one at a time
   too: a slot (`scenes.<s>.slots.<t>`) is kept when someone since changed
   it or its scene, or made, removed or rebuilt its track or a clip it
-  named (a scene the producer removed does not come back for it, and a
-  track or clip they made again gets no old slot); a scene the run added
+  named, or its whole track is kept (a scene the producer removed does not
+  come back for it, and a track they made again, by hand too, or a clip
+  they made again gets no old slot); a scene the run added
   or removed (`scenes.<s>`, with the slots the run set in a scene it
   added) is kept when someone since changed it or any slot in it, moved
   any scene, or made, removed or rebuilt a track or clip its slots name,
