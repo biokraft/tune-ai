@@ -389,3 +389,55 @@ fn set_mix_errors() {
     let e = String::from_utf8_lossy(&out.stderr);
     assert!(e.contains("unknown master mode"), "{e}");
 }
+
+#[test]
+fn set_clip_notes_from_the_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let song = dir.path().join("song.toml");
+    fs::write(
+        &song,
+        r#"[song]
+version = 2
+name = "notes"
+bpm = 120
+
+[tracks.acid]
+instrument = "acid303"
+play = [{ at = 1, clip = "lead", bars = 1 }]
+
+[clips.lead]
+kind = "notes"
+bars = 1
+notes = [
+  { start = 0, pitch = "C3", len = 3 },
+  { start = 2.5, pitch = "D#3", len = 2, vel = 120 },
+]
+
+[[sections]]
+name = "a"
+bars = 1
+"#,
+    )
+    .unwrap();
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "clips.lead.notes=[{ start = 0, pitch = \"C3\", len = 2 }]",
+        "--json",
+    ]));
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["changes"][0]["path"], "clips.lead.notes");
+    let text = fs::read_to_string(&song).unwrap();
+    assert!(
+        text.contains("notes = [{ start = 0, pitch = \"C3\", len = 2 }]"),
+        "{text}"
+    );
+    let v = json_out(tune().args(["changes", song.to_str().unwrap(), "--json"]));
+    let entries = v["changes"].as_array().unwrap();
+    assert!(
+        entries
+            .iter()
+            .any(|e| e["path"] == "clips.lead.notes" && e["source"] == "claude"),
+        "{v}"
+    );
+}

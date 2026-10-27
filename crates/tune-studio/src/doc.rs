@@ -22,9 +22,9 @@ use tune_song::toml_doc::{
     Slot, element_mut, inline_element, normalize_positions, root_child, walk, walk_mut,
 };
 use tune_song::{
-    ArrangeError, Arranged, Device, FORMAT_VERSION, MIX_TRACK_ID, Migration, Placement, Registry,
-    SectionPlay, SettingSpec, Song, SongError, Track, find_mix_param, migrate, parse,
-    section_bars_error,
+    ArrangeError, Arranged, Clip, Device, FORMAT_VERSION, MIX_TRACK_ID, Migration, Note, Placement,
+    Registry, SectionPlay, SettingSpec, Song, SongError, TICKS_PER_STEP, Track, find_mix_param,
+    migrate, parse, pitch_name, section_bars_error,
 };
 
 use crate::path::{SongPath, TrackField};
@@ -358,8 +358,20 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
                     .collect();
             json!({ "instrument": t.instrument.module.name, "fx": fx })
         }
-        // A notes clip has no step notation: it has no value at this path.
-        SongPath::Clip { clip } => Value::from(song.clips.get(clip)?.steps_text()?),
+        // A notes clip has no step notation: its value here is `null`.
+        SongPath::Clip { clip } => song
+            .clips
+            .get(clip)?
+            .steps_text()
+            .map_or(Value::Null, Value::from),
+        SongPath::ClipNotes { clip } => match song.clips.get(clip)? {
+            Clip::Notes(n) => Value::Array(n.notes.iter().map(note_json).collect()),
+            _ => Value::Null,
+        },
+        SongPath::ClipBars { clip } => match song.clips.get(clip)? {
+            Clip::Notes(n) => Value::from(n.bars),
+            _ => Value::Null,
+        },
         SongPath::SectionBars(i) => Value::from(song.sections.get(*i)?.bars),
         SongPath::SectionName(i) => Value::from(song.sections.get(*i)?.name.clone()),
         SongPath::SectionPlay { section, track } => {
@@ -401,6 +413,18 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
                 .map(|s| Value::from(format!("{}:{}", s.name, s.bars)))
                 .collect(),
         ),
+    })
+}
+
+/// A note as JSON: `{"start", "pitch", "len", "vel"}`, `start` and `len` in
+/// 16th steps, `pitch` a note name.
+fn note_json(n: &Note) -> Value {
+    let steps = |ticks: u32| num(f64::from(ticks) / f64::from(TICKS_PER_STEP));
+    json!({
+        "start": steps(n.start),
+        "pitch": pitch_name(n.pitch),
+        "len": steps(n.len),
+        "vel": n.velocity,
     })
 }
 
@@ -607,14 +631,44 @@ fn apply(
             _ => return Err(bad("expected a track id or null")),
         },
         SongPath::Clip { clip } => {
-            if !song.clips.contains_key(clip) {
-                return Err(missing());
+            let existing = song.clips.get(clip).ok_or_else(missing)?;
+            if matches!(existing, Clip::Notes(_)) {
+                return Err(bad(&format!(
+                    "clip `{clip}` is a notes clip: it has no steps (set clips.{clip}.notes)"
+                )));
             }
             let v = toml_edit::Value::from(string()?);
             root_child(doc, "clips")
                 .and_then(|c| c.child(clip))
                 .ok_or_else(missing)?
                 .put("steps", v);
+        }
+        SongPath::ClipNotes { clip } | SongPath::ClipBars { clip } => {
+            let existing = song.clips.get(clip).ok_or_else(missing)?;
+            let field = if matches!(path, SongPath::ClipNotes { .. }) {
+                "notes"
+            } else {
+                "bars"
+            };
+            if !matches!(existing, Clip::Notes(_)) {
+                let kind = existing.kind().name();
+                let article = if kind == "acid" { "an" } else { "a" };
+                return Err(bad(&format!(
+                    "clip `{clip}` is {article} {kind} clip: it has no {field}"
+                )));
+            }
+            let v = if field == "notes" {
+                notes_value(value).map_err(|m| bad(&m))?
+            } else {
+                let bars = number()?;
+                as_integer(bars)
+                    .map(toml_edit::Value::from)
+                    .ok_or_else(|| bad("bars must be a whole number"))?
+            };
+            root_child(doc, "clips")
+                .and_then(|c| c.child(clip))
+                .ok_or_else(missing)?
+                .put(field, v);
         }
         SongPath::SectionName(i) => {
             if *i >= song.sections.len() {
@@ -634,6 +688,55 @@ fn apply(
         }
     }
     Ok(())
+}
+
+/// The TOML array for a `clips.<c>.notes` value, laid out as
+/// [`notes_toml`](tune_song::notes_toml) lays notes out: `[]`, one note
+/// inline, or one note per line with a trailing comma. Numbers are written
+/// as given; the commit's validation judges them.
+fn notes_value(value: &Value) -> Result<toml_edit::Value, String> {
+    let notes = value
+        .as_array()
+        .ok_or("expected an array of notes, each {start, pitch, len, vel}")?;
+    let entries = notes
+        .iter()
+        .map(|note| {
+            let object = note.as_object().ok_or("expected an array of notes")?;
+            if let Some(key) = object
+                .keys()
+                .find(|k| !["start", "pitch", "len", "vel"].contains(&k.as_str()))
+            {
+                return Err(format!("a note has start, pitch, len and vel, not `{key}`"));
+            }
+            let mut parts = Vec::new();
+            for key in ["start", "pitch", "len", "vel"] {
+                let Some(v) = object.get(key) else { continue };
+                let text = if key == "pitch" {
+                    let name = v.as_str().ok_or_else(|| {
+                        "a note's pitch must be a note name, e.g. \"C3\"".to_owned()
+                    })?;
+                    toml_edit::Value::from(name).to_string()
+                } else {
+                    let n = v
+                        .as_f64()
+                        .ok_or_else(|| format!("a note's {key} must be a number"))?;
+                    toml_number(n).to_string()
+                };
+                parts.push(format!("{key} = {}", text.trim()));
+            }
+            Ok(format!("{{ {} }}", parts.join(", ")))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let text = match entries.as_slice() {
+        [] => "[]".to_owned(),
+        [one] => format!("[{one}]"),
+        many => format!(
+            "[\n{}]",
+            many.iter().map(|e| format!("  {e},\n")).collect::<String>()
+        ),
+    };
+    text.parse::<toml_edit::Value>()
+        .map_err(|e| format!("the notes do not make valid TOML: {e}"))
 }
 
 /// A TOML number, exact integers as integers.

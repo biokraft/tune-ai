@@ -62,7 +62,12 @@ fn from_toml(v: &toml_edit::Value) -> Option<Value> {
         T::Float(f) => serde_json::Number::from_f64(*f.value())?.into(),
         T::Boolean(b) => Value::Bool(*b.value()),
         T::Array(a) => Value::Array(a.iter().map(from_toml).collect::<Option<_>>()?),
-        T::Datetime(_) | T::InlineTable(_) => return None,
+        T::InlineTable(t) => Value::Object(
+            t.iter()
+                .map(|(k, v)| Some((k.to_owned(), from_toml(v)?)))
+                .collect::<Option<_>>()?,
+        ),
+        T::Datetime(_) => return None,
     })
 }
 
