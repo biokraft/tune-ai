@@ -3,9 +3,10 @@
 
 use tune_dsp::DrumPattern;
 use tune_song::{
-    Clip, EditOpError, LaneOrigin, Registry, Song, add_clip, add_effect, add_track,
-    clip_table_toml, duplicate_clip, move_effect, parse_song, remove_clip, remove_effect,
-    remove_track, rename_clip, rename_device, rename_track, set_instrument, track_table_toml,
+    Clip, EditOpError, LaneOrigin, Placement, Registry, Song, add_clip, add_effect, add_placement,
+    add_track, clip_table_toml, duplicate_clip, move_effect, move_placement, parse_song,
+    remove_clip, remove_effect, remove_placement, remove_track, rename_clip, rename_device,
+    rename_track, resize_placement, set_instrument, track_table_toml,
 };
 
 const SONG: &str = r#"
@@ -602,4 +603,111 @@ fn clip_tables_are_written_as_to_toml_writes_them() {
     for (id, clip) in &s.clips {
         assert!(whole.contains(&clip_table_toml(id, clip)), "{id}");
     }
+}
+
+const PLACED: &str = r#"
+[song]
+version = 2
+name = "t"
+bpm = 120
+
+[tracks.kick]
+instrument = "kick"
+play = [{ at = 1, clip = "k4", bars = 2 }, { at = 5, clip = "k4", bars = 2 }]
+
+[clips.k4]
+kind = "drum"
+steps = "x...x...x...X..."
+
+[[sections]]
+name = "a"
+bars = 8
+"#;
+
+fn placed() -> Song {
+    parse_song(PLACED).expect("the song parses")
+}
+
+/// A track's placements as `(0-based start bar, bars, offset)`.
+fn spans(song: &Song, track: &str) -> Vec<(u32, u32, u32)> {
+    song.tracks[track]
+        .play
+        .iter()
+        .map(|p| (p.start_bar, p.bars, p.offset_bars))
+        .collect()
+}
+
+fn placement(start_bar: u32, bars: u32) -> Placement {
+    Placement {
+        start_bar,
+        bars,
+        clip: "k4".into(),
+        offset_bars: 0,
+    }
+}
+
+#[test]
+fn a_placement_goes_in_by_time() {
+    let s = placed();
+    let edited = add_placement(&s, "kick", placement(3, 1)).unwrap();
+    let song = &edited.arranged.song;
+    assert_eq!(spans(song, "kick"), [(0, 2, 0), (3, 1, 0), (4, 2, 0)]);
+    assert_eq!(edited.removed, Default::default());
+    assert_eq!(edited.arranged.lanes.len(), s.automation.len());
+    // A tie goes after the placement already there (the validator then
+    // reports the overlap at the new one).
+    let tie = add_placement(&s, "kick", placement(0, 1)).unwrap();
+    assert_eq!(
+        spans(&tie.arranged.song, "kick"),
+        [(0, 2, 0), (0, 1, 0), (4, 2, 0)]
+    );
+    assert_eq!(
+        add_placement(&s, "bass", placement(0, 1)).unwrap_err(),
+        EditOpError::NoSuchTrack("bass".into())
+    );
+}
+
+#[test]
+fn a_placement_moves_and_resizes_by_its_start() {
+    let s = placed();
+    let moved = move_placement(&s, "kick", 4, 2).unwrap();
+    assert_eq!(spans(&moved.arranged.song, "kick"), [(0, 2, 0), (2, 2, 0)]);
+    // Past the other one: the list stays in time order.
+    let moved = move_placement(&s, "kick", 0, 6).unwrap();
+    let play = &moved.arranged.song.tracks["kick"].play;
+    assert_eq!(play.iter().map(|p| p.start_bar).collect::<Vec<_>>(), [4, 6]);
+    let resized = resize_placement(&s, "kick", 4, 1).unwrap();
+    assert_eq!(
+        spans(&resized.arranged.song, "kick"),
+        [(0, 2, 0), (4, 1, 0)]
+    );
+    // A move to where it is changes nothing.
+    assert_eq!(move_placement(&s, "kick", 4, 4).unwrap().arranged.song, s);
+}
+
+#[test]
+fn removing_a_placement_lists_it() {
+    let s = placed();
+    let edited = remove_placement(&s, "kick", 4).unwrap();
+    assert_eq!(spans(&edited.arranged.song, "kick"), [(0, 2, 0)]);
+    assert_eq!(
+        edited.removed.placements,
+        [("kick".to_owned(), placement(4, 2))]
+    );
+}
+
+#[test]
+fn a_missing_placement_is_named_one_based() {
+    let s = placed();
+    for err in [
+        move_placement(&s, "kick", 1, 2).unwrap_err(),
+        resize_placement(&s, "kick", 1, 2).unwrap_err(),
+        remove_placement(&s, "kick", 1).unwrap_err(),
+    ] {
+        assert_eq!(err.to_string(), "track `kick` has no placement at bar 2");
+    }
+    assert_eq!(
+        remove_placement(&s, "bass", 0).unwrap_err(),
+        EditOpError::NoSuchTrack("bass".into())
+    );
 }
