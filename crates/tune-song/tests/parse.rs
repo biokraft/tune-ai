@@ -942,5 +942,8 @@ fn patterns_become_clips_with_kinds() {
     assert_eq!(ids, ["k4", "a1", "h"]);
     let kinds: Vec<ClipKind> = song.clips.values().map(Clip::kind).collect();
     assert_eq!(kinds, [ClipKind::Drum, ClipKind::Acid, ClipKind::Drum]);
-    assert_eq!(song.clips["k4"].steps_text(), "x... x... x... X...");
+    assert_eq!(
+        song.clips["k4"].steps_text().as_deref(),
+        Some("x... x... x... X...")
+    );
 }

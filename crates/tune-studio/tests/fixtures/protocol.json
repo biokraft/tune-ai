@@ -142,7 +142,8 @@
             "instrument": "kick",
             "instrument_id": "kick",
             "plays": [
-              "drum"
+              "drum",
+              "notes"
             ],
             "gain_db": -3.0,
             "pan": 0.0,
@@ -283,7 +284,8 @@
             "instrument": "acid303",
             "instrument_id": "acid303",
             "plays": [
-              "acid"
+              "acid",
+              "notes"
             ],
             "gain_db": 0.0,
             "pan": 0.0,
@@ -514,7 +516,8 @@
             "instrument": "hat_closed",
             "instrument_id": "hat_closed",
             "plays": [
-              "drum"
+              "drum",
+              "notes"
             ],
             "gain_db": -10.0,
             "pan": 0.3,

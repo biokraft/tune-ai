@@ -723,7 +723,9 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
             };
             let mut steps = match pattern_steps(doc, &path, pattern)? {
                 Clip::Acid(p) => p.steps().to_vec(),
-                Clip::Drum(_) => return Err(bad(&path, "not an acid pattern").into()),
+                Clip::Drum(_) | Clip::Notes(_) => {
+                    return Err(bad(&path, "not an acid pattern").into());
+                }
             };
             let step = step_mut(&mut steps, *index)?;
             *step = AcidStep {
@@ -744,7 +746,9 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
             };
             let mut hits = match pattern_steps(doc, &path, pattern)? {
                 Clip::Drum(p) => p.hits().to_vec(),
-                Clip::Acid(_) => return Err(bad(&path, "not a drum pattern").into()),
+                Clip::Acid(_) | Clip::Notes(_) => {
+                    return Err(bad(&path, "not a drum pattern").into());
+                }
             };
             *step_mut(&mut hits, *index)? = (*hit).into();
             let p = DrumPattern::new(hits).map_err(|e| bad(&path, &e.to_string()))?;

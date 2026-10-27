@@ -50,6 +50,12 @@ fn every_builtin_param_id_carries_its_prefix() {
 
 #[test]
 fn clip_kinds_and_duck_default() {
+    let names: Vec<_> = ClipKind::ALL.iter().map(|k| k.name()).collect();
+    assert_eq!(names, ["acid", "drum", "notes"]);
+    for m in BUILTIN.iter().filter(|m| m.is_instrument()) {
+        assert!(m.plays(ClipKind::Notes), "{m:?}");
+    }
+    assert!(!DISTORTION.plays(ClipKind::Notes));
     assert!(ACID303.plays(ClipKind::Acid) && !ACID303.plays(ClipKind::Drum));
     for m in [&KICK, &CLAP, &HAT_CLOSED, &HAT_OPEN, &RIDE] {
         assert!(m.plays(ClipKind::Drum) && !m.plays(ClipKind::Acid), "{m:?}");

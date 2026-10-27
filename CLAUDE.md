@@ -64,8 +64,33 @@ Notation:
 - Drum pattern: `x` hit, `X` accent, `.` rest, e.g. `x...x...x...X...`.
 - Song format v2 (`version = 2` in `[song]`; a file without it is v1). Bars
   are 1-based and ranges inclusive in CLI flags.
-- Clips: `[clips.<id>]` with `kind = "acid" | "drum"` and `steps`. An acid
-  clip plays on an instrument that plays acid, a drum clip on a drum module.
+- Clips: `[clips.<id>]` with `kind = "acid" | "drum" | "notes"`. An acid or
+  drum clip has `steps`; an acid clip plays on an instrument that plays acid,
+  a drum clip on a drum module.
+- Note clips: `kind = "notes"` with `bars` (1 to 64) and optional `notes`; any
+  instrument plays them. They are timed notes, not steps:
+
+  ```toml
+  [clips.lead]
+  kind = "notes"
+  bars = 1
+  notes = [
+    { start = 0, pitch = "C3", len = 3 },               # start and len in 16th steps
+    { start = 0.333, pitch = "G3", len = 0.5 },         # 0.333 reads as a third of a step
+    { start = 2.5, pitch = "D#3", len = 2, vel = 120 }, # vel 1 to 127, default 100
+  ]
+  ```
+
+  Positions sit on a grid of 24 ticks per 16th step: a value within 0.001
+  step of a multiple of 1/24 is that multiple, anything else (`0.3`) is an
+  error. `start >= 0`, `len > 0`, and a note may not end past the clip
+  (`16 * bars` steps). Keep the notes in time order (`start` never
+  decreases); overlaps and chords are fine. `pitch` is a note name as in an
+  acid pattern, without `!` or `~` (`C3` = MIDI 48, `Bb1`, `C-1` to `G9`).
+  A note with `vel` 110 or more is accented. A notes clip has no `steps`; an
+  acid or drum clip has no `bars` or `notes`. The song file only holds them
+  for now: the engine does not play them yet and the studio shows no
+  editor.
 - Placements: the track's `play = [{ at, clip, bars, offset }]`. `at` is the
   1-based start bar, `offset` the bars into the clip (default 0); `at`,
   `bars` and `offset` are whole numbers. Keep them in time order and never

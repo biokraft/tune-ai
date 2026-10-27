@@ -14,7 +14,9 @@ use tune_modules::{DRUM_PITCH, Effect, EventCtx, Instrument, NoteEvent, NoteId};
 use tune_song::lane_value;
 
 use crate::clock::hit_seed;
-use crate::compile::{Cell, CompiledDevice, CompiledSong, CompiledTrack, MIX_TRACK, ParamTarget};
+use crate::compile::{
+    Cell, CompiledClip, CompiledDevice, CompiledSong, CompiledTrack, MIX_TRACK, ParamTarget,
+};
 use crate::live::SongUpdate;
 use crate::mixer::{Meter, MixRuntime, Strip};
 
@@ -906,9 +908,14 @@ fn cell_at(song: &CompiledSong, region: usize, t: usize, step: u64) -> &Cell {
     match song.regions[region].cells[t] {
         None => &REST,
         Some(source) => {
-            let clip = &song.clips[source.clip];
-            let offset = step - source.start_step + source.offset_steps;
-            &clip[(offset % clip.len() as u64) as usize]
+            match &song.clips[source.clip] {
+                CompiledClip::Steps(clip) => {
+                    let offset = step - source.start_step + source.offset_steps;
+                    &clip[(offset % clip.len() as u64) as usize]
+                }
+                // The engine plays no events from a notes clip yet.
+                CompiledClip::Notes(_) => &REST,
+            }
         }
     }
 }

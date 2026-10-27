@@ -298,10 +298,10 @@ fn device_rules() {
 #[test]
 fn clip_rules() {
     fails_at(
-        &swap("kind = \"acid\"", "kind = \"notes\""),
-        "\"notes\"",
+        &swap("kind = \"acid\"", "kind = \"chords\""),
+        "\"chords\"",
         0,
-        "unknown clip kind `notes` (expected acid or drum)",
+        "unknown clip kind `chords` (expected acid, drum or notes)",
     );
     fails_at(
         &swap(

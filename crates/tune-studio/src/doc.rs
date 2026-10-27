@@ -358,7 +358,8 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
                     .collect();
             json!({ "instrument": t.instrument.module.name, "fx": fx })
         }
-        SongPath::Clip { clip } => Value::from(song.clips.get(clip)?.steps_text()),
+        // A notes clip has no step notation: it has no value at this path.
+        SongPath::Clip { clip } => Value::from(song.clips.get(clip)?.steps_text()?),
         SongPath::SectionBars(i) => Value::from(song.sections.get(*i)?.bars),
         SongPath::SectionName(i) => Value::from(song.sections.get(*i)?.name.clone()),
         SongPath::SectionPlay { section, track } => {

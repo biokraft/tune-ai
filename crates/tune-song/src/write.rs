@@ -7,7 +7,9 @@ use std::fmt::Write as _;
 use indexmap::IndexMap;
 
 use crate::FORMAT_VERSION;
-use crate::model::{Device, Placement, Song};
+use crate::model::{
+    Clip, DEFAULT_VELOCITY, Device, Note, Placement, Song, TICKS_PER_STEP, pitch_name,
+};
 
 impl Song {
     /// The song in canonical TOML form, format version 2. Parsing the result
@@ -60,7 +62,18 @@ impl Song {
         for (id, clip) in &self.clips {
             let _ = write!(out, "\n[clips.{}]\n", key(id));
             let _ = writeln!(out, "kind = {}", string(clip.kind().name()));
-            let _ = writeln!(out, "steps = {}", string(&clip.steps_text()));
+            match clip {
+                Clip::Notes(n) => {
+                    let _ = writeln!(out, "bars = {}", n.bars);
+                    if !n.notes.is_empty() {
+                        let _ = writeln!(out, "notes = {}", notes_toml(&n.notes));
+                    }
+                }
+                steps => {
+                    let text = steps.steps_text().expect("a steps clip has step notation");
+                    let _ = writeln!(out, "steps = {}", string(&text));
+                }
+            }
         }
 
         for section in &self.sections {
@@ -94,7 +107,35 @@ impl Song {
 /// trailing comma. `offset` is written only when it is not 0.
 pub fn placements_toml(play: &[Placement]) -> String {
     let entries: Vec<String> = play.iter().map(placement_inline).collect();
-    match entries.as_slice() {
+    list(&entries)
+}
+
+/// A notes clip's `notes` value: one note inline, two or more one per line
+/// with a two-space indent and a trailing comma, like [`placements_toml`].
+/// Positions are ticks over 24 in the shortest round-trip form; `vel` is
+/// written only when it is not 100.
+pub fn notes_toml(notes: &[Note]) -> String {
+    let entries: Vec<String> = notes.iter().map(note_inline).collect();
+    list(&entries)
+}
+
+/// `{ start = <s>, pitch = "<name>", len = <s>[, vel = <v>] }`.
+fn note_inline(n: &Note) -> String {
+    let steps = |ticks: u32| num(f64::from(ticks) / f64::from(TICKS_PER_STEP));
+    let mut parts = vec![
+        format!("start = {}", steps(n.start)),
+        format!("pitch = {}", string(&pitch_name(n.pitch))),
+        format!("len = {}", steps(n.len)),
+    ];
+    if n.velocity != DEFAULT_VELOCITY {
+        parts.push(format!("vel = {}", n.velocity));
+    }
+    inline(&parts)
+}
+
+/// `[]`, one entry inline (`[{ … }]`), or two or more one per line.
+fn list(entries: &[String]) -> String {
+    match entries {
         [] => "[]".to_owned(),
         [one] => format!("[{one}]"),
         many => {
@@ -220,7 +261,7 @@ fn key(k: &str) -> String {
 /// Shortest round-trip form. Rust's `Display` never uses an exponent, so a
 /// huge value would print as a long integer that overflows TOML's i64; those
 /// switch to the exponent form, which is a valid TOML float.
-fn num(v: f64) -> String {
+pub(crate) fn num(v: f64) -> String {
     let plain = v.to_string();
     if v.abs() >= 9.0e15 && !plain.contains('.') {
         format!("{v:e}")

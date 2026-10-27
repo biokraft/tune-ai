@@ -219,11 +219,13 @@ impl From<&Song> for SongView {
                     placements: t.play.iter().map(|p| placement_view(song, id, p)).collect(),
                 })
                 .collect(),
+            // Note clips stay out of `patterns` until the studio can show
+            // them (a later task adds their view).
             patterns: song
                 .clips
                 .iter()
-                .map(|(id, p)| match p {
-                    Clip::Acid(a) => PatternView::Acid {
+                .filter_map(|(id, p)| match p {
+                    Clip::Acid(a) => Some(PatternView::Acid {
                         id: id.clone(),
                         steps: a
                             .steps()
@@ -234,11 +236,12 @@ impl From<&Song> for SongView {
                                 slide: s.slide,
                             })
                             .collect(),
-                    },
-                    Clip::Drum(d) => PatternView::Drum {
+                    }),
+                    Clip::Drum(d) => Some(PatternView::Drum {
                         id: id.clone(),
                         hits: d.hits().iter().map(|&h| h.into()).collect(),
-                    },
+                    }),
+                    Clip::Notes(_) => None,
                 })
                 .collect(),
             sections: song
