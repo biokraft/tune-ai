@@ -295,7 +295,8 @@ fn decide(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionRecord]) 
 
 /// A track's placements or a lane's stretches, element by element: an
 /// element the run added goes if it is still there; one it removed comes
-/// back if nothing there now overlaps it.
+/// back if nothing there now overlaps it and every element the run added
+/// was still there.
 fn decide_list(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionRecord]) -> Decision {
     let current = target_value(doc.song(), &p.target);
     if current == p.before {
@@ -328,8 +329,12 @@ fn decide_list(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionReco
             None => out.push(kept(a)),
         }
     }
+    // An addition changed later may be a removed element moved on by
+    // someone else: putting the original back would set it beside their
+    // copy, so the removals are kept too.
+    let changed_later = !out.is_empty();
     for r in &removed {
-        if next.iter().any(|e| spans_overlap(e, r)) {
+        if changed_later || next.iter().any(|e| spans_overlap(e, r)) {
             out.push(kept(r));
         } else {
             next.push(r.clone());

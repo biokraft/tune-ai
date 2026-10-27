@@ -719,3 +719,75 @@ fn every_edit_action_reverts() {
         );
     }
 }
+
+/// The run moved a placement and the producer moved it again: the run's
+/// original does not come back beside the producer's copy. Both of the
+/// run's elements are kept and listed.
+#[test]
+fn a_placement_moved_again_is_kept_with_its_original() {
+    let mut s = open();
+    // Before the run: acid's placement is one bar long.
+    s.human(Action::ResizePlacement {
+        track: "acid".into(),
+        at: 3,
+        bars: 1,
+    });
+    s.agent(
+        "r1",
+        &[Action::MovePlacement {
+            track: "acid".into(),
+            at: 3,
+            to: 1,
+        }],
+    );
+    s.human(Action::MovePlacement {
+        track: "acid".into(),
+        at: 1,
+        to: 2,
+    });
+    let left = s.value("tracks.acid.play");
+    let u = s.undo_run("r1");
+    let kept_at = |at| KeptTarget {
+        item: Some(placement(at, "a1", 1)),
+        ..kept("tracks.acid.play", Some(Source::Human))
+    };
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept_at(1), kept_at(3)]);
+    assert_eq!(s.value("tracks.acid.play"), left);
+    assert_eq!(left, json!([placement(2, "a1", 1)]));
+}
+
+/// The same for a lane stretch the run moved and the producer moved again.
+#[test]
+fn a_stretch_moved_again_is_kept_with_its_original() {
+    let lane = "acid.acid303.cutoff";
+    let remove = |at| Action::RemoveLane {
+        param: lane.into(),
+        at,
+    };
+    let add = |at| Action::AddLane {
+        param: lane.into(),
+        at,
+        bars: 1,
+        points: vec![[0.0, 0.1], [1.0, 0.8]],
+    };
+    let mut s = open();
+    // Before the run: the stretch is one bar long.
+    s.human(remove(3));
+    s.human(add(3));
+    s.agent("r1", &[remove(3)]);
+    s.agent("r1", &[add(1)]);
+    s.human(remove(1));
+    s.human(add(2));
+    let left = s.value("automation.acid.acid303.cutoff");
+    let u = s.undo_run("r1");
+    let stretch = |at| json!({ "at": at, "bars": 1, "points": [[0, 0.1], [1, 0.8]] });
+    let kept_at = |at| KeptTarget {
+        item: Some(stretch(at)),
+        ..kept("automation.acid.acid303.cutoff", Some(Source::Human))
+    };
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept_at(1), kept_at(3)]);
+    assert_eq!(s.value("automation.acid.acid303.cutoff"), left);
+    assert_eq!(left, json!([stretch(2)]));
+}
