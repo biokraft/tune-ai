@@ -88,14 +88,56 @@ struct Sequencer {
     /// A step note that does not slide: its Off and the sample it lands on.
     /// Only step notes use this slot (see [`deliver_off`](Self::deliver_off)).
     off: Option<(u64, NoteId, u8)>,
-    /// The placement and song step of the last step boundary, `None` when no
-    /// placement played there (or none has been played since a reset).
-    last: Option<(CellSource, u64)>,
+    /// Where the last step boundary played a notes clip, `None` when it
+    /// played none (or none has been played since a reset).
+    last: Option<NotePos>,
     /// A note-clip On went out since the last `AllOff`: a cut (a placement
     /// end, a loop wrap, a source change) must end it.
     notes_live: bool,
     /// The note-clip events of the current step not yet delivered.
     cursor: Option<NoteCursor>,
+}
+
+/// Where a track plays a notes clip at one step boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NotePos {
+    /// Index into `CompiledSong::clips`.
+    clip: usize,
+    /// The clip's length in steps.
+    steps: u64,
+    /// The clip step played, `0 .. steps`.
+    clip_step: u64,
+    /// The song step.
+    step: u64,
+}
+
+impl NotePos {
+    /// Where placement `src` of `song` plays at song `step`: `None` unless
+    /// it plays a notes clip.
+    fn of(song: &CompiledSong, src: Option<CellSource>, step: u64) -> Option<Self> {
+        let src = src?;
+        let Some(CompiledClip::Notes(clip)) = song.clips.get(src.clip) else {
+            return None;
+        };
+        Some(Self {
+            clip: src.clip,
+            steps: clip.steps,
+            clip_step: (step - src.start_step + src.offset_steps) % clip.steps,
+            step,
+        })
+    }
+
+    /// Whether `self` plays on from `was`: the same clip, one song step
+    /// later, at the clip step `was` leads to (wrapping at the clip's end,
+    /// as the clip loops). Placements do not matter: two adjacent
+    /// placements whose offsets line up play on, as the two pieces of a
+    /// split placement do (spec §7.5).
+    fn follows(self, was: Self) -> bool {
+        self.clip == was.clip
+            && self.steps == was.steps
+            && self.step == was.step.wrapping_add(1)
+            && self.clip_step == (was.clip_step + 1) % self.steps
+    }
 }
 
 /// The rest of one step's note-clip events: `events[next..end]` of clip
@@ -218,67 +260,71 @@ impl Sequencer {
 
     /// At the start of step `ctx.step`, before its events: sends `AllOff`
     /// when a note-clip note may still sound and the track does not play
-    /// on from step `ctx.step - 1` of the same placement `src` (after a
-    /// seek, a loop wrap, a placement's end, a change of placement or a
-    /// swap that ended the notes, see [`carry_over`](Self::carry_over)),
-    /// then remembers `src` at this step. A track with no `last` never
-    /// plays on, not even into no placement. Events of the step before
-    /// still in the cursor (none: every tick of a step starts before the
-    /// next step) go first when due; the rest are dropped.
+    /// on from the last step (see [`NotePos::follows`]): after a seek, a
+    /// loop wrap, a placement's end, a jump to another clip or clip step,
+    /// or a swap that ended the notes (see [`carry_over`](Self::carry_over)).
+    /// Then remembers where placement `src` plays at this step and returns
+    /// it, `None` unless `src` plays a notes clip. A track with no `last`
+    /// never plays on. Events of the step before still in the cursor (none:
+    /// every tick of a step starts before the next step) go first when due;
+    /// the rest are dropped.
     fn cut(
         &mut self,
         instrument: &mut dyn Instrument,
         song: &CompiledSong,
         src: Option<CellSource>,
         ctx: &EventCtx,
-    ) {
+    ) -> Option<NotePos> {
         self.deliver_notes(instrument, song, ctx.pos);
         self.cursor = None;
-        let continuous =
-            self.last.is_some() && self.last == src.map(|s| (s, ctx.step.wrapping_sub(1)));
+        let now = NotePos::of(song, src, ctx.step);
+        let continuous = matches!((now, self.last), (Some(now), Some(was)) if now.follows(was));
         if !continuous && self.notes_live {
             instrument.note(&NoteEvent::AllOff, ctx);
             self.notes_live = false;
         }
-        self.last = src.map(|s| (s, ctx.step));
+        self.last = now;
+        now
     }
 
     /// On a swap from `old` to `new` at step boundary `step`, for a track
     /// whose instrument (and so this sequencer) the swap keeps, as track
-    /// `t` of `new`: held note-clip notes play on only when the last source
-    /// played a notes clip and the new song's source at `step` has the same
-    /// `start_step` and `offset_steps` and a clip with the same events (id,
-    /// events and length; compared by content, since clip indices of two
-    /// songs say nothing about each other). Then `last` and the cursor
-    /// point into the new song's clip. Otherwise `last` is `None`, so the
-    /// cut at `step` sends `AllOff` if a note may sound, and the cursor is
-    /// cleared, so that cut never reads the new song through an index into
-    /// the old one. `cut` still checks that `last` was the step before
-    /// `step` (a swap that jumps to the loop start ends the notes).
+    /// `t` of `new`: held note-clip notes may play on only when the last
+    /// step played a notes clip and the new song plays, at `step`, a clip
+    /// with the same events (id, events and length; compared by content,
+    /// since clip indices of two songs say nothing about each other). Then
+    /// `last` and the cursor point into the new song's clip, and the cut at
+    /// `step` decides as inside one song: the notes play on when the new
+    /// song plays the clip step the old one led to, whatever placement
+    /// plays it (a swap that splits a placement, moves it by a clip length
+    /// or makes it longer keeps them). Otherwise `last` is `None`, so that
+    /// cut sends `AllOff` if a note may sound, and the cursor is cleared,
+    /// so it never reads the new song through an index into the old one.
     /// Comparisons only: never allocates.
     fn carry_over(&mut self, old: &CompiledSong, new: &CompiledSong, t: usize, step: u64) {
         let src = (step < 16 * u64::from(new.total_bars))
             .then(|| new.regions[region_of(new, step)].cells[t])
             .flatten();
-        fn notes(song: &CompiledSong, s: CellSource) -> Option<&NoteClipEvents> {
-            match song.clips.get(s.clip) {
+        fn notes(song: &CompiledSong, clip: usize) -> Option<&NoteClipEvents> {
+            match song.clips.get(clip) {
                 Some(CompiledClip::Notes(clip)) => Some(clip),
                 _ => None,
             }
         }
-        let kept = match (self.last, src) {
-            (Some((was, at)), Some(now))
-                if was.start_step == now.start_step
-                    && was.offset_steps == now.offset_steps
-                    && notes(old, was).is_some_and(|a| notes(new, now) == Some(a)) =>
+        let kept = match (self.last, NotePos::of(new, src, step)) {
+            (Some(was), Some(now))
+                if notes(old, was.clip).is_some_and(|a| notes(new, now.clip) == Some(a)) =>
             {
-                Some((now, at))
+                Some(NotePos {
+                    clip: now.clip,
+                    ..was
+                })
             }
             _ => None,
         };
         self.last = kept;
         self.cursor = match (kept, self.cursor) {
-            (Some((now, _)), Some(cur)) => Some(NoteCursor {
+            (Some(now), Some(cur)) => Some(NoteCursor {
                 clip: now.clip,
                 ..cur
             }),
@@ -286,31 +332,28 @@ impl Sequencer {
         };
     }
 
-    /// When placement `src` plays a notes clip: queues the events of song
-    /// step `step` (of a track with noise seed `seed`) and delivers those
-    /// landing on `pos`, the step's first sample. Returns whether an On was
-    /// delivered.
+    /// Queues the events of the notes clip step at `at` (of a track with
+    /// noise seed `seed`) and delivers those landing on `pos`, the step's
+    /// first sample. Returns whether an On was delivered.
     fn notes_step(
         &mut self,
         instrument: &mut dyn Instrument,
         song: &CompiledSong,
-        src: CellSource,
-        step: u64,
+        at: NotePos,
         seed: u64,
         pos: u64,
     ) -> bool {
-        let CompiledClip::Notes(clip) = &song.clips[src.clip] else {
+        let CompiledClip::Notes(clip) = &song.clips[at.clip] else {
             return false;
         };
-        let cs = (step - src.start_step + src.offset_steps) % clip.steps;
-        let cs_index = cs as usize;
+        let cs_index = at.clip_step as usize;
         self.cursor = Some(NoteCursor {
-            clip: src.clip,
+            clip: at.clip,
             next: clip.step_starts[cs_index],
             end: clip.step_starts[cs_index + 1],
-            step,
-            clip_tick: (cs as u32) * TICKS_PER_STEP,
-            seed: hit_seed(seed, step),
+            step: at.step,
+            clip_tick: (at.clip_step as u32) * TICKS_PER_STEP,
+            seed: hit_seed(seed, at.step),
         });
         self.deliver_notes(instrument, song, pos)
     }
@@ -685,9 +728,10 @@ impl Engine {
     ///   the limiter without a silent frame (see
     ///   [`MixRuntime::take_units`]);
     /// - a track that keeps its instrument keeps its held note-clip notes
-    ///   only when its placement at `k` starts and is offset as before and
-    ///   plays a clip with the same events; otherwise they get `AllOff` at
-    ///   `k` (see `Sequencer::carry_over`);
+    ///   only when it plays at `k` a clip with the same events, at the clip
+    ///   step the old song led to (whichever placement plays it, so a split
+    ///   placement plays on); otherwise they get `AllOff` at `k` (see
+    ///   `Sequencer::carry_over`);
     /// - a swap that changes a track's signal path (a device added, removed,
     ///   reordered or rebuilt, the instrument swapped, the track added or
     ///   removed) crossfades that track over [`SWAP_FADE_MS`]: the old path
@@ -886,8 +930,9 @@ impl Engine {
     ///    region's lanes for this sample; apply the knob overrides; deliver
     ///    note events on every track in order (a step note's scheduled Off
     ///    still pending; `AllOff` when a note-clip note may sound and the
-    ///    track does not play on from the previous step of the same
-    ///    placement, as after a seek, a loop wrap or a placement's end;
+    ///    track does not play on from the previous step (the same notes
+    ///    clip at the next clip step, whichever placement plays it), as
+    ///    after a seek, a loop wrap or a placement's end;
     ///    then the step's: an On for a note or a hit, the Off of a note that
     ///    slid into this step, or the note-clip events of the step that
     ///    land on this sample, the rest waiting in the track's cursor); if
@@ -1004,16 +1049,16 @@ impl Engine {
                 rt.seq
                     .deliver_off(instrument, self.pos, step, track.seed, true);
                 let src = song.regions[region].cells[t];
-                rt.seq.cut(instrument, song, src, &ctx);
+                let at = rt.seq.cut(instrument, song, src, &ctx);
                 // A notes clip's cell is `Rest`, so a step note before it
                 // does not slide into it.
                 let cell = cell_at(song, region, t, step);
                 let next = cell_at(song, next_region, t, next_step);
                 let mut on = rt.seq.step(instrument, cell, next, &ctx, self.gate_samples);
-                if let Some(src) = src {
+                if let Some(at) = at {
                     on |= rt
                         .seq
-                        .notes_step(instrument, song, src, step, track.seed, self.pos);
+                        .notes_step(instrument, song, at, track.seed, self.pos);
                 }
                 duck |= on && song.mix.duck_source == Some(t);
             }

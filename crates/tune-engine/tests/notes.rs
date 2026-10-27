@@ -616,3 +616,211 @@ fn moving_the_placement_ends_held_notes() {
         ]
     );
 }
+
+/// The note of the split tests: steps 8 to 24 of a 2-bar clip, so it
+/// crosses the clip's bar 2.
+const SEAM: &str = r#"{ start = 8, pitch = "C2", len = 16 }"#;
+
+/// The first interleaved sample where `a` and `b` differ bitwise, or where
+/// one ends; `None` when they are identical.
+fn first_diff(a: &[f32], b: &[f32]) -> Option<usize> {
+    let (a, b) = (bits(a), bits(b));
+    a.iter()
+        .zip(&b)
+        .position(|(x, y)| x != y)
+        .or((a.len() != b.len()).then(|| a.len().min(b.len())))
+}
+
+/// The SEAM note as it starts.
+fn seam_on() -> NoteEvent {
+    NoteEvent::On {
+        id: id(0),
+        pitch: 36,
+        velocity: 100,
+        accent: false,
+        slide: false,
+    }
+}
+
+fn seam_off() -> NoteEvent {
+    NoteEvent::Off {
+        id: id(0),
+        pitch: 36,
+    }
+}
+
+/// One acid303 track `t` playing `play` of a 2-bar notes clip `c` holding
+/// SEAM, in sections `a` (1 bar) and `b` (`b_bars` bars).
+fn seam_song(b_bars: u32, play: &str) -> String {
+    format!(
+        "[song]\nversion = 2\nname = \"notes\"\nbpm = 120\nseed = {SEED}\n\n\
+         [tracks.t]\ninstrument = \"acid303\"\nplay = [{play}]\n\n{}\n\
+         [[sections]]\nname = \"a\"\nbars = 1\n\n[[sections]]\nname = \"b\"\nbars = {b_bars}\n",
+        notes_clip("c", 2, &[SEAM])
+    )
+}
+
+/// The reviewer's repro: the clip over bars 1-2, then section `b` grown to
+/// 2 bars, which splits the placement at the section edge into
+/// `{ at = 1, bars = 1 }` and `{ at = 2, bars = 2, offset = 1 }`.
+fn split_by_resize() -> (Arc<CompiledSong>, Arc<CompiledSong>) {
+    let before = common::song(&seam_song(1, r#"{ at = 1, clip = "c", bars = 2 }"#));
+    let after = tune_song::resize_section(&before, 1, 2)
+        .expect("resize")
+        .song;
+    let t = &after.tracks["t"];
+    assert_eq!(t.play.len(), 2, "the resize split the placement");
+    assert_eq!(
+        (t.play[1].start_bar, t.play[1].bars, t.play[1].offset_bars),
+        (1, 2, 1),
+        "the second piece plays on from the clip's bar 2"
+    );
+    (common::compile_song(&before), common::compile_song(&after))
+}
+
+#[test]
+fn a_split_placement_renders_like_the_unsplit_one() {
+    let (_, split) = split_by_resize();
+    // The same three bars as one placement.
+    let unsplit = compiled(&seam_song(2, r#"{ at = 1, clip = "c", bars = 3 }"#));
+    let a = run(&mut Engine::new(unsplit), 3 * BAR);
+    let b = run(&mut Engine::new(split.clone()), 3 * BAR);
+    assert!(
+        rms(&a[2 * BAR as usize..2 * (BAR + 6000) as usize]) > 1e-2,
+        "the note sounds across the seam"
+    );
+    assert_eq!(first_diff(&a, &b), None, "the split is inaudible");
+    // The note runs to its own end, with no AllOff at the seam.
+    let (mut engine, log) = probe_engine(&split, "t");
+    run(&mut engine, 2 * BAR);
+    assert_eq!(
+        events(&log),
+        [(8 * STEP, seam_on()), (24 * STEP, seam_off())]
+    );
+}
+
+#[test]
+fn a_live_split_keeps_the_held_note() {
+    let (before, after) = split_by_resize();
+    let offline = run(&mut Engine::new(after.clone()), 3 * BAR);
+    // Swaps landing in bar 1, at the seam and in bar 2, all while the note
+    // sounds.
+    for queue_at in [10 * STEP + 100, 16 * STEP - 100, 20 * STEP + 100] {
+        let mut engine = Engine::new(before.clone());
+        let mut live = run(&mut engine, queue_at);
+        assert!(engine.queue_swap(SongUpdate::new(after.clone())).is_none());
+        live.extend(run(&mut engine, 3 * BAR - queue_at));
+        assert_eq!(engine.swaps_applied(), 1);
+        assert_eq!(
+            first_diff(&live, &offline),
+            None,
+            "a swap queued at {queue_at} keeps the note"
+        );
+    }
+}
+
+#[test]
+fn offset_and_bars_changes_keep_or_end_held_notes() {
+    let clip = notes_clip("c", 2, &[SEAM]);
+    let from = swap_song(3, 0, r#"{ at = 1, clip = "c", bars = 2 }"#, &clip);
+    let swap_at = 10 * STEP + 100; // lands at step 11, inside the note
+    // An offset of one clip length plays the same clip steps: the note
+    // plays on.
+    let same_steps = swap_song(
+        3,
+        0,
+        r#"{ at = 1, clip = "c", bars = 2, offset = 2 }"#,
+        &clip,
+    );
+    assert_eq!(
+        swap_events(&from, &same_steps, swap_at, 2 * BAR),
+        [(8 * STEP, seam_on()), (24 * STEP, seam_off())]
+    );
+    // An offset of one bar jumps to clip step 27: the note ends at the swap.
+    let other_steps = swap_song(
+        3,
+        0,
+        r#"{ at = 1, clip = "c", bars = 2, offset = 1 }"#,
+        &clip,
+    );
+    assert_eq!(
+        swap_events(&from, &other_steps, swap_at, 2 * BAR),
+        [
+            (8 * STEP, seam_on()),
+            (11 * STEP, NoteEvent::AllOff),
+            // Clip step 0 again at song step 16, where its note starts at
+            // clip step 8.
+            (24 * STEP, seam_on()),
+        ]
+    );
+    // A longer placement plays on through the swap step.
+    let longer = swap_song(3, 0, r#"{ at = 1, clip = "c", bars = 3 }"#, &clip);
+    assert_eq!(
+        swap_events(&from, &longer, swap_at, 3 * BAR),
+        [
+            (8 * STEP, seam_on()),
+            (24 * STEP, seam_off()),
+            (2 * BAR + 8 * STEP, seam_on()),
+        ]
+    );
+    // A shorter one that ends before the swap step ends the note there.
+    let shorter = swap_song(3, 0, r#"{ at = 1, clip = "c", bars = 1 }"#, &clip);
+    assert_eq!(
+        swap_events(&from, &shorter, 20 * STEP + 100, 2 * BAR),
+        [(8 * STEP, seam_on()), (21 * STEP, NoteEvent::AllOff)]
+    );
+}
+
+#[test]
+fn adjacent_placements_play_on_only_when_their_clip_steps_line_up() {
+    let clip2 = notes_clip("c", 2, &[SEAM]);
+    let events_of = |play: &str, clip: &str| {
+        let song = swap_song(2, 0, play, clip);
+        let (mut engine, log) = probe_engine(&song, "t");
+        run(&mut engine, 2 * BAR);
+        events(&log)
+    };
+    // The second placement starts the clip over: the note ends at the seam.
+    assert_eq!(
+        events_of(
+            r#"{ at = 1, clip = "c", bars = 1 }, { at = 2, clip = "c", bars = 1 }"#,
+            &clip2
+        ),
+        [
+            (8 * STEP, seam_on()),
+            (BAR, NoteEvent::AllOff),
+            (BAR + 8 * STEP, seam_on()),
+        ]
+    );
+    // Its offset picks up where the first one stopped: the note plays on.
+    assert_eq!(
+        events_of(
+            r#"{ at = 1, clip = "c", bars = 1 }, { at = 2, clip = "c", bars = 1, offset = 1 }"#,
+            &clip2
+        ),
+        [(8 * STEP, seam_on()), (24 * STEP, seam_off())]
+    );
+    // A 1-bar clip placed twice plays on across its own loop, as one
+    // 2-bar placement of it does: the note ending at the clip's end gets
+    // its Off at the seam, with no AllOff.
+    let clip1 = notes_clip("c", 1, &[r#"{ start = 12, pitch = "C2", len = 4 }"#]);
+    let twice = events_of(
+        r#"{ at = 1, clip = "c", bars = 1 }, { at = 2, clip = "c", bars = 1 }"#,
+        &clip1,
+    );
+    assert_eq!(
+        twice,
+        events_of(r#"{ at = 1, clip = "c", bars = 2 }"#, &clip1)
+    );
+    assert_eq!(
+        twice,
+        [
+            // The clip-end Off sits at tick 0, so the clip's start sends it
+            // too, for a note not sounding (harmless).
+            (0, seam_off()),
+            (12 * STEP, seam_on()),
+            (BAR, seam_off()),
+            (BAR + 12 * STEP, seam_on()),
+        ]
+    );
+}
