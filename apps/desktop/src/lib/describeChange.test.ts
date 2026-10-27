@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { goldenState } from "../client/fakeClient";
-import { describeChange } from "./describeChange";
+import { describeChange, describeTarget } from "./describeChange";
 
 const song = goldenState.song!;
 const change = (path: string, old: unknown, next: unknown) =>
@@ -79,5 +79,40 @@ describe("describeChange on v2 songs", () => {
     );
     expect(change("tracks.acid", null, devices)).toBe("Track acid added");
     expect(change("tracks.acid", devices, null)).toBe("Track acid removed");
+  });
+});
+
+describe("describeTarget", () => {
+  const k = (target: string, by: "human" | "claude" | "external" | null = null) =>
+    ({ target, item: null, reason: "changed_later", by, message: null }) as never;
+
+  it("labels a leaf as describeChange does, without the span", () => {
+    expect(describeTarget(k("tracks.acid.acid303.cutoff", "human"), song)).toBe("Cutoff (by you)");
+    expect(describeTarget(k("tracks.kick.send.delay"), song)).toBe("kick Delay");
+    expect(describeTarget(k("song.bpm"), song)).toBe("Tempo");
+    expect(describeTarget(k("tracks.hat.pan"), song)).toBe("hat pan");
+    expect(describeTarget(k("tracks.hat.mute"), song)).toBe("hat mute");
+  });
+  it("names a track and its devices", () => {
+    expect(describeTarget(k("tracks.acid"), song)).toBe("track acid");
+    expect(describeTarget(k("tracks.acid.instrument"), song)).toBe("acid's instrument");
+    expect(describeTarget(k("tracks.acid.fx"), song)).toBe("acid's effects");
+    expect(describeTarget(k("tracks.acid.play"), song)).toBe("a clip on acid");
+  });
+  it("names a clip, a lane and the sections", () => {
+    expect(describeTarget(k("clips.a1"), song)).toBe("clip a1");
+    expect(describeTarget(k("automation.acid.acid303.cutoff"), song)).toBe(
+      "acid303.cutoff automation on acid",
+    );
+    expect(describeTarget(k("automation.mix.reverb.size"), song)).toBe(
+      "mix reverb.size automation",
+    );
+    expect(describeTarget(k("sections"), song)).toBe("the sections");
+  });
+  it("says who changed it later", () => {
+    expect(describeTarget(k("sections", "human"), song)).toBe("the sections (by you)");
+    expect(describeTarget(k("sections", "claude"), song)).toBe("the sections (another run)");
+    expect(describeTarget(k("sections", "external"), song)).toBe("the sections");
+    expect(describeTarget(k("sections", null), song)).toBe("the sections");
   });
 });

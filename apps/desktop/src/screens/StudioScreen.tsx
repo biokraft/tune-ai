@@ -36,7 +36,7 @@ const sameRange = (a: [number, number] | null, b: [number, number] | null) =>
  * top-right, under the transport.
  */
 export function StudioScreen({ view, store }: StudioScreenProps) {
-  const { state, highlights, notice, noticeUndoable } = view;
+  const { state, highlights, notice, noticeUndoable, runUndo } = view;
   const song = state.song;
   const fire = useCallback((cmd: Command) => void store.send(cmd).catch(() => {}), [store]);
 
@@ -177,8 +177,10 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
               notice={notice}
               offered={state.offered}
               canUndo={noticeUndoable}
+              runUndo={runUndo}
               song={song}
               onUndo={undo}
+              onUndoRun={(run) => void store.undoRun(run).catch(() => {})}
               onResolve={(reapply) => {
                 store.dismissNotice();
                 fire({ cmd: "resolve_offered", args: { reapply } });

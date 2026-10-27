@@ -11,6 +11,7 @@ function view(patch: Partial<StudioView> = {}, edit: (s: StudioState) => void = 
     playhead: null,
     highlights: new Map(),
     notice: null,
+    runUndo: null,
     noticeUndoable: false,
     selectedSection: null,
     connection: "open",

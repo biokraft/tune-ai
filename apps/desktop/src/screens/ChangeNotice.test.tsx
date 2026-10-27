@@ -1,13 +1,15 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { goldenState } from "../client/fakeClient";
-import type { ExternalChange } from "../client/protocol";
+import type { ExternalChange, RunUndo } from "../client/protocol";
 import { ChangeNotice } from "./ChangeNotice";
+import type { Notice } from "../store/studioStore";
 
 const song = goldenState.song!;
 
-function notice(patch: Partial<ExternalChange>): ExternalChange {
+function notice(patch: Partial<Notice>): Notice {
   return {
     source: "claude",
+    run: null,
     changes: [],
     replaced: false,
     merged: [],
@@ -17,8 +19,14 @@ function notice(patch: Partial<ExternalChange>): ExternalChange {
   };
 }
 
-function setup(n: ExternalChange | null, offered = n?.offered ?? [], canUndo = true) {
+function setup(
+  n: Notice | null,
+  offered = n?.offered ?? [],
+  canUndo = true,
+  runUndo: RunUndo | null = null,
+) {
   const onUndo = vi.fn();
+  const onUndoRun = vi.fn();
   const onResolve = vi.fn();
   const onDismiss = vi.fn();
   render(
@@ -26,14 +34,93 @@ function setup(n: ExternalChange | null, offered = n?.offered ?? [], canUndo = t
       notice={n}
       offered={offered}
       canUndo={canUndo}
+      runUndo={runUndo}
       song={song}
       onUndo={onUndo}
+      onUndoRun={onUndoRun}
       onResolve={onResolve}
       onDismiss={onDismiss}
     />,
   );
-  return { onUndo, onResolve, onDismiss };
+  return { onUndo, onUndoRun, onResolve, onDismiss };
 }
+
+const CUTOFF = { path: "tracks.acid.acid303.cutoff", old: 500, new: 820 };
+const runUndo = (patch: Partial<RunUndo>): RunUndo => ({
+  run: "r1",
+  title: null,
+  reverted: [],
+  kept: [],
+  already: [],
+  ...patch,
+});
+const reverted = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({ target: `tracks.acid.acid303.p${i}`, item: null }));
+
+describe("ChangeNotice runs", () => {
+  it("shows the run title", () => {
+    setup(notice({ changes: [CUTOFF], run: { id: "r1", title: "open the filter" } }));
+    const card = screen.getByRole("status", { name: "Claude's change" });
+    expect(within(card).getByText("Claude")).toBeInTheDocument();
+    expect(within(card).getByText("· open the filter", { exact: false })).toHaveClass("text-ink2");
+  });
+
+  it("Undo this run sends undo_run", () => {
+    const { onUndoRun, onUndo } = setup(
+      notice({ changes: [CUTOFF], run: { id: "r1", title: null } }),
+    );
+    expect(screen.getByRole("button", { name: "Undo Claude's change" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Undo this run" }));
+    expect(onUndoRun).toHaveBeenCalledWith("r1");
+    expect(onUndo).not.toHaveBeenCalled();
+  });
+
+  it("offers no Undo this run without a run", () => {
+    setup(notice({ changes: [CUTOFF] }));
+    expect(screen.queryByRole("button", { name: "Undo this run" })).toBeNull();
+  });
+
+  it("reports what the run undo kept", () => {
+    setup(
+      notice({ changes: [CUTOFF], run: { id: "r1", title: null } }),
+      [],
+      true,
+      runUndo({
+        reverted: reverted(3),
+        kept: [
+          {
+            target: "tracks.acid.acid303.cutoff",
+            item: null,
+            reason: "changed_later",
+            by: "human",
+            message: null,
+          },
+        ],
+      }),
+    );
+    expect(
+      screen.getByText("Undid this run: 3 changes. Kept 1 change made since: Cutoff (by you)."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Undo this run" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Undo Claude's change" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+  });
+
+  it("reports a run undo that kept nothing", () => {
+    setup(
+      notice({ changes: [CUTOFF], run: { id: "r1", title: null } }),
+      [],
+      true,
+      runUndo({ reverted: reverted(1) }),
+    );
+    expect(screen.getByText("Undid this run: 1 change.")).toBeInTheDocument();
+  });
+
+  it("says when the run was already undone", () => {
+    setup(notice({ changes: [CUTOFF], run: { id: "r1", title: null } }), [], true, runUndo({}));
+    expect(screen.getByText("Nothing to undo: this run is already undone.")).toBeInTheDocument();
+  });
+});
 
 describe("ChangeNotice", () => {
   it("lists what Claude changed, with Undo", () => {
@@ -125,8 +212,10 @@ describe("ChangeNotice", () => {
         notice={notice({ replaced: true })}
         offered={[]}
         canUndo
+        runUndo={null}
         song={song}
         onUndo={() => {}}
+        onUndoRun={() => {}}
         onResolve={() => {}}
         onDismiss={() => {}}
       />,
@@ -149,8 +238,10 @@ describe("ChangeNotice", () => {
         notice={null}
         offered={[]}
         canUndo
+        runUndo={null}
         song={song}
         onUndo={() => {}}
+        onUndoRun={() => {}}
         onResolve={() => {}}
         onDismiss={() => {}}
       />,

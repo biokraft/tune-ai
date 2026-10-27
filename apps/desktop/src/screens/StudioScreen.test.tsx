@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import App from "../App";
 import { FakeClient, goldenExternal, stateEvent } from "../client/fakeClient";
 import { createStudioStore } from "../store/studioStore";
@@ -229,5 +230,55 @@ describe("StudioScreen timeline blocks", () => {
     expect(screen.getByText("↳ Delay")).toBeInTheDocument();
     expect(screen.getByText("↳ Reverb size")).toBeInTheDocument();
     expect(screen.getByTestId("mix-header")).toHaveTextContent("Mix");
+  });
+});
+
+describe("StudioScreen undo keys", () => {
+  const cmdZ = (init: KeyboardEventInit = {}, target: EventTarget = document.body) =>
+    act(() => {
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "z",
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+          ...init,
+        }),
+      );
+    });
+
+  it("Cmd+Z undoes inside an open popover", async () => {
+    const user = userEvent.setup();
+    const client = render303();
+    fireEvent.click(screen.getByRole("button", { name: "Open acid" }));
+    const dock = screen.getByRole("region", { name: "Dock" });
+    await user.click(within(dock).getByRole("button", { name: "acid in section 1" }));
+    const none = screen.getByRole("button", { name: "None" });
+    cmdZ({}, none);
+    expect(client.named("undo")).toHaveLength(1);
+  });
+
+  it("Cmd+Z in a text field does nothing", () => {
+    const client = render303();
+    const input = document.createElement("input");
+    document.body.append(input);
+    input.focus();
+    cmdZ({}, input);
+    input.remove();
+    expect(client.named("undo")).toHaveLength(0);
+    expect(client.named("redo")).toHaveLength(0);
+  });
+
+  it("Shift+Cmd+Z redoes", () => {
+    const client = render303();
+    cmdZ({ shiftKey: true });
+    expect(client.named("redo")).toHaveLength(1);
+    expect(client.named("undo")).toHaveLength(0);
+  });
+
+  it("Ctrl+Z undoes too", () => {
+    const client = render303();
+    cmdZ({ metaKey: false, ctrlKey: true });
+    expect(client.named("undo")).toHaveLength(1);
   });
 });

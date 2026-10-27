@@ -109,6 +109,78 @@ describe("createStudioStore", () => {
     expect(store.get()).toBe(before);
   });
 
+  it("an applied change from Claude raises the notice with its run", () => {
+    const client = new FakeClient();
+    const store = createStudioStore(client);
+    client.emit(stateEvent());
+    const changes = [{ path: "tracks.acid.acid303.cutoff", old: 500, new: 820 }];
+    client.emit({
+      event: "applied",
+      source: "claude",
+      changes,
+      run: { id: "r1", title: "open the filter" },
+    });
+    expect(store.get().notice).toEqual({
+      source: "claude",
+      changes,
+      run: { id: "r1", title: "open the filter" },
+      replaced: false,
+      merged: [],
+      offered: [],
+      errors: [],
+    });
+    expect(store.get().notice?.run?.id).toBe("r1");
+    expect(store.get().noticeUndoable).toBe(true);
+    expect(store.get().highlights.get("tracks.acid.acid303.cutoff")).toBe("claude");
+  });
+
+  it("an external change has no run", () => {
+    const client = new FakeClient();
+    const store = createStudioStore(client);
+    client.emit(stateEvent());
+    client.emit(external({ merged: [] }));
+    expect(store.get().notice?.run).toBeNull();
+  });
+
+  it("a human edit after it ends its Undo but keeps Undo this run", () => {
+    const client = new FakeClient();
+    const store = createStudioStore(client);
+    client.emit(stateEvent());
+    client.emit({
+      event: "applied",
+      source: "claude",
+      changes: [{ path: "tracks.acid.acid303.cutoff", old: 500, new: 820 }],
+      run: { id: "r1", title: null },
+    });
+    client.emit({
+      event: "applied",
+      source: "human",
+      changes: [{ path: "tracks.acid.acid303.resonance", old: 70, new: 90 }],
+      run: null,
+    });
+    expect(store.get().noticeUndoable).toBe(false);
+    expect(store.get().notice?.run?.id).toBe("r1");
+  });
+
+  it("undoRun sends undo_run and keeps the answer for the toast, until the notice goes", async () => {
+    const client = new FakeClient();
+    const store = createStudioStore(client);
+    client.emit(stateEvent());
+    client.emit({
+      event: "applied",
+      source: "claude",
+      changes: [{ path: "tracks.acid.acid303.cutoff", old: 500, new: 820 }],
+      run: { id: "r1", title: null },
+    });
+    const answer = { run: "r1", title: null, reverted: [], kept: [], already: [] };
+    client.results.undo_run = answer;
+    await store.undoRun("r1");
+    expect(client.named("undo_run")).toEqual([{ cmd: "undo_run", args: { run: "r1" } }]);
+    expect(store.get().runUndo).toEqual(answer);
+    store.dismissNotice();
+    expect(store.get().runUndo).toBeNull();
+  });
+
   it("a later human edit keeps the notice but takes back its Undo", () => {
     const client = new FakeClient();
     const store = createStudioStore(client);
@@ -163,6 +235,7 @@ describe("createStudioStore", () => {
     client.emit(opened("songs/a/song.toml", 1));
     expect(store.get().notice).toEqual({
       source: "external",
+      run: null,
       changes: [{ path: "song.version", old: 1, new: 2 }],
       replaced: false,
       merged: [],

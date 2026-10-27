@@ -299,7 +299,9 @@ describe("App", () => {
     const inner = document.createElement("button");
     pop.append(inner);
     document.body.append(pop);
-    press({ key: "z", metaKey: true }, inner);
+    // Popovers keep Space, L, M and Esc; only undo and redo reach past them.
+    press({ key: "l" }, inner);
+    press({ key: "z", metaKey: true }, input);
     const handled = new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true });
     handled.preventDefault();
     act(() => {

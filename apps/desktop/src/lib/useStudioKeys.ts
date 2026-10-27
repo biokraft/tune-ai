@@ -14,19 +14,27 @@ export type StudioKeys = {
 const TYPING = 'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
 const POPOVER = '[data-radix-popper-content-wrapper], [role="dialog"], [role="menu"]';
 
-/** Whether a key event belongs to something else: a text field, a popover, or a handler. */
-function ignored(e: KeyboardEvent): boolean {
+/**
+ * Whether a key event belongs to something else: a text field, a popover (unless `inPopover`),
+ * or a handler.
+ */
+function ignored(e: KeyboardEvent, inPopover = false): boolean {
   if (e.defaultPrevented) return true;
   const t = e.target;
   if (!(t instanceof Element)) return false;
   if (t instanceof HTMLElement && t.isContentEditable) return true;
-  return t.closest(TYPING) !== null || t.closest(POPOVER) !== null;
+  return t.closest(TYPING) !== null || (!inPopover && t.closest(POPOVER) !== null);
 }
+
+/** Cmd/Ctrl+Z, with or without Shift. */
+const isUndoKey = (e: KeyboardEvent) =>
+  (e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "z";
 
 const isSpace = (e: KeyboardEvent) => e.code === "Space" || e.key === " ";
 
 /**
- * Window-wide shortcuts: Space play/stop, Cmd+Z undo, Shift+Cmd+Z redo, L loop the selected
+ * Window-wide shortcuts: Space play/stop, Cmd+Z undo and Shift+Cmd+Z redo (also inside popovers
+ * and menus, never in a text field), L loop the selected
  * section, M the mixer, Esc close the dock. Controls that handle a key themselves stop it or
  * prevent its default first; an open popover closes on Esc itself (Radix prevents its default).
  */
@@ -36,14 +44,15 @@ export function useStudioKeys(keys: StudioKeys) {
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (ignored(e)) return;
+      // Undo and redo work anywhere but a text field, which has its own.
+      if (ignored(e, isUndoKey(e))) return;
       const k = ref.current;
       const mod = e.metaKey || e.ctrlKey;
       if (isSpace(e) && !mod && !e.altKey) {
         // Also keeps Space from pressing a focused button.
         e.preventDefault();
         if (!e.repeat) k.playStop();
-      } else if (mod && !e.altKey && e.key.toLowerCase() === "z") {
+      } else if (isUndoKey(e)) {
         e.preventDefault();
         if (e.shiftKey) k.redo();
         else k.undo();
