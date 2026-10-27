@@ -13,9 +13,18 @@ use tune_studio::{
 };
 
 const FIXTURE: &str = include_str!("fixtures/commented.toml");
+const SESSION: &str = include_str!("../../tune-song/tests/fixtures/session.toml");
 
 fn fixture() -> SongDoc {
     SongDoc::parse(FIXTURE).expect("the fixture parses")
+}
+
+fn session() -> SongDoc {
+    SongDoc::parse(SESSION).expect("the session fixture parses")
+}
+
+fn scene_ids(doc: &SongDoc) -> Vec<String> {
+    doc.song().scenes.keys().cloned().collect()
 }
 
 fn target(s: &str) -> Target {
@@ -183,6 +192,12 @@ fn targets_round_trip_as_strings() {
             },
         ),
         ("sections", Target::Sections),
+        ("scenes", Target::SceneOrder),
+        ("scenes.groove", Target::Scene("groove".into())),
+        (
+            "scenes.groove.slots.acid",
+            Target::Value("scenes.groove.slots.acid".parse().unwrap()),
+        ),
     ];
     for (text, want) in cases {
         let got: Target = text.parse().unwrap_or_else(|e| panic!("{text}: {e}"));
@@ -200,9 +215,206 @@ fn targets_round_trip_as_strings() {
         "automation..cutoff",
         "sections[0].bars",
         "song.version",
+        "scenes.",
+        "scenes.Groove",
+        "scenes.groove.",
+        "scenes.groove.slots",
+        "scenes.groove.acid",
     ] {
         assert!(bad.parse::<Target>().is_err(), "{bad:?} should not parse");
     }
+    let err = "scenes.Groove".parse::<Target>().unwrap_err();
+    assert!(err.contains(" scenes, scenes.<scene>, "), "{err}");
+}
+
+#[test]
+fn a_new_scene_is_one_target() {
+    let old = session();
+    let mut new = old.clone();
+    new.add_scene("jam", None).unwrap();
+    assert_eq!(
+        target_changes(old.song(), new.song()),
+        vec![TargetChange {
+            target: target("scenes.jam"),
+            old: Value::Null,
+            new: json!({ "index": 2, "slots": {} }),
+        }]
+    );
+    assert_eq!(
+        target_value(new.song(), &target("scenes.groove")),
+        json!({ "index": 0, "slots": { "kick": "k4", "acid": "a1" } })
+    );
+}
+
+#[test]
+fn slots_are_leaf_targets() {
+    let old = session();
+    let mut new = old.clone();
+    new.set_slot("groove", "hat", Some("h")).unwrap();
+    assert_eq!(
+        target_changes(old.song(), new.song()),
+        vec![TargetChange {
+            target: target("scenes.groove.slots.hat"),
+            old: Value::Null,
+            new: json!("h"),
+        }]
+    );
+}
+
+#[test]
+fn a_scene_move_is_the_order_target() {
+    let old = session();
+    let mut new = old.clone();
+    new.move_scene("break", 0).unwrap();
+    assert_eq!(
+        target_changes(old.song(), new.song()),
+        vec![TargetChange {
+            target: target("scenes"),
+            old: json!(["groove", "break"]),
+            new: json!(["break", "groove"]),
+        }]
+    );
+}
+
+#[test]
+fn remove_track_touches_its_slots() {
+    let old = session();
+    let mut new = old.clone();
+    new.remove_track("acid").unwrap();
+    let changes = target_changes(old.song(), new.song());
+    assert_eq!(
+        names(&changes),
+        [
+            "tracks.acid",
+            "scenes.groove.slots.acid",
+            "automation.acid.acid303.cutoff",
+        ]
+    );
+    assert_eq!(
+        (&changes[1].old, &changes[1].new),
+        (&json!("a1"), &Value::Null)
+    );
+}
+
+/// The scene targets come after the clips and before the sections, as
+/// `diff_songs` gives the scene paths: the scenes in one song only, the
+/// order, then the slots.
+#[test]
+fn scene_targets_follow_the_clips() {
+    let old = session();
+    let mut new = old.clone();
+    new.add_clip("lead", "notes", None, Some(1), None).unwrap();
+    new.add_scene("jam", None).unwrap();
+    new.move_scene("break", 0).unwrap();
+    new.set_slot("groove", "hat", Some("h")).unwrap();
+    new.insert_section(0, "intro", 1).unwrap();
+    let changes = target_changes(old.song(), new.song());
+    let names = names(&changes);
+    assert_eq!(
+        &names[..5],
+        [
+            "clips.lead",
+            "scenes.jam",
+            "scenes",
+            "scenes.groove.slots.hat",
+            "sections",
+        ]
+    );
+    assert_eq!(changes[2].new, json!(["break", "groove", "jam"]));
+}
+
+/// Putting back the order a move took away moves the tables back, comments
+/// and all: a reorder is a change even though the scenes compare equal.
+#[test]
+fn putting_the_old_order_back_reorders_the_text() {
+    let mut doc = session();
+    doc.move_scene("break", 0).unwrap();
+    assert_ne!(doc.text(), SESSION);
+    doc.put(&target("scenes"), &json!(["groove", "break"]))
+        .unwrap();
+    assert_eq!(scene_ids(&doc), ["groove", "break"]);
+    assert_eq!(doc.text(), SESSION);
+}
+
+/// The order's ids that are not scenes are passed over, and the scenes it
+/// does not name follow in their order.
+#[test]
+fn an_order_put_keeps_the_scenes_it_does_not_name() {
+    let mut doc = session();
+    doc.add_scene("jam", Some(0)).unwrap();
+    doc.add_scene("fill", None).unwrap();
+    assert_eq!(scene_ids(&doc), ["jam", "groove", "break", "fill"]);
+    doc.put(&target("scenes"), &json!(["break", "nope", "groove"]))
+        .unwrap();
+    assert_eq!(scene_ids(&doc), ["break", "groove", "jam", "fill"]);
+    let at = |s: &str| doc.text().find(s).unwrap_or_else(|| panic!("{s}"));
+    assert!(at("# hats alone\n[scenes.break]") < at("# jam rows\n[scenes.groove]"));
+    assert!(at("[scenes.fill]") < at("[[sections]]"));
+}
+
+/// A scene put inserts the table at its index, before the scene there and
+/// its comments, or after the last scene; `null` removes it.
+#[test]
+fn a_scene_put_writes_the_table_at_its_index() {
+    let mut doc = session();
+    let value = json!({ "index": 1, "slots": { "hat": "h" } });
+    doc.put(&target("scenes.jam"), &value).unwrap();
+    assert_eq!(scene_ids(&doc), ["groove", "jam", "break"]);
+    assert!(
+        doc.text()
+            .contains("[scenes.jam]\nslots = { hat = \"h\" }\n\n# hats alone\n[scenes.break]"),
+        "{}",
+        doc.text()
+    );
+    assert_eq!(target_value(doc.song(), &target("scenes.jam")), value);
+
+    let value = json!({ "index": 9, "slots": {} });
+    doc.put(&target("scenes.end"), &value).unwrap();
+    assert_eq!(scene_ids(&doc), ["groove", "jam", "break", "end"]);
+    assert!(
+        doc.text().contains("[scenes.end]\n\n[[sections]]"),
+        "{}",
+        doc.text()
+    );
+
+    doc.put(&target("scenes.jam"), &Value::Null).unwrap();
+    doc.put(&target("scenes.end"), &Value::Null).unwrap();
+    assert_eq!(doc.text(), SESSION);
+
+    // A scene that is there with other slots is replaced at the index.
+    let value = json!({ "index": 1, "slots": { "kick": "k4" } });
+    doc.put(&target("scenes.groove"), &value).unwrap();
+    assert_eq!(scene_ids(&doc), ["break", "groove"]);
+    assert_eq!(target_value(doc.song(), &target("scenes.groove")), value);
+}
+
+/// A scene is compared without its `index`: a put of its slots at another
+/// index writes nothing (the order is the `scenes` target's).
+#[test]
+fn a_scene_put_ignores_the_index_of_the_same_scene() {
+    let mut doc = session();
+    let value = json!({ "index": 1, "slots": { "kick": "k4", "acid": "a1" } });
+    doc.put(&target("scenes.groove"), &value).unwrap();
+    assert_eq!(doc.text(), SESSION);
+}
+
+/// A scene whose slots name a track that is not there is refused until
+/// the track is back.
+#[test]
+fn a_scene_put_is_validated() {
+    let mut doc = session();
+    let value = json!({ "index": 2, "slots": { "bass": "a1" } });
+    let err = doc.put(&target("scenes.jam"), &value).unwrap_err();
+    assert!(err.to_string().contains("unknown track `bass`"), "{err}");
+    assert_eq!(doc.text(), SESSION);
+    for bad in [
+        json!({ "slots": {} }),
+        json!({ "index": 0, "slots": { "hat": 3 } }),
+    ] {
+        assert!(doc.put(&target("scenes.jam"), &bad).is_err(), "{bad}");
+    }
+    assert!(doc.put(&target("scenes"), &json!("groove")).is_err());
+    assert_eq!(doc.text(), SESSION);
 }
 
 /// An edit for the `put` cases: what it does to a document.
@@ -299,6 +511,72 @@ fn put_restores_each_kind() {
         ),
     ];
     restores(FIXTURE, cases);
+
+    let scene_cases: Vec<(&str, Edit, Edit)> = vec![
+        ("add_scene", nothing, |d| d.add_scene("jam", Some(1))),
+        ("add_scene_last", nothing, |d| d.add_scene("jam", None)),
+        ("remove_scene", nothing, |d| {
+            d.remove_scene("groove").map(drop)
+        }),
+        ("remove_last_scene", nothing, |d| {
+            d.remove_scene("break").map(drop)
+        }),
+        ("rename_scene", nothing, |d| {
+            d.rename_scene("groove", "drop")
+        }),
+        ("move_scene", nothing, |d| d.move_scene("break", 0)),
+        ("set_slot", nothing, |d| {
+            d.set_slot("groove", "hat", Some("h"))
+        }),
+        ("clear_slot", nothing, |d| {
+            d.set_slot("groove", "kick", None)
+        }),
+        ("clear_last_slot", nothing, |d| {
+            d.set_slot("break", "hat", None)
+        }),
+        // A scene made, filled and moved in one go goes back in one put.
+        ("add_fill_move", nothing, |d| {
+            d.add_scene("jam", None)?;
+            d.set_slot("jam", "hat", Some("h"))?;
+            d.move_scene("jam", 0)
+        }),
+        // The order goes back first, without the scene not there yet.
+        (
+            "move_and_remove",
+            |d| d.add_scene("jam", None),
+            |d| {
+                d.move_scene("jam", 0)?;
+                d.remove_scene("break").map(drop)
+            },
+        ),
+        // A track and a clip that sit in several scenes' slots.
+        (
+            "remove_track_in_scenes",
+            |d| d.set_slot("break", "acid", Some("a1")),
+            |d| d.remove_track("acid").map(drop),
+        ),
+        (
+            "remove_clip_in_scenes",
+            |d| d.set_slot("break", "kick", Some("k4")),
+            |d| d.remove_clip("k4").map(drop),
+        ),
+        (
+            "set_instrument_in_scenes",
+            |d| d.set_slot("break", "acid", Some("a1")),
+            |d| d.set_instrument("acid", "kick").map(drop),
+        ),
+        (
+            "rename_track_in_scenes",
+            |d| d.set_slot("break", "acid", Some("a1")),
+            |d| d.rename_track("acid", "lead"),
+        ),
+        (
+            "rename_clip_in_scenes",
+            |d| d.set_slot("break", "kick", Some("k4")),
+            |d| d.rename_clip("k4", "k8"),
+        ),
+    ];
+    restores(SESSION, scene_cases);
 }
 
 /// Each case's edit on `text` (after its setup), then every change's
@@ -319,9 +597,10 @@ fn restores(text: &str, cases: Vec<(&str, Edit, Edit)>) {
             "{case}: restored text:\n{}",
             doc.text()
         );
-        // A track comes back where it was.
+        // A track and a scene come back where they were.
         let order = |d: &SongDoc| d.song().tracks.keys().cloned().collect::<Vec<_>>();
         assert_eq!(order(&doc), order(&base), "{case}");
+        assert_eq!(scene_ids(&doc), scene_ids(&base), "{case}");
     }
 }
 
@@ -377,6 +656,18 @@ fn put_of_the_current_value_changes_nothing() {
         let value = target_value(doc.song(), &t);
         doc.put(&t, &value).unwrap_or_else(|e| panic!("{t}: {e}"));
         assert_eq!(doc.text(), FIXTURE, "{t}");
+    }
+    let mut doc = session();
+    for t in [
+        "scenes",
+        "scenes.groove",
+        "scenes.groove.slots.acid",
+        "scenes.break.slots.acid",
+    ] {
+        let t = target(t);
+        let value = target_value(doc.song(), &t);
+        doc.put(&t, &value).unwrap_or_else(|e| panic!("{t}: {e}"));
+        assert_eq!(doc.text(), SESSION, "{t}");
     }
 }
 

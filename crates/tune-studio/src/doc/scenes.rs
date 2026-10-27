@@ -8,7 +8,7 @@
 
 use toml_edit::{DocumentMut, Item};
 use tune_song::toml_doc::{Slot, normalize_positions, root_child, walk, walk_mut};
-use tune_song::{Removed, RemovedSlot, Song, scene_table_toml};
+use tune_song::{Removed, RemovedSlot, Scene, Song, scene_table_toml};
 
 use super::items::{Place, insert_table, rename_keys};
 use super::{EditError, SongDoc, put_slot};
@@ -69,34 +69,16 @@ impl SongDoc {
     pub fn move_scene(&mut self, scene: &str, index: usize) -> Result<(), EditError> {
         // The model first, so a missing scene is said before a form.
         let edited = tune_song::move_scene(&self.song, scene, index)?;
-        self.check_scenes_form("move_scene")?;
-        if let Some(Item::Table(scenes)) = self.doc.as_table().get("scenes")
-            && scenes
-                .iter()
-                .any(|(_, item)| !matches!(item, Item::Table(t) if !t.is_dotted()))
-        {
-            return Err(EditError::ScenesByHand {
-                action: "move_scene",
-            });
-        }
+        self.check_scene_tables("move_scene")?;
         let expected = edited.arranged.song;
         // Scene equality ignores order, so a move is checked by the keys.
         let after: Vec<String> = expected.scenes.keys().cloned().collect();
         if self.song.scenes.keys().eq(after.iter()) {
             return Ok(());
         }
-        let broken = |what: &str| {
-            EditError::Internal(format!("the scene move could not be {what} the file"))
-        };
         let mut doc = self.doc.clone();
         move_table(&mut doc, &self.song, scene, &after).ok_or_else(|| broken("written into"))?;
-        let mut moved = self.clone();
-        moved.commit_as(doc, Some(&expected))?;
-        if moved.song.scenes.keys().ne(after.iter()) {
-            return Err(broken("read back from"));
-        }
-        *self = moved;
-        Ok(())
+        self.commit_scenes(doc, &expected)
     }
 
     /// Puts `clip` in the slot of `track` in scene `scene`, or empties the
@@ -125,6 +107,121 @@ impl SongDoc {
             _ => Ok(()),
         }
     }
+
+    /// Refuses a file whose scenes are not each their own `[scenes.<id>]`
+    /// table, the only form [`move_table`] moves.
+    fn check_scene_tables(&self, action: &'static str) -> Result<(), EditError> {
+        self.check_scenes_form(action)?;
+        if let Some(Item::Table(scenes)) = self.doc.as_table().get("scenes")
+            && scenes
+                .iter()
+                .any(|(_, item)| !matches!(item, Item::Table(t) if !t.is_dotted()))
+        {
+            return Err(EditError::ScenesByHand { action });
+        }
+        Ok(())
+    }
+
+    /// Commits `doc` as the song `expected` on a copy, and keeps the copy
+    /// only when the file has the scenes in `expected`'s order too: `Song`
+    /// equality ignores the scene order, so a reorder that did not reach
+    /// the text would pass for no change.
+    fn commit_scenes(&mut self, doc: DocumentMut, expected: &Song) -> Result<(), EditError> {
+        let mut next = self.clone();
+        next.commit_as(doc, Some(expected))?;
+        if next.song.scenes.keys().ne(expected.scenes.keys()) {
+            return Err(broken("read back from"));
+        }
+        *self = next;
+        Ok(())
+    }
+}
+
+/// The writers of [`SongDoc::put`] for the scenes, with none of the
+/// clean-up the edit actions do. Each commits through
+/// [`commit_scenes`](SongDoc::commit_scenes), so the scene order is checked
+/// in the file as well.
+impl SongDoc {
+    /// Removes scene `id`'s table and the comments above it (`None`), or
+    /// writes `scene` as scene `id` at `index` of the scenes (replacing the
+    /// one there) in the [`scene_table_toml`] layout: right before the
+    /// table of the scene now at `index` and the comments above it, else
+    /// after the last scene table, else after the last clip table.
+    pub(crate) fn put_scene(
+        &mut self,
+        id: &str,
+        scene: Option<(usize, Scene)>,
+    ) -> Result<(), EditError> {
+        let mut song = self.song.clone();
+        let existed = song.scenes.shift_remove(id).is_some();
+        if scene.is_none() && !existed {
+            return Ok(());
+        }
+        if scene.is_some() {
+            self.check_scenes_form("undo_run")?;
+        }
+        let mut doc = self.doc.clone();
+        if existed {
+            root_child(&mut doc, "scenes")
+                .ok_or_else(|| broken("written into"))?
+                .remove(id);
+        }
+        if let Some((index, scene)) = scene {
+            let at = index.min(song.scenes.len());
+            let next = song.scenes.get_index(at).map(|(next, _)| next.clone());
+            let text = scene_table_toml(id, &scene);
+            song.scenes.shift_insert(at, id.to_owned(), scene);
+            let place = next.as_deref().map_or(Place::Last, Place::Before);
+            insert_table(&mut doc, "scenes", id, &text, place, SCENE_ANCHORS)
+                .ok_or_else(|| broken("written into"))?;
+        }
+        self.commit_scenes(doc, &song)
+    }
+
+    /// Puts the scene tables in the order of `order`: first its ids that
+    /// are scenes of the song, then the scenes it does not name, in their
+    /// order. Each scene's tables and the comments above them move as they
+    /// are, as [`move_scene`](Self::move_scene) moves them.
+    pub(crate) fn put_scene_order(&mut self, order: &[&str]) -> Result<(), EditError> {
+        let mut after: Vec<String> = Vec::new();
+        let named = order
+            .iter()
+            .copied()
+            .filter(|id| self.song.scenes.contains_key(*id));
+        for id in named
+            .map(str::to_owned)
+            .chain(self.song.scenes.keys().cloned())
+        {
+            if !after.contains(&id) {
+                after.push(id);
+            }
+        }
+        if self.song.scenes.keys().eq(after.iter()) {
+            return Ok(());
+        }
+        self.check_scene_tables("undo_run")?;
+        // Each scene in turn goes after all the others, so the last one
+        // moved ends last.
+        let mut doc = self.doc.clone();
+        let mut now: Vec<String> = self.song.scenes.keys().cloned().collect();
+        for id in &after {
+            now.retain(|s| s != id);
+            now.push(id.clone());
+            move_table(&mut doc, &self.song, id, &now).ok_or_else(|| broken("written into"))?;
+        }
+        let mut expected = self.song.clone();
+        expected.scenes = after
+            .iter()
+            .map(|id| (id.clone(), self.song.scenes[id].clone()))
+            .collect();
+        self.commit_scenes(doc, &expected)
+    }
+}
+
+/// The error of a scene write the writer could not do: a bug, not the
+/// file's fault.
+fn broken(what: &str) -> EditError {
+    EditError::Internal(format!("the scene write could not be {what} the file"))
 }
 
 /// The `slots` table of scene `scene`, when the file has one.

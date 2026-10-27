@@ -329,7 +329,7 @@ fn relative_lanes(song: &Song, i: usize) -> Option<Vec<LanePart<'_>>> {
 }
 
 /// Whether the scenes in both songs are in a different relative order.
-fn scenes_reordered(old: &Song, new: &Song) -> bool {
+pub(crate) fn scenes_reordered(old: &Song, new: &Song) -> bool {
     let shared = |a: &Song, b: &Song| -> Vec<String> {
         a.scenes
             .keys()

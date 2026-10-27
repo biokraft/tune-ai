@@ -1,18 +1,19 @@
 //! Undo targets: a song seen as the values and items one edit can change.
 //!
-//! A [`Target`] is one leaf value (any `tune set` path), one whole item (a
-//! track, a track's instrument or fx chain, a clip), one list merged an
-//! element at a time (a track's placements, the stretches of one lane
-//! param) or the section list. [`target_changes`] gives the targets two
-//! songs differ in, with each one's value on both sides (see
-//! [`target_value`]); the edit log records them per write, so a run can be
-//! undone target by target. [`SongDoc::put`] writes a value back.
+//! A [`Target`] is one leaf value (any `tune set` path, a scene's slot
+//! among them), one whole item (a track, a track's instrument or fx chain,
+//! a clip, a scene), one list merged an element at a time (a track's
+//! placements, the stretches of one lane param), the section list or the
+//! scene order. [`target_changes`] gives the targets two songs differ in,
+//! with each one's value on both sides (see [`target_value`]); the edit log
+//! records them per write, so a run can be undone target by target.
+//! [`SongDoc::put`] writes a value back.
 //!
 //! Values are effective (defaults filled in), so writing one back can turn
 //! an implicit default into an explicit one. A removed item comes back in
-//! the minimal layout, without the comments it had: a restored track or
-//! clip table, and a restored lane stretch (an `[[automation]]` table gets
-//! no comment back, as the stretch's value holds none).
+//! the minimal layout, without the comments it had: a restored track, clip
+//! or scene table, and a restored lane stretch (an `[[automation]]` table
+//! gets no comment back, as the stretch's value holds none).
 
 use std::fmt;
 use std::str::FromStr;
@@ -21,9 +22,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value, json};
 use tune_dsp::STRIP_PARAMS;
 use tune_song::{
-    ClipKind, Device, Lane, MIX_TRACK_ID, MixUnit, Placement, Registry, Section, Song, Track,
+    ClipKind, Device, Lane, MIX_TRACK_ID, MixUnit, Placement, Registry, Scene, Section, Song, Track,
 };
 
+use crate::diff::scenes_reordered;
 use crate::doc::{EditError, SongDoc, effective_value, num, placement_json};
 use crate::path::{SongPath, TrackField};
 
@@ -33,7 +35,7 @@ pub enum Target {
     /// A leaf: `song.bpm`, `tracks.<t>.<field>`,
     /// `tracks.<t>.<device>.<param|setting>`, `tracks.<t>.send.delay` …,
     /// `mix.master`, `mix.duck_source`, `mix.<param>`,
-    /// `clips.<c>.steps|notes|bars`.
+    /// `clips.<c>.steps|notes|bars`, `scenes.<s>.slots.<t>`.
     Value(SongPath),
     /// `tracks.<t>`: the whole track.
     Track(String),
@@ -50,6 +52,10 @@ pub enum Target {
     Lanes { track: String, param: String },
     /// `sections`: the section list.
     Sections,
+    /// `scenes.<s>`: the whole scene.
+    Scene(String),
+    /// `scenes`: the scene order.
+    SceneOrder,
 }
 
 impl fmt::Display for Target {
@@ -63,6 +69,8 @@ impl fmt::Display for Target {
             Self::Play(t) => write!(f, "tracks.{t}.play"),
             Self::Lanes { track, param } => write!(f, "automation.{track}.{param}"),
             Self::Sections => f.write_str("sections"),
+            Self::Scene(s) => write!(f, "scenes.{s}"),
+            Self::SceneOrder => f.write_str("scenes"),
         }
     }
 }
@@ -74,8 +82,8 @@ impl FromStr for Target {
         parse(s).ok_or_else(|| {
             format!(
                 "unknown target `{s}` (expected a value path, tracks.<track>, \
-                 tracks.<track>.instrument|fx|play, clips.<clip>, \
-                 automation.<track>.<param id> or sections)"
+                 tracks.<track>.instrument|fx|play, clips.<clip>, scenes, \
+                 scenes.<scene>, automation.<track>.<param id> or sections)"
             )
         })
     }
@@ -134,7 +142,10 @@ fn parse(s: &str) -> Option<Target> {
         | SongPath::MixDuckSource
         | SongPath::Clip { .. }
         | SongPath::ClipNotes { .. }
-        | SongPath::ClipBars { .. }) => Some(Target::Value(path)),
+        | SongPath::ClipBars { .. }
+        | SongPath::SceneSlot { .. }) => Some(Target::Value(path)),
+        SongPath::Scenes => Some(Target::SceneOrder),
+        SongPath::Scene { scene } => Some(Target::Scene(scene)),
         _ => None,
     }
 }
@@ -175,6 +186,9 @@ pub struct TargetChange {
 /// - `automation.<t>.<p>`: `[{"at", "bars", "points"}]` in bar order (`at`
 ///   1-based); `[]` when the param has no stretch,
 /// - `sections`: `[{"name", "bars"}]`,
+/// - `scenes.<s>`: `{"index", "slots": {<track>: <clip>}}`, `index` its
+///   position among the scenes (left out when scenes are compared),
+/// - `scenes`: `[<scene id>]` in row order,
 /// - a leaf: [`effective_value`].
 pub fn target_value(song: &Song, target: &Target) -> Value {
     let track = |t: &str| song.tracks.get(t);
@@ -187,6 +201,8 @@ pub fn target_value(song: &Song, target: &Target) -> Value {
         Target::Play(t) => track(t).map_or(Value::Null, |t| play_json(&t.play)),
         Target::Lanes { track, param } => lanes_json(song, track, param),
         Target::Sections => sections_json(&song.sections),
+        Target::Scene(s) => scene_json(song, s),
+        Target::SceneOrder => scene_order_json(song),
     }
 }
 
@@ -197,8 +213,12 @@ pub fn target_value(song: &Song, target: &Target) -> Value {
 /// its param and setting leaves), `tracks.<t>.fx` when the chain's ids or
 /// modules changed, and the param and setting leaves of each effect in
 /// both chains; `clips.<c>` for a clip in one song only or of another kind
-/// (else its leaves); `sections`; then the arrangement on top of the
-/// sections: `tracks.<t>.play` per track in both songs whose placements
+/// (else its leaves); the scenes as [`diff_songs`](crate::diff_songs) gives
+/// them: `scenes.<s>` for a scene in one song only, `scenes` when the
+/// scenes in both are in another relative order, and per scene in both one
+/// `scenes.<s>.slots.<t>` per track whose clip differs (old's slot order,
+/// then new's); `sections`; then the arrangement on top of the sections:
+/// `tracks.<t>.play` per track in both songs whose placements
 /// changed, and one `automation.<t>.<p>` per lane param whose stretches
 /// changed (compared in bar order, so a reorder in the file is no change).
 pub fn target_changes(old: &Song, new: &Song) -> Vec<TargetChange> {
@@ -271,6 +291,31 @@ pub fn target_changes(old: &Song, new: &Song) -> Vec<TargetChange> {
                 let (a, b) = (clip_json(old, &id), clip_json(new, &id));
                 out.push(change(Target::Clip(id), a, b));
             }
+        }
+    }
+
+    for id in union(old.scenes.keys(), new.scenes.keys()) {
+        if old.scenes.contains_key(&id) != new.scenes.contains_key(&id) {
+            let (a, b) = (scene_json(old, &id), scene_json(new, &id));
+            out.push(change(Target::Scene(id), a, b));
+        }
+    }
+    if scenes_reordered(old, new) {
+        let (a, b) = (scene_order_json(old), scene_order_json(new));
+        out.push(change(Target::SceneOrder, a, b));
+    }
+    for (id, o) in &old.scenes {
+        if let Some(n) = new.scenes.get(id) {
+            out.extend(
+                union(o.slots.keys(), n.slots.keys())
+                    .into_iter()
+                    .map(|track| {
+                        leaf(SongPath::SceneSlot {
+                            scene: id.clone(),
+                            track,
+                        })
+                    }),
+            );
         }
     }
 
@@ -428,6 +473,17 @@ fn lanes_json(song: &Song, track: &str, param: &str) -> Value {
     )
 }
 
+fn scene_json(song: &Song, id: &str) -> Value {
+    let Some((index, _, scene)) = song.scenes.get_full(id) else {
+        return Value::Null;
+    };
+    json!({ "index": index, "slots": scene.slots })
+}
+
+fn scene_order_json(song: &Song) -> Value {
+    Value::Array(song.scenes.keys().cloned().map(Value::from).collect())
+}
+
 fn sections_json(sections: &[Section]) -> Value {
     Value::Array(
         sections
@@ -459,7 +515,18 @@ impl SongDoc {
     ///   comments, one that comes back after it went gets none (a lane's
     ///   value holds no comments);
     /// - `sections` rebuilds the list in the value's order, each entry
-    ///   reusing the first unused table of that name (comments kept).
+    ///   reusing the first unused table of that name (comments kept);
+    /// - `scenes.<s>`: `null` removes the scene's table; a value inserts it
+    ///   at `index` in the [`scene_table_toml`](tune_song::scene_table_toml)
+    ///   layout, before the table of the scene now there, else after the
+    ///   last (replacing the scene if it is there). A scene is compared
+    ///   without its `index`: a put of its slots at another index writes
+    ///   nothing, as the place is the `scenes` target's;
+    /// - `scenes` reorders the scene tables to the value's order, the
+    ///   scenes it does not name following in their order (its ids that are
+    ///   not scenes are passed over); each table keeps its comments. A
+    ///   reorder is checked against the file's order, which `Song` equality
+    ///   ignores.
     pub fn put(&mut self, target: &Target, value: &Value) -> Result<(), EditError> {
         self.put_value(target, value).map_err(|e| match e {
             Bad::Edit(e) => e,
@@ -471,7 +538,13 @@ impl SongDoc {
     }
 
     fn put_value(&mut self, target: &Target, value: &Value) -> Result<(), Bad> {
-        if target_value(self.song(), target) == *value {
+        let current = target_value(self.song(), target);
+        let same = match target {
+            // A scene's place is the order's: its `index` is no change.
+            Target::Scene(_) => without_index(&current) == without_index(value),
+            _ => current == *value,
+        };
+        if same {
             return Ok(());
         }
         let null = value.is_null();
@@ -523,6 +596,19 @@ impl SongDoc {
             Target::Sections => {
                 let sections = list(value)?.iter().map(section_from);
                 self.put_sections(sections.collect::<Result<_, _>>()?)?;
+            }
+            Target::Scene(id) if null => self.put_scene(id, None)?,
+            Target::Scene(id) => {
+                let index = field(value, "index")?.as_u64();
+                let index = index.and_then(|i| usize::try_from(i).ok());
+                let index = index.ok_or("bad `index`")?;
+                self.put_scene(id, Some((index, scene_from(value)?)))?;
+            }
+            Target::SceneOrder => {
+                let ids = list(value)?
+                    .iter()
+                    .map(|id| id.as_str().ok_or("bad scene id"));
+                self.put_scene_order(&ids.collect::<Result<Vec<_>, _>>()?)?;
             }
         }
         Ok(())
@@ -687,6 +773,26 @@ fn lane_from(v: &Value, track: &str, param: &str) -> Result<Lane, Bad> {
         start_bar: bar0(v, "at")?,
         bars: whole(v, "bars")?,
         points,
+    })
+}
+
+/// `v` without its `index` key, as a scene is compared.
+fn without_index(v: &Value) -> Value {
+    let mut v = v.clone();
+    if let Some(map) = v.as_object_mut() {
+        map.remove("index");
+    }
+    v
+}
+
+fn scene_from(v: &Value) -> Result<Scene, Bad> {
+    let slots = field(v, "slots")?.as_object().ok_or("bad `slots`")?;
+    let slots = slots.iter().map(|(track, clip)| match clip.as_str() {
+        Some(clip) => Ok((track.clone(), clip.to_owned())),
+        None => Err(Bad::Value(format!("bad slot `{track}`"))),
+    });
+    Ok(Scene {
+        slots: slots.collect::<Result<_, _>>()?,
     })
 }
 
