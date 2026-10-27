@@ -161,7 +161,7 @@ pub fn undo_run(
     };
     let mut waiting = Vec::new();
     for unit in units {
-        let decided: Vec<(&Plan, Decision, Option<Source>)> = unit
+        let decided: Vec<(&Plan, Decision)> = unit
             .iter()
             .map(|&k| {
                 let p = &plans[k];
@@ -171,16 +171,18 @@ pub fn undo_run(
                 } else {
                     decide(doc, p, &foreign, records)
                 };
-                (p, decision, foreign.last().map(|&j| records[j].source))
+                (p, decision)
             })
             .collect();
-        let whole = decided.iter().all(|(_, d, _)| match d {
-            Decision::Already => true,
-            Decision::Kept(_) => false,
-            Decision::Revert { kept, .. } => kept.is_empty(),
+        // The first kept part, if any: it keeps the whole unit.
+        let cause = decided.iter().find_map(|(_, d)| match d {
+            Decision::Already => None,
+            Decision::Kept(kept) | Decision::Revert { kept, .. } => kept.first(),
         });
+        let whole = cause.is_none();
+        let cause_by = cause.and_then(|k| k.by);
         let mut puts = Vec::new();
-        for (p, decision, by) in decided {
+        for (p, decision) in decided {
             match decision {
                 Decision::Already => out.already.push(p.target.clone()),
                 Decision::Kept(kept) => out.kept.extend(kept),
@@ -188,14 +190,15 @@ pub fn undo_run(
                     out.kept.extend(kept);
                     puts.push((p.target.clone(), value, items));
                 }
-                // A part of a section edit is kept: so is the rest of it.
+                // A part of a section edit is kept: so is the rest of it,
+                // naming who changed that part.
                 Decision::Revert { items, kept, .. } => {
                     out.kept.extend(kept);
                     out.kept.extend(items.into_iter().map(|item| KeptTarget {
                         target: p.target.clone(),
                         item,
                         reason: KeptReason::ChangedLater,
-                        by,
+                        by: cause_by,
                         message: None,
                     }));
                 }
