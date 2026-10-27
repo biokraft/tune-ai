@@ -1,6 +1,6 @@
 //! The canonical serializer: exact layout, round trips and number fidelity.
 
-use tune_song::{Placement, Song, parse_song, placements_toml};
+use tune_song::{Note, Placement, Song, notes_toml, parse_song, placements_toml};
 
 const MINI: &str = include_str!("fixtures/mini.toml");
 
@@ -245,4 +245,71 @@ fn mix_writes_duck_source_and_bare_eq() {
 fn no_mix_writes_no_mix_table() {
     let text = parse(MINI).to_toml();
     assert!(!text.contains("[mix]"), "{text}");
+}
+
+#[test]
+fn note_clips_round_trip() {
+    let src = r#"[song]
+version = 2
+name = "notes"
+bpm = 120
+
+[tracks.acid]
+instrument = "acid303"
+play = [{ at = 1, clip = "lead", bars = 1 }]
+
+[clips.lead]
+kind = "notes"
+bars = 1
+notes = [
+  { start = 0, pitch = "C3", len = 3 },
+  { start = 0.333, pitch = "G3", len = 0.5 },
+  { start = 2.5, pitch = "Eb3", len = 2, vel = 120 },
+]
+
+[clips.rest]
+kind = "notes"
+bars = 2
+
+[[sections]]
+name = "a"
+bars = 1
+"#;
+    let song = parse_song(src).unwrap();
+    let text = song.to_toml();
+    let clip = r#"[clips.lead]
+kind = "notes"
+bars = 1
+notes = [
+  { start = 0, pitch = "C3", len = 3 },
+  { start = 0.3333333333333333, pitch = "G3", len = 0.5 },
+  { start = 2.5, pitch = "D#3", len = 2, vel = 120 },
+]
+
+[clips.rest]
+kind = "notes"
+bars = 2
+"#;
+    assert!(text.contains(clip), "{text}");
+    assert_eq!(parse_song(&text).unwrap(), song);
+    assert_eq!(parse_song(&text).unwrap().to_toml(), text);
+}
+
+#[test]
+fn notes_toml_layout() {
+    let note = |start, len, pitch, velocity| Note {
+        start,
+        len,
+        pitch,
+        velocity,
+    };
+    assert_eq!(notes_toml(&[]), "[]");
+    assert_eq!(
+        notes_toml(&[note(0, 72, 48, 100)]),
+        r#"[{ start = 0, pitch = "C3", len = 3 }]"#
+    );
+    assert_eq!(
+        notes_toml(&[note(0, 72, 48, 100), note(60, 48, 51, 120)]),
+        "[\n  { start = 0, pitch = \"C3\", len = 3 },\n  { start = 2.5, pitch = \"D#3\", len = 2, vel = 120 },\n]"
+    );
 }

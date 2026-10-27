@@ -5,8 +5,11 @@
 use tune_dsp::acid303::AcidStep;
 use tune_dsp::acid303::math::db2amp;
 use tune_dsp::{DrumHit, ParamSpec, STRIP_PARAMS, find_spec};
-use tune_modules::ModuleDescriptor;
-use tune_song::{Clip, Device, MIX_TRACK_ID, MasterMode, MixUnit, Song, Track, find_mix_param};
+use tune_modules::{ACCENT_VELOCITY, ModuleDescriptor, NoteEvent, NoteId};
+use tune_song::{
+    Clip, Device, MIX_TRACK_ID, MasterMode, MixUnit, NoteClip, Song, TICKS_PER_STEP, Track,
+    find_mix_param,
+};
 
 use crate::clock::{Clock, track_seed};
 use crate::mixer::pan_gains;
@@ -24,6 +27,88 @@ pub enum Cell {
     Note(AcidStep),
 }
 
+/// The id bit of a note-clip note: its [`NoteId`] is `NOTE_CLIP_IDS | index`,
+/// the note's position in its clip, which no step note's id (below 2^31)
+/// shares.
+pub const NOTE_CLIP_IDS: u32 = 0x8000_0000;
+
+/// One clip as the engine plays it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CompiledClip {
+    /// An acid or drum clip: one cell per step.
+    Steps(Vec<Cell>),
+    /// A notes clip: its note events.
+    Notes(NoteClipEvents),
+}
+
+/// A notes clip compiled to its events, in the order the engine sends them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NoteClipEvents {
+    /// The clip's id in the song file.
+    pub id: String,
+    /// The clip's length in 16th steps.
+    pub steps: u64,
+    /// Sorted by tick, then Offs before Ons, then note index.
+    pub events: Vec<ClipEvent>,
+    /// `steps + 1` indices into `events`: entry `s` is the first event with
+    /// `tick >= 24 * s` (the last entry is `events.len()`).
+    pub step_starts: Vec<usize>,
+}
+
+/// One event of a notes clip.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClipEvent {
+    /// Ticks from the clip start, `0 .. 24 * steps`.
+    pub tick: u32,
+    pub event: NoteEvent,
+}
+
+impl NoteClipEvents {
+    /// Compiles `clip`, called `id`. Note `i` is an On at its start and an
+    /// Off at its end (an Off at the clip's end moves to tick 0, where the
+    /// loop wraps); its On slides when a later note starts inside it.
+    pub fn new(id: &str, clip: &NoteClip) -> Self {
+        let steps = u64::from(clip.steps());
+        let clip_end = clip.steps() * TICKS_PER_STEP;
+        // (tick, is_on, note index, event)
+        let mut events: Vec<(u32, bool, usize, NoteEvent)> = Vec::new();
+        for (i, n) in clip.notes.iter().enumerate() {
+            let id = NoteId(NOTE_CLIP_IDS | u32::try_from(i).expect("at most 2^31 notes"));
+            let slide = clip.notes[i + 1..]
+                .iter()
+                .any(|later| later.start > n.start && later.start < n.end());
+            events.push((
+                n.start,
+                true,
+                i,
+                NoteEvent::On {
+                    id,
+                    pitch: n.pitch,
+                    velocity: n.velocity,
+                    accent: n.velocity >= ACCENT_VELOCITY,
+                    slide,
+                },
+            ));
+            let off = if n.end() >= clip_end { 0 } else { n.end() };
+            events.push((off, false, i, NoteEvent::Off { id, pitch: n.pitch }));
+        }
+        events.sort_by_key(|&(tick, on, i, _)| (tick, on, i));
+        let events: Vec<ClipEvent> = events
+            .into_iter()
+            .map(|(tick, _, _, event)| ClipEvent { tick, event })
+            .collect();
+        let step_starts = (0..=clip.steps())
+            .map(|s| events.partition_point(|e| e.tick < s * TICKS_PER_STEP))
+            .collect();
+        Self {
+            id: id.to_owned(),
+            steps,
+            events,
+            step_starts,
+        }
+    }
+}
+
 /// A song ready to play. Tracks, clips and sections keep song-file order.
 #[derive(Clone, Debug)]
 pub struct CompiledSong {
@@ -31,8 +116,8 @@ pub struct CompiledSong {
     pub clock: Clock,
     pub total_bars: u32,
     pub tracks: Vec<CompiledTrack>,
-    /// One cell per clip step, indexed like `Song::clips`.
-    pub clips: Vec<Vec<Cell>>,
+    /// One compiled clip per `Song::clips` entry, in the same order.
+    pub clips: Vec<CompiledClip>,
     /// The named sections, for bar maps; the engine plays `regions`.
     pub sections: Vec<CompiledSection>,
     /// The arrangement cut wherever a section, a placement or a lane
@@ -197,25 +282,28 @@ impl CompiledSong {
 
         let clips = song
             .clips
-            .values()
-            .map(|p| match p {
-                Clip::Acid(acid) => acid
-                    .steps()
-                    .iter()
-                    .map(|s| match s.note {
-                        Some(_) => Cell::Note(s.clone()),
-                        None => Cell::Rest,
-                    })
-                    .collect(),
-                Clip::Drum(drum) => drum
-                    .hits()
-                    .iter()
-                    .map(|h| match h {
-                        DrumHit::Rest => Cell::Rest,
-                        DrumHit::Hit => Cell::Hit { accent: false },
-                        DrumHit::Accent => Cell::Hit { accent: true },
-                    })
-                    .collect(),
+            .iter()
+            .map(|(id, clip)| match clip {
+                Clip::Acid(acid) => CompiledClip::Steps(
+                    acid.steps()
+                        .iter()
+                        .map(|s| match s.note {
+                            Some(_) => Cell::Note(s.clone()),
+                            None => Cell::Rest,
+                        })
+                        .collect(),
+                ),
+                Clip::Drum(drum) => CompiledClip::Steps(
+                    drum.hits()
+                        .iter()
+                        .map(|h| match h {
+                            DrumHit::Rest => Cell::Rest,
+                            DrumHit::Hit => Cell::Hit { accent: false },
+                            DrumHit::Accent => Cell::Hit { accent: true },
+                        })
+                        .collect(),
+                ),
+                Clip::Notes(notes) => CompiledClip::Notes(NoteClipEvents::new(id, notes)),
             })
             .collect();
 
@@ -452,6 +540,7 @@ mod tests {
     use super::*;
     use tune_dsp::DIST_PARAMS;
     use tune_dsp::acid303::ACID303_PARAMS;
+    use tune_song::Note;
 
     const MINI: &str = include_str!("../../tune-song/tests/fixtures/mini.toml");
 
@@ -536,12 +625,16 @@ mod tests {
     fn clips_become_cells() {
         let s = mini();
         assert_eq!(s.clips.len(), 3);
-        let k4 = &s.clips[0];
+        let steps = |i: usize| match &s.clips[i] {
+            CompiledClip::Steps(cells) => cells,
+            other => panic!("not a step clip: {other:?}"),
+        };
+        let k4 = steps(0);
         assert_eq!(k4.len(), 16);
         assert_eq!(k4[0], Cell::Hit { accent: false });
         assert_eq!(k4[1], Cell::Rest);
         assert_eq!(k4[12], Cell::Hit { accent: true });
-        let a1 = &s.clips[1];
+        let a1 = steps(1);
         assert_eq!(a1.len(), 8);
         assert!(matches!(&a1[1], Cell::Note(n) if n.note == Some(36) && n.accent));
         assert!(matches!(&a1[2], Cell::Note(n) if n.note == Some(48) && n.slide));
@@ -625,5 +718,113 @@ mod tests {
         let lanes: Vec<usize> = s.regions.iter().map(|r| r.lanes.len()).collect();
         assert_eq!(lanes, [0, 1, 1, 0]);
         assert_eq!(s.regions[1].lanes[0].start_sample, 96_000);
+    }
+
+    #[test]
+    fn note_clips_become_events() {
+        let mut song = tune_song::parse_song(MINI).unwrap();
+        let note = |start, len, pitch, velocity| Note {
+            start,
+            len,
+            pitch,
+            velocity,
+        };
+        // Notes {0, C3, 4}, {2.5, D#3, 2, vel 120} and {14, G3, 2}, in steps.
+        let clip = NoteClip {
+            bars: 1,
+            notes: vec![
+                note(0, 96, 48, 100),
+                note(60, 48, 51, 120),
+                note(336, 48, 55, 100),
+            ],
+        };
+        song.clips.insert("lead".into(), Clip::Notes(clip));
+        let s = CompiledSong::new(&song, 48_000);
+        let CompiledClip::Notes(lead) = s.clips.last().unwrap() else {
+            panic!("not a notes clip");
+        };
+        assert_eq!(lead.id, "lead");
+        assert_eq!(lead.steps, 16);
+        let on = |i, pitch, velocity, accent, slide| NoteEvent::On {
+            id: NoteId(NOTE_CLIP_IDS | i),
+            pitch,
+            velocity,
+            accent,
+            slide,
+        };
+        let off = |i, pitch| NoteEvent::Off {
+            id: NoteId(NOTE_CLIP_IDS | i),
+            pitch,
+        };
+        let events: Vec<(u32, NoteEvent)> = lead.events.iter().map(|e| (e.tick, e.event)).collect();
+        assert_eq!(
+            events,
+            [
+                (0, off(2, 55)),
+                (0, on(0, 48, 100, false, true)),
+                (60, on(1, 51, 120, true, false)),
+                (96, off(0, 48)),
+                (108, off(1, 51)),
+                (336, on(2, 55, 100, false, false)),
+            ]
+        );
+        assert_eq!(
+            lead.step_starts,
+            [0, 2, 2, 3, 3, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6]
+        );
+    }
+
+    #[test]
+    fn chords_order_by_note_and_do_not_slide() {
+        let clip = NoteClip {
+            bars: 1,
+            notes: vec![
+                Note {
+                    start: 0,
+                    len: 24,
+                    pitch: 48,
+                    velocity: 100,
+                },
+                Note {
+                    start: 0,
+                    len: 48,
+                    pitch: 52,
+                    velocity: 100,
+                },
+                Note {
+                    start: 24,
+                    len: 24,
+                    pitch: 55,
+                    velocity: 100,
+                },
+            ],
+        };
+        let lead = NoteClipEvents::new("c", &clip);
+        let ticks: Vec<(u32, bool)> = lead
+            .events
+            .iter()
+            .map(|e| (e.tick, matches!(e.event, NoteEvent::On { .. })))
+            .collect();
+        assert_eq!(
+            ticks,
+            [
+                (0, true),
+                (0, true),
+                (24, false),
+                (24, true),
+                (48, false),
+                (48, false)
+            ]
+        );
+        let slides: Vec<bool> = lead
+            .events
+            .iter()
+            .filter_map(|e| match e.event {
+                NoteEvent::On { slide, .. } => Some(slide),
+                _ => None,
+            })
+            .collect();
+        // The second chord note runs on into the third note's start.
+        assert_eq!(slides, [false, true, false]);
     }
 }

@@ -12,9 +12,11 @@ use super::tracks::{TrackShape, find_in, or_list, param_ids, spec_ids, unknown_p
 use super::{BARS, Duck, MAX_SONG_BARS, check_id, unknown_track};
 use crate::error::Errors;
 use crate::model::{
-    Clip, Lane, MIX_TRACK_ID, MixUnit, Placement, Section, Track, section_bars_error,
+    Clip, DEFAULT_VELOCITY, Lane, MIX_TRACK_ID, MixUnit, NOTE_CLIP_BARS, Note, NoteClip, Placement,
+    Section, TICKS_PER_STEP, Track, parse_pitch, section_bars_error,
 };
-use crate::raw::{At, RawLane, RawPlacement, RawSection, RawSong};
+use crate::raw::{At, RawClip, RawLane, RawPlacement, RawSection, RawSong};
+use crate::write::num;
 
 /// The arrangement of a song: its clip pool, sections and lane stretches.
 /// Placements go straight into the tracks.
@@ -130,9 +132,12 @@ pub(super) fn v2(
             kind
         });
         kinds.insert(id.value.as_str(), kind);
-        if let (Some(kind), Some(steps)) = (kind, &c.steps)
-            && let Some(clip) = clip_steps("clip", id, kind, steps, errors)
-        {
+        let clip = match (kind, &c.steps) {
+            (Some(ClipKind::Notes), _) => note_clip(id, c, errors),
+            (Some(kind), Some(steps)) => clip_steps("clip", id, kind, steps, errors),
+            _ => None,
+        };
+        if let Some(clip) = clip {
             clips.insert(id.value.clone(), clip);
         }
     }
@@ -238,6 +243,7 @@ fn clip_steps(
                 PatternError::Length(n) => Err(n),
                 other => Ok(other.to_string()),
             }),
+        ClipKind::Notes => unreachable!("a notes clip has no steps"),
     };
     match parsed {
         Ok(clip) => Some(clip),
@@ -256,6 +262,158 @@ fn clip_steps(
             None
         }
     }
+}
+
+/// The grid tolerance: a position this near a multiple of 1/24 step is that
+/// multiple.
+const GRID_TOLERANCE: f64 = 0.001;
+
+/// `value` 16th steps as ticks, when it is within [`GRID_TOLERANCE`] of a
+/// tick.
+fn grid_ticks(value: f64) -> Option<i64> {
+    if !value.is_finite() {
+        return None;
+    }
+    let ticks = (value * f64::from(TICKS_PER_STEP)).round();
+    let on_grid = (value - ticks / f64::from(TICKS_PER_STEP)).abs() <= GRID_TOLERANCE;
+    // Beyond i64 there is no grid worth speaking of; `as` saturates.
+    on_grid.then_some(ticks as i64)
+}
+
+/// `ticks` as 16th steps in the writer's number form.
+fn steps_text(ticks: i64) -> String {
+    num(ticks as f64 / f64::from(TICKS_PER_STEP))
+}
+
+/// Checks a notes clip `id`: its `bars` and every note. The notes are
+/// checked even when `bars` is broken, but not against the clip's end.
+fn note_clip(id: &At<String>, c: &RawClip, errors: &mut Errors) -> Option<Clip> {
+    let before = errors.len();
+    let clip = &id.value;
+    let bars = c.bars.as_ref().and_then(|b| {
+        let ok = u32::try_from(b.value)
+            .ok()
+            .filter(|n| NOTE_CLIP_BARS.contains(n));
+        if ok.is_none() {
+            errors.at(
+                &b.span,
+                format!(
+                    "a notes clip has {} to {} bars, got {}",
+                    NOTE_CLIP_BARS.start(),
+                    NOTE_CLIP_BARS.end(),
+                    b.value
+                ),
+            );
+        }
+        ok
+    });
+    let end_tick = bars.map(|b| i64::from(b) * 16 * i64::from(TICKS_PER_STEP));
+
+    let mut notes = Vec::new();
+    // The start of the last note whose `start` was valid.
+    let mut prev: Option<(i64, usize)> = None;
+    for n in &c.notes {
+        let at = format!("note {} of clip `{clip}`", n.number);
+        let grid = |field: &str, v: &At<f64>, errors: &mut Errors| {
+            let ticks = grid_ticks(v.value);
+            if ticks.is_none() {
+                errors.at(
+                    &v.span,
+                    format!(
+                        "{at}: `{field}` {} is off the grid (positions are 16th steps in multiples of 1/24, e.g. 0.5, 0.25 or 0.333)",
+                        num(v.value)
+                    ),
+                );
+            }
+            ticks
+        };
+        let start = n.start.as_ref().and_then(|v| {
+            let ticks = grid("start", v, errors)?;
+            if ticks < 0 {
+                errors.at(
+                    &v.span,
+                    format!("{at}: `start` must be at least 0, got {}", num(v.value)),
+                );
+                return None;
+            }
+            if let Some((before, number)) = prev
+                && ticks < before
+            {
+                errors.at(
+                    &v.span,
+                    format!(
+                        "notes of clip `{clip}` must be in time order: note {} starts before note {number}",
+                        n.number
+                    ),
+                );
+            }
+            prev = Some((ticks, n.number));
+            Some(ticks)
+        });
+        let len = n.len.as_ref().and_then(|v| {
+            let ticks = grid("len", v, errors)?;
+            if ticks < 1 {
+                errors.at(
+                    &v.span,
+                    format!("{at}: `len` must be more than 0, got {}", num(v.value)),
+                );
+                return None;
+            }
+            Some(ticks)
+        });
+        if let (Some(start), Some(len), Some(end_tick)) = (start, len, end_tick) {
+            let end = start.saturating_add(len);
+            if end > end_tick {
+                let v = n.len.as_ref().expect("a valid len has a value");
+                errors.at(
+                    &v.span,
+                    format!(
+                        "{at} ends at step {}, past the clip's end (step {})",
+                        steps_text(end),
+                        steps_text(end_tick)
+                    ),
+                );
+            }
+        }
+        let pitch = n.pitch.as_ref().and_then(|p| {
+            let pitch = parse_pitch(&p.value);
+            if pitch.is_none() {
+                errors.at(
+                    &p.span,
+                    format!(
+                        "{at}: unknown pitch `{}` (expected a note such as `C3`, `D#2` or `Bb1`, from C-1 to G9)",
+                        p.value
+                    ),
+                );
+            }
+            pitch
+        });
+        let velocity = match &n.vel {
+            None => Some(DEFAULT_VELOCITY),
+            Some(v) => {
+                let ok = u8::try_from(v.value).ok().filter(|v| (1..=127).contains(v));
+                if ok.is_none() {
+                    errors.at(
+                        &v.span,
+                        format!("{at}: `vel` must be 1 to 127, got {}", v.value),
+                    );
+                }
+                ok
+            }
+        };
+        if let (Some(start), Some(len), Some(pitch), Some(velocity)) = (start, len, pitch, velocity)
+            && let (Ok(start), Ok(len)) = (u32::try_from(start), u32::try_from(len))
+        {
+            notes.push(Note {
+                start,
+                len,
+                pitch,
+                velocity,
+            });
+        }
+    }
+    (errors.len() == before).then_some(())?;
+    Some(Clip::Notes(NoteClip { bars: bars?, notes }))
 }
 
 /// A section's `bars`, when it is valid.
@@ -402,9 +560,11 @@ fn placements(
                     if let Some(module) = shape.module()
                         && !module.plays(*kind)
                     {
+                        // Every instrument plays notes clips; the others are
+                        // what tells instruments apart.
                         let plays: Vec<&str> = ClipKind::ALL
                             .iter()
-                            .filter(|k| module.plays(**k))
+                            .filter(|k| **k != ClipKind::Notes && module.plays(**k))
                             .map(|k| k.name())
                             .collect();
                         errors.at(

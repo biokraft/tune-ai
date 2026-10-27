@@ -305,14 +305,85 @@ impl Track {
     }
 }
 
-/// A named loop of steps in the pool of clips. A clip belongs to no track;
-/// which tracks can play it follows from its kind.
+/// Ticks in one 16th step: the grid note-clip positions live on (1/384 bar).
+pub const TICKS_PER_STEP: u32 = 24;
+/// The velocity of a note that gives none.
+pub const DEFAULT_VELOCITY: u8 = 100;
+/// The bars a note clip may have.
+pub const NOTE_CLIP_BARS: RangeInclusive<u32> = 1..=64;
+
+/// One note of a note clip.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Note {
+    /// Ticks from the clip start.
+    pub start: u32,
+    /// Ticks, at least 1.
+    pub len: u32,
+    /// MIDI note number.
+    pub pitch: u8,
+    /// 1 to 127.
+    pub velocity: u8,
+}
+
+impl Note {
+    /// The tick the note ends at: `start + len`.
+    pub fn end(&self) -> u32 {
+        self.start + self.len
+    }
+}
+
+/// A loop of timed notes, `bars` long.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoteClip {
+    /// In [`NOTE_CLIP_BARS`].
+    pub bars: u32,
+    /// In time order (`start` never decreases), each ending by the clip's end.
+    pub notes: Vec<Note>,
+}
+
+impl NoteClip {
+    /// The clip's length in 16th steps: `16 * bars`.
+    pub fn steps(&self) -> u32 {
+        16 * self.bars
+    }
+}
+
+/// Note names of the 12 pitch classes, as acid notation prints them.
+const PITCH_NAMES: [&str; 12] = [
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+];
+
+/// The MIDI pitch of a note name as acid notation writes a note, without
+/// suffixes (`C3` is 48, `Bb1` is 34, `C-1` to `G9`); `None` for anything
+/// else.
+pub fn parse_pitch(name: &str) -> Option<u8> {
+    if name.contains(char::is_whitespace) {
+        return None;
+    }
+    let pattern = AcidPattern::parse(name).ok()?;
+    match pattern.steps() {
+        [step] if !step.accent && !step.slide => step.note,
+        _ => None,
+    }
+}
+
+/// The name of `pitch` as acid notation prints it, sharps spelled with `#`
+/// (51 is `D#3`, 0 is `C-1`).
+pub fn pitch_name(pitch: u8) -> String {
+    let octave = i32::from(pitch / 12) - 1;
+    format!("{}{octave}", PITCH_NAMES[usize::from(pitch % 12)])
+}
+
+/// A named loop in the pool of clips. A clip belongs to no track; which
+/// tracks can play it follows from its kind.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Clip {
     /// Steps in 303 notation.
     Acid(AcidPattern),
     /// Steps in drum notation.
     Drum(DrumPattern),
+    /// Timed notes.
+    Notes(NoteClip),
 }
 
 impl Clip {
@@ -321,14 +392,26 @@ impl Clip {
         match self {
             Self::Acid(_) => ClipKind::Acid,
             Self::Drum(_) => ClipKind::Drum,
+            Self::Notes(_) => ClipKind::Notes,
         }
     }
 
-    /// The steps in the clip's notation, as the song file writes them.
-    pub fn steps_text(&self) -> String {
+    /// The steps in the clip's notation, as the song file writes them;
+    /// `None` for a notes clip, which has no step notation.
+    pub fn steps_text(&self) -> Option<String> {
         match self {
-            Self::Acid(p) => p.to_string(),
-            Self::Drum(p) => p.to_string(),
+            Self::Acid(p) => Some(p.to_string()),
+            Self::Drum(p) => Some(p.to_string()),
+            Self::Notes(_) => None,
+        }
+    }
+
+    /// The clip's length in 16th steps, whatever its kind.
+    pub fn steps(&self) -> u32 {
+        match self {
+            Self::Acid(p) => u32::try_from(p.steps().len()).expect("at most 64 steps"),
+            Self::Drum(p) => u32::try_from(p.hits().len()).expect("at most 64 steps"),
+            Self::Notes(n) => n.steps(),
         }
     }
 }

@@ -88,7 +88,23 @@ pub(crate) struct RawPattern {
 
 pub(crate) struct RawClip {
     pub kind: Option<At<String>>,
+    /// An acid or drum clip's steps.
     pub steps: Option<At<String>>,
+    /// A notes clip's length in bars.
+    pub bars: Option<At<i64>>,
+    /// A notes clip's notes, in file order; empty when there is no `notes`.
+    pub notes: Vec<RawNote>,
+}
+
+pub(crate) struct RawNote {
+    /// 1-based position in the clip's `notes`, for messages.
+    pub number: usize,
+    /// 16th steps.
+    pub start: Option<At<f64>>,
+    pub pitch: Option<At<String>>,
+    /// 16th steps.
+    pub len: Option<At<f64>>,
+    pub vel: Option<At<i64>>,
 }
 
 pub(crate) struct RawPlacement {
@@ -240,14 +256,41 @@ pub(crate) fn read(
             .into_iter()
             .filter_map(|(id, v)| {
                 let what = format!("[clips.{}]", id.value);
-                let f = Fields::open(v, &what, CLIP_KEYS, errors)?;
-                Some((
-                    id,
-                    RawClip {
-                        kind: f.req(errors, "kind", Kind::Str),
-                        steps: f.req(errors, "steps", Kind::Str),
+                // The clip's `kind` decides which of the other keys it may have.
+                let kind = v
+                    .get_ref()
+                    .as_table()
+                    .and_then(|t| t.get("kind"))
+                    .and_then(|k| k.get_ref().as_str());
+                let (allowed, hints) = match kind {
+                    Some("notes") => (NOTES_CLIP_KEYS, NOTES_CLIP_HINTS),
+                    Some("acid" | "drum") => (STEPS_CLIP_KEYS, STEPS_CLIP_HINTS),
+                    _ => (CLIP_KEYS, &[][..]),
+                };
+                let f = Fields::open_hinted(v, &what, allowed, hints, errors)?;
+                let kind_at = f.req(errors, "kind", Kind::Str);
+                let clip = match kind {
+                    Some("notes") => RawClip {
+                        kind: kind_at,
+                        steps: None,
+                        bars: f.req(errors, "bars", Kind::Int),
+                        notes: read_notes(&f, &id.value, errors),
                     },
-                ))
+                    Some("acid" | "drum") => RawClip {
+                        kind: kind_at,
+                        steps: f.req(errors, "steps", Kind::Str),
+                        bars: None,
+                        notes: Vec::new(),
+                    },
+                    // An unknown kind has its own error; read what is there.
+                    _ => RawClip {
+                        kind: kind_at,
+                        steps: f.opt(errors, "steps", Kind::Str),
+                        bars: f.opt(errors, "bars", Kind::Int),
+                        notes: read_notes(&f, &id.value, errors),
+                    },
+                };
+                Some((id, clip))
             })
             .collect();
         (Vec::new(), clips)
@@ -361,7 +404,24 @@ const TRACK_KEYS_V2: &[&str] = &[
     "play",
 ];
 const PATTERN_KEYS: &[&str] = &["track", "steps"];
-const CLIP_KEYS: &[&str] = &["kind", "steps"];
+const CLIP_KEYS: &[&str] = &["kind", "steps", "bars", "notes"];
+const STEPS_CLIP_KEYS: &[&str] = &["kind", "steps"];
+const STEPS_CLIP_HINTS: &[(&str, &str)] = &[
+    (
+        "bars",
+        "`bars` and `notes` are for a notes clip (kind = \"notes\")",
+    ),
+    (
+        "notes",
+        "`bars` and `notes` are for a notes clip (kind = \"notes\")",
+    ),
+];
+const NOTES_CLIP_KEYS: &[&str] = &["kind", "bars", "notes"];
+const NOTES_CLIP_HINTS: &[(&str, &str)] = &[(
+    "steps",
+    "a notes clip has no `steps`: its length is `bars` and its notes are `notes`",
+)];
+const NOTE_KEYS: &[&str] = &["start", "pitch", "len", "vel"];
 const PLACEMENT_KEYS: &[&str] = &["at", "clip", "bars", "offset"];
 const SECTION_KEYS_V1: &[&str] = &["name", "bars", "play", "automation"];
 const SECTION_KEYS_V2: &[&str] = &["name", "bars"];
@@ -494,6 +554,28 @@ fn read_play(f: &Fields<'_, '_>, what: &str, errors: &mut Errors) -> Vec<RawPlac
                 clip: p.req(errors, "clip", Kind::Str),
                 bars: p.req(errors, "bars", Kind::Int),
                 offset: p.opt(errors, "offset", Kind::Int),
+            })
+        })
+        .collect()
+}
+
+/// A notes clip's `notes = [{ start, pitch, len, vel }, …]`.
+fn read_notes(f: &Fields<'_, '_>, clip: &str, errors: &mut Errors) -> Vec<RawNote> {
+    let Some(v) = f.get("notes") else {
+        return Vec::new();
+    };
+    tables_in_array(v, &format!("`notes` of clip `{clip}`"), errors)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, v)| {
+            let what = format!("note {} of clip `{clip}`", i + 1);
+            let n = Fields::open(v, &what, NOTE_KEYS, errors)?;
+            Some(RawNote {
+                number: i + 1,
+                start: n.req(errors, "start", Kind::Num),
+                pitch: n.req(errors, "pitch", Kind::Str),
+                len: n.req(errors, "len", Kind::Num),
+                vel: n.opt(errors, "vel", Kind::Int),
             })
         })
         .collect()

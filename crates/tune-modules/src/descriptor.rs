@@ -14,17 +14,20 @@ pub enum ClipKind {
     Acid,
     /// Drum notation (`x X .`).
     Drum,
+    /// Timed notes (`kind = "notes"`); every instrument plays them.
+    Notes,
 }
 
 impl ClipKind {
     /// Every kind, in the order error messages list them.
-    pub const ALL: [Self; 2] = [Self::Acid, Self::Drum];
+    pub const ALL: [Self; 3] = [Self::Acid, Self::Drum, Self::Notes];
 
     /// The clip `kind` value in a song file.
     pub fn name(self) -> &'static str {
         match self {
             Self::Acid => "acid",
             Self::Drum => "drum",
+            Self::Notes => "notes",
         }
     }
 
@@ -85,10 +88,11 @@ impl ModuleDescriptor {
         matches!(self.role, Role::Instrument { .. })
     }
 
-    /// Whether this module plays clips of `kind`; false for effects.
+    /// Whether this module plays clips of `kind`; false for effects. Every
+    /// instrument plays note clips, whatever its `plays` list holds.
     pub fn plays(&self, kind: ClipKind) -> bool {
         match self.role {
-            Role::Instrument { plays, .. } => plays.contains(&kind),
+            Role::Instrument { plays, .. } => kind == ClipKind::Notes || plays.contains(&kind),
             Role::Effect { .. } => false,
         }
     }

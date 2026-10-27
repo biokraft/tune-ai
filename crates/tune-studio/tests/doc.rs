@@ -1047,8 +1047,8 @@ fn views_list_clips_and_what_tracks_play() {
     assert_eq!(first["kind"], "drum");
     assert_eq!(first["id"], "k4");
     assert!(first.get("track").is_none(), "a clip has no track: {first}");
-    assert_eq!(view["tracks"][0]["plays"], json!(["drum"]));
-    assert_eq!(view["tracks"][1]["plays"], json!(["acid"]));
+    assert_eq!(view["tracks"][0]["plays"], json!(["drum", "notes"]));
+    assert_eq!(view["tracks"][1]["plays"], json!(["acid", "notes"]));
 }
 
 /// A version 2 song with a second eq on the acid.
