@@ -186,6 +186,13 @@
         "device": "dist",
         "to": "drive2"
       }
+    },
+    {
+      "cmd": "set_instrument",
+      "args": {
+        "track": "acid",
+        "module": "kick"
+      }
     }
   ],
   "events": [

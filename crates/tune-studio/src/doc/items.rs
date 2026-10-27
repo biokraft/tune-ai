@@ -10,7 +10,7 @@ use toml_edit::{Decor, DocumentMut, InlineTable, Item, Key, Table, Value};
 use tune_song::toml_doc::{Slot, normalize_positions, reshape, root_child, walk, walk_mut};
 use tune_song::{Device, Edited, Registry, Removed, Track, fx_entry_toml, track_table_toml};
 
-use super::arrange::write_automation;
+use super::arrange::{write_automation, write_plays};
 use super::{EditError, SongDoc, fx_table, put_instrument_setting, track_table};
 
 impl SongDoc {
@@ -113,6 +113,22 @@ impl SongDoc {
         let old = self.song.tracks[track].clone();
         self.write_edited(edited, |doc| rename_device_id(doc, track, &old, device, to))?;
         Ok(())
+    }
+
+    /// Swaps the instrument of `track` for a new `module` one: the
+    /// `instrument` value, the old instrument's params, the placements the
+    /// new module cannot play and its lane stretches (see
+    /// [`tune_song::set_instrument`]). Returns what went with it.
+    pub fn set_instrument(&mut self, track: &str, module: &str) -> Result<Removed, EditError> {
+        let edited = tune_song::set_instrument(&self.song, Registry::builtin(), track, module)?;
+        let old = self.song.clone();
+        let new = edited.arranged.song.clone();
+        self.write_edited(edited, |doc| {
+            let device = &new.tracks[track].instrument;
+            track_table(doc, track)?.put("instrument", Value::from(device.module.name));
+            remove_params(doc, track, &format!("{}.", old.tracks[track].instrument.id))?;
+            write_plays(doc, &old, &new)
+        })
     }
 
     /// Writes an edit's result into a copy of the text with `write`, and
@@ -372,4 +388,36 @@ fn insert_after(table: &mut InlineTable, after: &str, key: &str, mut value: Valu
     for (key, value) in entries {
         table.insert_formatted(&key, value);
     }
+}
+
+/// Removes the entries of the track's `params` table whose key starts with
+/// `prefix`, and the table when none is left. A table that keeps entries
+/// keeps its spacing.
+fn remove_params(doc: &mut DocumentMut, track: &str, prefix: &str) -> Option<()> {
+    let Some(params) = track_table(doc, track)?.child("params") else {
+        return Some(());
+    };
+    let left = match params {
+        Slot::Table(t) => {
+            t.retain(|k, _| !k.starts_with(prefix));
+            t.len()
+        }
+        Slot::Inline(t) => {
+            // The space before `}` is the last value's suffix: keep it there.
+            let tail = t
+                .iter()
+                .last()
+                .and_then(|(_, v)| v.decor().suffix().and_then(|s| s.as_str()))
+                .map(str::to_owned);
+            t.retain(|k, _| !k.starts_with(prefix));
+            if let (Some(tail), Some((_, last))) = (tail, t.iter_mut().last()) {
+                last.decor_mut().set_suffix(tail);
+            }
+            t.len()
+        }
+    };
+    if left == 0 {
+        track_table(doc, track)?.remove("params");
+    }
+    Some(())
 }

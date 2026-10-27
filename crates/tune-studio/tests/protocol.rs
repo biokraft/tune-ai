@@ -48,6 +48,7 @@ fn wire_name(c: &Command) -> &'static str {
             Action::RemoveEffect { .. } => "remove_effect",
             Action::MoveEffect { .. } => "move_effect",
             Action::RenameDevice { .. } => "rename_device",
+            Action::SetInstrument { .. } => "set_instrument",
         },
     }
 }
@@ -170,6 +171,10 @@ fn sample_actions() -> Vec<Action> {
             track: "acid".into(),
             device: "dist".into(),
             to: "drive2".into(),
+        },
+        Action::SetInstrument {
+            track: "acid".into(),
+            module: "kick".into(),
         },
     ]
 }

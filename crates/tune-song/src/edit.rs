@@ -14,7 +14,7 @@
 
 use indexmap::IndexMap;
 use tune_dsp::STRIP_PARAMS;
-use tune_modules::{ModuleDescriptor, Registry};
+use tune_modules::{ClipKind, ModuleDescriptor, Registry};
 
 use crate::arrange::{Arranged, LaneOrigin};
 use crate::model::{Device, Lane, MIX_TRACK_ID, Placement, Song, Track};
@@ -65,6 +65,9 @@ pub enum EditOpError {
     /// A chain edit named the instrument.
     #[error("`{device}` is the instrument of track `{track}`, not an effect")]
     NotAnEffectDevice { track: String, device: String },
+    /// A new instrument's id is its module's prefix, and an effect has it.
+    #[error("track `{track}` already has a device `{device}`; rename it first")]
+    InstrumentIdTaken { track: String, device: String },
     #[error("`send` and `duck` are reserved for the strip params")]
     StripReserved,
     #[error("index {index} is out of bounds (the chain has {len})")]
@@ -248,6 +251,56 @@ pub fn rename_device(
         }
     }
     Ok(untouched_lanes(song, Removed::default()))
+}
+
+/// Swaps the instrument of `track` for a new `module` one. The new device is
+/// called after the module's prefix, with default settings and no params;
+/// the old instrument's param values go (the strip's stay), and so do:
+///
+/// - its lane stretches (`removed.lanes`),
+/// - the placements of clips the new module cannot play, `removed.placements`
+///   (the clips stay in the pool),
+/// - an explicit `mix.duck_source` naming the track, when the new module
+///   plays no drum clips (`removed.duck_source`).
+///
+/// The same module changes nothing, whatever its id.
+pub fn set_instrument(
+    song: &Song,
+    registry: &Registry,
+    track: &str,
+    module: &str,
+) -> Result<Edited, EditOpError> {
+    let old = track_of(song, track)?;
+    let module = instrument_module(registry, module)?;
+    if old.instrument.module.name == module.name {
+        return Ok(untouched_lanes(song.clone(), Removed::default()));
+    }
+    if old.fx.iter().any(|d| d.id == module.prefix) {
+        return Err(EditOpError::InstrumentIdTaken {
+            track: track.to_owned(),
+            device: module.prefix.to_owned(),
+        });
+    }
+    let old_prefix = format!("{}.", old.instrument.id);
+    let mut song = song.clone();
+    let mut removed = Removed::default();
+    let t = &mut song.tracks[track];
+    t.instrument = Device::new(module.prefix, module);
+    let (played, gone): (Vec<Placement>, Vec<Placement>) =
+        std::mem::take(&mut t.play).into_iter().partition(|p| {
+            song.clips
+                .get(&p.clip)
+                .is_none_or(|clip| module.plays(clip.kind()))
+        });
+    song.tracks[track].play = played;
+    removed.placements = gone.into_iter().map(|p| (track.to_owned(), p)).collect();
+    if song.mix.duck_source.as_deref() == Some(track) && !module.plays(ClipKind::Drum) {
+        removed.duck_source = song.mix.duck_source.take();
+    }
+    let kept = take_lanes(&mut song, &mut removed, |l| {
+        l.track == track && l.param.starts_with(&old_prefix)
+    });
+    Ok(edited(song, kept, removed))
 }
 
 fn track_of<'s>(song: &'s Song, id: &str) -> Result<&'s Track, EditOpError> {

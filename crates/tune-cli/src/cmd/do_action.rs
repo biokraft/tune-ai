@@ -116,7 +116,7 @@ fn result_lines(result: &Value) -> Vec<String> {
         }
         for p in removed["placements"].as_array().into_iter().flatten() {
             lines.push(format!(
-                "removed placement {} of {} at bar {}",
+                "removed placement {} on {} at bar {}",
                 p["clip"].as_str().unwrap_or("?"),
                 p["track"].as_str().unwrap_or("?"),
                 p["at"]

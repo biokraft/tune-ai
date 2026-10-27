@@ -814,3 +814,160 @@ fn edits_work_on_a_file_in_inline_and_one_line_forms() {
     assert_eq!(song.tracks["drum"].instrument.id, "thump");
     SongDoc::parse(&s.text()).expect("parses as a doc");
 }
+
+// ----- set_instrument -----
+
+fn set_instrument(track: &str, module: &str) -> Action {
+    Action::SetInstrument {
+        track: track.into(),
+        module: module.into(),
+    }
+}
+
+/// The lines of `[tracks.<id>]`, up to the next table header.
+fn track_lines(text: &str, id: &str) -> Vec<String> {
+    let header = format!("[tracks.{id}]");
+    text.lines()
+        .skip_while(|l| *l != header)
+        .skip(1)
+        .take_while(|l| !l.starts_with('['))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn swap_cleans_up_and_lists_it() {
+    let s = fixture();
+    let out = s.ok(set_instrument("acid", "kick"));
+    assert_eq!(
+        out.results,
+        [json!({"removed": {
+            "lanes": [{"param": "acid.acid303.cutoff", "at": 3, "bars": 2,
+                "points": [[0, 0.1], [2, 0.8]]}],
+            "placements": [{"track": "acid", "at": 3, "clip": "a1", "bars": 2, "offset": 0}],
+            "duck_source": null,
+        }})]
+    );
+    let text = s.text();
+    let acid = track_lines(&text, "acid");
+    assert!(
+        acid.contains(&"instrument = \"kick\"".to_owned()),
+        "{acid:?}"
+    );
+    assert!(
+        !acid
+            .iter()
+            .any(|l| l.starts_with("params") || l.starts_with("play")),
+        "{acid:?}"
+    );
+    assert!(
+        acid.iter()
+            .any(|l| l.starts_with("fx = [{ type = \"distortion\"")),
+        "the fx line stays: {acid:?}"
+    );
+    assert!(!text.contains("[[automation]]"), "{text}");
+    assert!(text.contains("[clips.a1]"), "the clip stays in the pool");
+    comments_kept(FIXTURE, &text, &["# the filter opens over the section"]);
+    let song = s.song();
+    assert_eq!(song.tracks["acid"].instrument.module.name, "kick");
+}
+
+#[test]
+fn swap_to_the_same_module_writes_nothing() {
+    let s = fixture();
+    let out = s.ok(set_instrument("acid", "acid303"));
+    assert!(out.changes.is_empty());
+    assert_eq!(s.text(), FIXTURE);
+}
+
+#[test]
+fn swap_keeps_strip_params_in_the_params_table() {
+    let with_send = FIXTURE.replacen(
+        "params = { \"acid303.cutoff\" = 500,",
+        "params = { \"send.delay\" = -20, \"acid303.cutoff\" = 500,",
+        1,
+    );
+    let s = song_with(&with_send);
+    s.ok(set_instrument("acid", "kick"));
+    let acid = track_lines(&s.text(), "acid");
+    assert!(
+        acid.contains(&"params = { \"send.delay\" = -20 }".to_owned()),
+        "{acid:?}"
+    );
+    assert_eq!(s.song().tracks["acid"].strip["send.delay"], -20.0);
+}
+
+#[test]
+fn swap_refusals_leave_the_file() {
+    let s = fixture();
+    assert_eq!(
+        s.refused(set_instrument("bass", "kick")),
+        "there is no track `bass`"
+    );
+    assert_eq!(
+        s.refused(set_instrument("acid", "eq")),
+        "`eq` is an effect, not an instrument"
+    );
+}
+
+#[test]
+fn swap_is_one_undo_step() {
+    let s = fixture();
+    let mut core = tune_studio::StudioCore::open(&s.path).expect("opens");
+    core.apply_now(&[set_instrument("acid", "kick")], &Origin::claude(None))
+        .expect("swaps");
+    assert_ne!(s.text(), FIXTURE);
+    core.undo(tune_studio::Source::Human).expect("undoes");
+    assert_eq!(s.text(), FIXTURE);
+}
+
+#[test]
+fn swap_names_its_target() {
+    assert_eq!(
+        set_instrument("acid", "kick").targets(),
+        ["tracks.acid.instrument"]
+    );
+    let spec = tune_studio::find_action("set_instrument").expect("listed");
+    assert_eq!(spec.kind, tune_studio::ActionKind::Edit);
+    assert_eq!(
+        cli("set_instrument", &["track=acid", "module=kick"]),
+        Ok(set_instrument("acid", "kick"))
+    );
+    assert_eq!(
+        set_instrument("acid", "kick").to_cli_args(),
+        ["track=acid", "module=kick"]
+    );
+}
+
+#[test]
+fn swap_handles_a_device_table_and_inline_forms() {
+    // An instrument table with its own id: its params go, whatever it was called.
+    let renamed = FIXTURE
+        .replacen(
+            "instrument = \"acid303\"",
+            "instrument = { type = \"acid303\", id = \"bass303\" }",
+            1,
+        )
+        .replacen("\"acid303.", "\"bass303.", 5)
+        .replace("acid.acid303.cutoff", "acid.bass303.cutoff");
+    let s = song_with(&renamed);
+    s.ok(set_instrument("acid", "hat_open"));
+    let acid = track_lines(&s.text(), "acid");
+    assert!(
+        acid.contains(&"instrument = \"hat_open\"".to_owned()),
+        "{acid:?}"
+    );
+    assert_eq!(s.song().tracks["acid"].instrument.id, "hat_open");
+
+    // An inline track keeps its other keys' spacing.
+    let text = "[song]\nversion = 2\nname = \"t\"\nbpm = 120\n\n[tracks]\nacid = { instrument = \"acid303\", params = { \"acid303.cutoff\" = 500, \"send.delay\" = -20 }, gain_db = -3 }\n\n[[sections]]\nname = \"a\"\nbars = 1\n";
+    let s = song_with(text);
+    s.ok(set_instrument("acid", "kick"));
+    assert!(
+        s.text().contains(
+            "acid = { instrument = \"kick\", params = { \"send.delay\" = -20 }, gain_db = -3 }"
+        ),
+        "{}",
+        s.text()
+    );
+}

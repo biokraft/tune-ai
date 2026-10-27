@@ -165,6 +165,12 @@ pub enum Action {
         device: String,
         to: String,
     },
+    /// Swaps the instrument of a track for a new `module` one, with the
+    /// clean-up that goes with it (see [`tune_song::set_instrument`]).
+    SetInstrument {
+        track: String,
+        module: String,
+    },
 }
 
 fn yes() -> bool {
@@ -279,6 +285,7 @@ impl Action {
             Self::RemoveEffect { .. } => "remove_effect",
             Self::MoveEffect { .. } => "move_effect",
             Self::RenameDevice { .. } => "rename_device",
+            Self::SetInstrument { .. } => "set_instrument",
         }
     }
 
@@ -340,6 +347,7 @@ impl Action {
                 let role = if is_instrument { "instrument" } else { "fx" };
                 vec![format!("tracks.{track}.{role}")]
             }
+            Self::SetInstrument { track, .. } => vec![format!("tracks.{track}.instrument")],
             Self::MoveSection { .. }
             | Self::DuplicateSection { .. }
             | Self::DeleteSection { .. } => {

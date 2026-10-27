@@ -3,7 +3,7 @@
 
 use tune_song::{
     EditOpError, LaneOrigin, Registry, Song, add_effect, add_track, move_effect, parse_song,
-    remove_effect, remove_track, rename_device, rename_track, track_table_toml,
+    remove_effect, remove_track, rename_device, rename_track, set_instrument, track_table_toml,
 };
 
 const SONG: &str = r#"
@@ -344,5 +344,141 @@ fn renaming_to_the_same_name_changes_nothing() {
             .arranged
             .song,
         s
+    );
+}
+
+/// A song with a 303 that plays an acid clip and a notes clip, drives the
+/// strip and an effect, and whose kick is the explicit duck source.
+const SWAP: &str = r#"
+[song]
+version = 2
+name = "t"
+bpm = 120
+
+[mix]
+duck_source = "kick"
+
+[tracks.kick]
+instrument = "kick"
+play = [{ at = 1, clip = "k4", bars = 2 }]
+
+[tracks.acid]
+instrument = "acid303"
+params = { "acid303.cutoff" = 500, "send.delay" = -20 }
+fx = [{ type = "eq" }]
+play = [
+  { at = 1, clip = "lead", bars = 1 },
+  { at = 2, clip = "a1", bars = 1 },
+]
+
+[clips.k4]
+kind = "drum"
+steps = "x...x...x...X..."
+
+[clips.a1]
+kind = "acid"
+steps = "C2 C2! C3~ C2 . D#2 C2~ G2!"
+
+[clips.lead]
+kind = "notes"
+bars = 1
+notes = [{ start = 0, pitch = "C3", len = 3 }]
+
+[[sections]]
+name = "a"
+bars = 4
+
+[[automation]]
+param = "acid.acid303.cutoff"
+at = 1
+bars = 2
+points = [[0, 0.1], [2, 0.8]]
+
+[[automation]]
+param = "acid.eq.low_cut"
+at = 1
+bars = 2
+points = [[0, 0.1], [2, 0.8]]
+"#;
+
+fn swap_song() -> Song {
+    parse_song(SWAP).expect("the song parses")
+}
+
+#[test]
+fn swap_keeps_strip_params_and_note_clips() {
+    let edited = set_instrument(&swap_song(), registry(), "acid", "kick").unwrap();
+    let acid = &edited.arranged.song.tracks["acid"];
+    assert_eq!(acid.instrument.module.name, "kick");
+    assert_eq!(acid.instrument.id, "kick");
+    assert!(acid.instrument.params.is_empty());
+    assert_eq!(acid.strip["send.delay"], -20.0);
+    assert_eq!(fx_ids(&edited.arranged.song, "acid"), ["eq"]);
+    let kept: Vec<_> = acid.play.iter().map(|p| p.clip.as_str()).collect();
+    assert_eq!(kept, ["lead"], "the notes clip stays, the acid clip goes");
+    let removed: Vec<_> = edited
+        .removed
+        .placements
+        .iter()
+        .map(|(t, p)| (t.as_str(), p.clip.as_str(), p.start_bar))
+        .collect();
+    assert_eq!(removed, [("acid", "a1", 1)]);
+    assert!(
+        edited.arranged.song.clips.contains_key("a1"),
+        "the clip stays in the pool"
+    );
+    // The instrument's stretch goes; the effect's stays.
+    let gone: Vec<_> = edited.removed.lanes.iter().map(|l| &l.param[..]).collect();
+    assert_eq!(gone, ["acid303.cutoff"]);
+    assert_eq!(edited.arranged.lanes, [LaneOrigin::Kept(1)]);
+    assert_eq!(edited.removed.duck_source, None);
+}
+
+#[test]
+fn swap_to_the_same_module_changes_nothing() {
+    let s = swap_song();
+    let edited = set_instrument(&s, registry(), "acid", "acid303").unwrap();
+    assert_eq!(edited.arranged.song, s);
+    assert_eq!(edited.removed, Default::default());
+}
+
+#[test]
+fn swap_clears_a_duck_source() {
+    let s = swap_song();
+    let edited = set_instrument(&s, registry(), "kick", "acid303").unwrap();
+    assert_eq!(edited.removed.duck_source.as_deref(), Some("kick"));
+    assert_eq!(edited.arranged.song.mix.duck_source, None);
+    // The kick's drum placement cannot be played by a 303.
+    assert_eq!(edited.removed.placements.len(), 1);
+    // Another drum voice keeps the source.
+    let edited = set_instrument(&s, registry(), "kick", "clap").unwrap();
+    assert_eq!(edited.removed.duck_source, None);
+    assert_eq!(
+        edited.arranged.song.mix.duck_source.as_deref(),
+        Some("kick")
+    );
+    assert!(edited.removed.placements.is_empty());
+}
+
+#[test]
+fn swap_refusals() {
+    let s = swap_song();
+    let swap = |track: &str, module: &str| err(set_instrument(&s, registry(), track, module));
+    assert_eq!(swap("bass", "kick"), "there is no track `bass`");
+    assert_eq!(swap("acid", "eq"), "`eq` is an effect, not an instrument");
+    assert_eq!(
+        swap("acid", "acid3030"),
+        "unknown instrument `acid3030` (expected acid303, kick, clap, hat_closed, hat_open or ride)"
+    );
+    let taken = SWAP.replacen(
+        "fx = [{ type = \"eq\" }]",
+        "fx = [{ type = \"eq\", id = \"kick\" }]",
+        1,
+    );
+    let taken = taken.replace("acid.eq.low_cut", "acid.kick.low_cut");
+    let taken = parse_song(&taken).unwrap();
+    assert_eq!(
+        err(set_instrument(&taken, registry(), "acid", "kick")),
+        "track `acid` already has a device `kick`; rename it first"
     );
 }
