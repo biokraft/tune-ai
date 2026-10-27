@@ -59,6 +59,9 @@ fn wire_name(c: &Command) -> &'static str {
             Action::RemovePlacement { .. } => "remove_placement",
             Action::AddSection { .. } => "add_section",
             Action::RenameSection { .. } => "rename_section",
+            Action::AddLane { .. } => "add_lane",
+            Action::RemoveLane { .. } => "remove_lane",
+            Action::SetLanePoints { .. } => "set_lane_points",
         },
     }
 }
@@ -231,6 +234,21 @@ fn sample_actions() -> Vec<Action> {
         Action::RenameSection {
             index: 1,
             name: "drop".into(),
+        },
+        Action::AddLane {
+            param: "mix.reverb.size".into(),
+            at: 1,
+            bars: 4,
+            points: vec![[0.0, 0.2], [4.0, 0.6]],
+        },
+        Action::RemoveLane {
+            param: "acid.acid303.cutoff".into(),
+            at: 3,
+        },
+        Action::SetLanePoints {
+            param: "acid.acid303.cutoff".into(),
+            at: 3,
+            points: vec![[0.0, 0.3], [2.0, 0.9]],
         },
     ]
 }

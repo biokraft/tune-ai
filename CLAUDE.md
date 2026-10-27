@@ -335,6 +335,16 @@ The producer may have the studio (app or browser) open on the same song.
   These rewrite a track's `play` list (and `add_section` the lane tables), which drops
   the comments inside a rewritten list.
 
+  The lane ones, refused the same way (`param` is spelled as in the file, split at its
+  first `.` into the track, or `mix`, and the param id; `at` is the 1-based bar a
+  stretch starts at, and a stretch is named by it):
+
+  | Action | Example |
+  | --- | --- |
+  | `add_lane` | `tune do <song> add_lane param=mix.reverb.size at=1 bars=4 points='[[0, 0.2], [4, 0.6]]'` writes a new `[[automation]]` table (the first one creates the list) right after the stretches of the section it starts in; an overlap, an unknown param or a point out of range is refused with the validator's message |
+  | `remove_lane` | `tune do <song> remove_lane param=acid.acid303.cutoff at=3` drops the stretch's table with its comments (the result lists it) |
+  | `set_lane_points` | `tune do <song> set_lane_points param=acid.acid303.cutoff at=3 points='[[0, 0.3], [2, 0.9]]'` changes only the `points` line |
+
 - To see the UI: `tune serve <song> --device null --port 4580` (in the
   background; `task ui:build` first), then drive Chrome with the
   `agent-browser` skill: start the agent Chrome, pick a session

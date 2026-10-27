@@ -1683,3 +1683,284 @@ fn placement_and_section_edits_work_on_inline_files_and_are_one_undo_step() {
     core.undo(tune_studio::Source::Human).expect("undoes");
     assert_eq!(s.text(), FIXTURE);
 }
+
+// ----- lanes -----
+
+const MINI: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
+
+/// The commented fixture's lane table, comment and all.
+const LANE_TABLE: &str = "# the filter opens over the section\n[[automation]]\n\
+    param = \"acid.acid303.cutoff\"\nat = 3\nbars = 2\npoints = [[0, 0.1], [2, 0.8]]\n";
+
+fn add_lane(param: &str, at: u32, bars: u32, points: &[[f64; 2]]) -> Action {
+    Action::AddLane {
+        param: param.into(),
+        at,
+        bars,
+        points: points.to_vec(),
+    }
+}
+
+fn remove_lane(param: &str, at: u32) -> Action {
+    Action::RemoveLane {
+        param: param.into(),
+        at,
+    }
+}
+
+fn set_lane_points(param: &str, at: u32, points: &[[f64; 2]]) -> Action {
+    Action::SetLanePoints {
+        param: param.into(),
+        at,
+        points: points.to_vec(),
+    }
+}
+
+/// The stretches of a song as `(param, 1-based at, bars)`.
+fn lanes_of(song: &tune_song::Song) -> Vec<(String, u32, u32)> {
+    song.automation
+        .iter()
+        .map(|l| (format!("{}.{}", l.track, l.param), l.start_bar + 1, l.bars))
+        .collect()
+}
+
+#[test]
+fn add_lane_writes_a_table() {
+    let s = fixture();
+    let out = s.ok(add_lane("mix.reverb.size", 1, 4, &[[0.0, 0.2], [4.0, 0.6]]));
+    assert_eq!(out.results, [Value::Null]);
+    let text = s.text();
+    // The new table follows the section it starts in; the old lane's table
+    // and its comment are untouched.
+    assert!(
+        text.contains(
+            "[[sections]]\nname = \"a\"\nbars = 2\n\n[[automation]]\nparam = \"mix.reverb.size\"\n\
+             at = 1\nbars = 4\npoints = [[0, 0.2], [4, 0.6]]\n\n# acid enters\n[[sections]]"
+        ),
+        "{text}"
+    );
+    assert!(text.ends_with(LANE_TABLE), "{text}");
+    comments_kept(FIXTURE, &text, &[]);
+    assert_eq!(
+        lanes_of(&s.song()),
+        [
+            ("mix.reverb.size".to_owned(), 1, 4),
+            ("acid.acid303.cutoff".to_owned(), 3, 2)
+        ]
+    );
+
+    // A stretch of another param in the old lane's section goes after it.
+    let s = fixture();
+    s.ok(add_lane(
+        "acid.acid303.resonance",
+        3,
+        2,
+        &[[0.0, 0.5], [2.0, 0.5]],
+    ));
+    let text = s.text();
+    assert!(text.starts_with(&FIXTURE[..FIXTURE.len() - 1]), "{text}");
+    assert!(
+        text.ends_with(
+            "\n[[automation]]\nparam = \"acid.acid303.resonance\"\nat = 3\nbars = 2\n\
+             points = [[0, 0.5], [2, 0.5]]\n"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_first_stretch_creates_the_automation_list() {
+    let lanes_at = MINI
+        .find("\n[[automation]]")
+        .expect("the fixture has a lane");
+    let s = song_with(&MINI[..lanes_at]);
+    s.ok(add_lane(
+        "acid.acid303.cutoff",
+        3,
+        2,
+        &[[0.0, 0.1], [2.0, 0.8]],
+    ));
+    assert_eq!(s.text(), MINI);
+    assert_eq!(
+        lanes_of(&s.song()),
+        [("acid.acid303.cutoff".to_owned(), 3, 2)]
+    );
+
+    // Tracks and clips written inline: the list still follows the sections.
+    let text = "[song]\nversion = 2\nname = \"t\"\nbpm = 120\n\n[tracks]\nkick = { instrument = \"kick\" }\n\n[clips]\nk4 = { kind = \"drum\", steps = \"x...x...x...X...\" }\n\n[[sections]]\nname = \"a\"\nbars = 2\n";
+    let s = song_with(text);
+    s.ok(add_lane("kick.kick.decay", 1, 1, &[[0.0, 0.0], [1.0, 1.0]]));
+    assert_eq!(
+        s.text(),
+        format!(
+            "{text}\n[[automation]]\nparam = \"kick.kick.decay\"\nat = 1\nbars = 1\n\
+             points = [[0, 0], [1, 1]]\n"
+        )
+    );
+}
+
+#[test]
+fn lane_rules() {
+    let s = fixture();
+    let points = [[0.0, 0.2], [2.0, 0.6]];
+    // Exactly on top of the old stretch (bars 3-4), one bar before it and one
+    // bar into it. The validator names the later table of the two.
+    for (at, bars, message) in [
+        (3, 2, "at bars 3-4 overlaps the stretch at bars 3-4"),
+        (2, 2, "at bars 3-4 overlaps the stretch at bars 2-3"),
+        (4, 1, "at bars 4-4 overlaps the stretch at bars 3-4"),
+    ] {
+        let points = [[0.0, 0.2], [f64::from(bars), 0.6]];
+        let err = s.refused(add_lane("acid.acid303.cutoff", at, bars, &points));
+        assert!(
+            err.contains(&format!("automation for `acid.acid303.cutoff` {message}")),
+            "{err}"
+        );
+    }
+    // A stretch that ends where the old one starts (bars 1-2, the old one
+    // starts at bar 3) does not overlap.
+    s.ok(add_lane("acid.acid303.cutoff", 1, 2, &points));
+    let err = s.refused(add_lane("acid.acid303.nope", 1, 2, &points));
+    assert!(
+        err.contains("unknown parameter `acid303.nope` for acid303"),
+        "{err}"
+    );
+    let err = s.refused(add_lane("acid.acid303.resonance", 1, 2, &[[0.0, 1.5]]));
+    assert!(err.contains("value 1.5 is outside 0..=1"), "{err}");
+    let err = s.refused(add_lane("acid.acid303.resonance", 1, 2, &[[3.0, 0.5]]));
+    assert!(
+        err.contains("bar 3 is outside the stretch (0..=2)"),
+        "{err}"
+    );
+    let err = s.refused(add_lane("acid.acid303.resonance", 4, 2, &points));
+    assert!(err.contains("runs past the song's end"), "{err}");
+    let err = s.refused(add_lane("acid.acid303.resonance", 1, 2, &[]));
+    assert!(err.contains("a lane needs at least one point"), "{err}");
+    assert_eq!(
+        s.refused(add_lane("acid.acid303.resonance", 0, 2, &points)),
+        "bars are 1-based: `at` must be at least 1"
+    );
+    assert_eq!(
+        s.refused(remove_lane("acid.acid303.cutoff", 0)),
+        "bars are 1-based: `at` must be at least 1"
+    );
+
+    // A stretch is addressed by the bar it starts at.
+    let s = fixture();
+    for at in [1, 2, 4, 5] {
+        let message = format!("there is no lane `acid.acid303.cutoff` at bar {at}");
+        assert_eq!(s.refused(remove_lane("acid.acid303.cutoff", at)), message);
+        assert_eq!(
+            s.refused(set_lane_points("acid.acid303.cutoff", at, &points)),
+            message
+        );
+    }
+    assert_eq!(
+        s.refused(remove_lane("acid.acid303.resonance", 3)),
+        "there is no lane `acid.acid303.resonance` at bar 3"
+    );
+    // A param needs its track.
+    let err = s.refused(add_lane("cutoff", 1, 1, &points));
+    assert!(err.contains("`<track>.<param id>`"), "{err}");
+    let err = s.refused(remove_lane("cutoff", 3));
+    assert!(err.contains("`<track>.<param id>`"), "{err}");
+}
+
+#[test]
+fn remove_and_set_points() {
+    let s = fixture();
+    let out = s.ok(remove_lane("acid.acid303.cutoff", 3));
+    let text = s.text();
+    assert!(!text.contains("[[automation]]"), "{text}");
+    assert!(!text.contains("the filter opens"), "{text}");
+    assert_eq!(text, FIXTURE.replace(&format!("\n{LANE_TABLE}"), ""));
+    comments_kept(FIXTURE, &text, &["# the filter opens over the section"]);
+    assert_eq!(
+        out.results,
+        [json!({"removed": {
+            "lanes": [{
+                "param": "acid.acid303.cutoff",
+                "at": 3,
+                "bars": 2,
+                "points": [[0, 0.1], [2, 0.8]],
+            }],
+            "placements": [],
+            "duck_source": null,
+        }})]
+    );
+    assert!(s.song().automation.is_empty());
+
+    let s = fixture();
+    let out = s.ok(set_lane_points(
+        "acid.acid303.cutoff",
+        3,
+        &[[0.0, 0.3], [2.0, 0.9]],
+    ));
+    assert_eq!(out.results, [Value::Null]);
+    assert_eq!(
+        s.text(),
+        FIXTURE.replace(
+            "points = [[0, 0.1], [2, 0.8]]",
+            "points = [[0, 0.3], [2, 0.9]]"
+        )
+    );
+    // Points out of range are the validator's.
+    let err = s.refused(set_lane_points("acid.acid303.cutoff", 3, &[[0.0, 2.0]]));
+    assert!(err.contains("value 2 is outside 0..=1"), "{err}");
+}
+
+#[test]
+fn lane_actions_name_their_targets_and_read_back() {
+    let add = add_lane("mix.reverb.size", 1, 4, &[[0.0, 0.2], [4.0, 0.6]]);
+    let remove = remove_lane("acid.acid303.cutoff", 3);
+    let set = set_lane_points("acid.acid303.cutoff", 3, &[[0.0, 0.3], [2.0, 0.9]]);
+    assert_eq!(add.targets(), ["automation.mix.reverb.size"]);
+    assert_eq!(remove.targets(), ["automation.acid.acid303.cutoff"]);
+    assert_eq!(set.targets(), ["automation.acid.acid303.cutoff"]);
+    for name in ["add_lane", "remove_lane", "set_lane_points"] {
+        let spec = tune_studio::find_action(name).unwrap_or_else(|| panic!("{name}"));
+        assert_eq!(spec.kind, tune_studio::ActionKind::Edit);
+    }
+    assert_eq!(
+        set.to_cli_args(),
+        [
+            "param=acid.acid303.cutoff",
+            "at=3",
+            "points=[[0.0, 0.3], [2.0, 0.9]]"
+        ]
+    );
+    for action in [add, remove, set] {
+        let got = action.to_cli_args();
+        assert_eq!(action_from_cli(action.name(), &got), Ok(action));
+    }
+    // The CLI reads whole numbers and decimals alike.
+    assert_eq!(
+        cli(
+            "set_lane_points",
+            &[
+                "param=acid.acid303.cutoff",
+                "at=3",
+                "points=[[0, 0.3], [2, 0.9]]"
+            ]
+        ),
+        Ok(set_lane_points(
+            "acid.acid303.cutoff",
+            3,
+            &[[0.0, 0.3], [2.0, 0.9]]
+        ))
+    );
+}
+
+#[test]
+fn lane_edits_are_one_undo_step() {
+    let s = fixture();
+    let mut core = tune_studio::StudioCore::open(&s.path).expect("opens");
+    core.apply_now(
+        &[add_lane("mix.reverb.size", 1, 4, &[[0.0, 0.2], [4.0, 0.6]])],
+        &Origin::claude(None),
+    )
+    .expect("adds");
+    assert_ne!(s.text(), FIXTURE);
+    core.undo(tune_studio::Source::Human).expect("undoes");
+    assert_eq!(s.text(), FIXTURE);
+}

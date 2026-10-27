@@ -111,7 +111,8 @@ pub(super) fn write_plays(doc: &mut DocumentMut, old: &Song, new: &Song) -> Opti
 /// copy clones the original's table. Of a split stretch whose first piece
 /// is gone, the first piece left reuses the old table, so its comments
 /// stay; any other piece is a new table. Old tables of stretches that are
-/// gone are dropped.
+/// gone are dropped. A song with no `automation` yet gets the list with a
+/// new table per stretch.
 pub(super) fn write_automation(
     doc: &mut DocumentMut,
     old: &Song,
@@ -122,7 +123,19 @@ pub(super) fn write_automation(
     let lanes = arranged.song.automation.iter().zip(reused);
     let empty = arranged.lanes.is_empty();
     match root.get_mut("automation") {
-        None => return empty.then_some(()),
+        None if empty => return Some(()),
+        // The first stretches of a song: every one is a new table.
+        None => {
+            let mut new = ArrayOfTables::new();
+            for lane in &arranged.song.automation {
+                let mut table = Table::new();
+                table.decor_mut().set_prefix("\n");
+                put_lane(Slot::Table(&mut table), None, lane)?;
+                new.push(table);
+            }
+            root.insert("automation", Item::ArrayOfTables(new));
+            return Some(());
+        }
         Some(Item::ArrayOfTables(aot)) => {
             let mut new = ArrayOfTables::new();
             for (lane, reuse) in lanes {
@@ -371,5 +384,50 @@ mod tests {
         write_automation(&mut doc, &old, &arranged).expect("written");
         let text = doc.to_string();
         assert_eq!(text, SONG.replace("kick.kick.decay", "kick.kick.pitch"));
+    }
+
+    /// A song with no `automation` yet gets the list, one new table per
+    /// stretch, after the text it had.
+    #[test]
+    fn the_first_stretches_create_the_list() {
+        let bare = SONG
+            .split("# the first")
+            .next()
+            .expect("has a lane")
+            .to_owned();
+        let bare = format!("{}\n", bare.trim_end());
+        let old = parse_song(&bare).expect("parses");
+        let mut new = old.clone();
+        new.automation.push(Lane {
+            track: "kick".into(),
+            param: "kick.decay".into(),
+            start_bar: 0,
+            bars: 2,
+            points: vec![(0.0, 0.0), (2.0, 1.0)],
+        });
+        let arranged = Arranged {
+            song: new.clone(),
+            lanes: vec![LaneOrigin::New],
+        };
+        let mut doc: DocumentMut = bare.parse().expect("parses");
+        write_automation(&mut doc, &old, &arranged).expect("written");
+        let text = doc.to_string();
+        assert_eq!(
+            text,
+            format!(
+                "{bare}\n[[automation]]\nparam = \"kick.kick.decay\"\nat = 1\nbars = 2\n\
+                 points = [[0, 0], [2, 1]]\n"
+            )
+        );
+        assert_eq!(parse_song(&text).expect("parses"), new);
+
+        // Nothing to write, nothing created.
+        let mut doc: DocumentMut = bare.parse().expect("parses");
+        let none = Arranged {
+            song: old.clone(),
+            lanes: Vec::new(),
+        };
+        write_automation(&mut doc, &old, &none).expect("written");
+        assert_eq!(doc.to_string(), bare);
     }
 }

@@ -264,6 +264,18 @@ pub(crate) fn apply_action(
         Action::RenameSection { index, name } => {
             doc.set(&SongPath::SectionName(*index), &Value::from(name.as_str()))?;
         }
+        Action::AddLane {
+            param,
+            at,
+            bars,
+            points,
+        } => doc.add_lane(param, bar0(*at, "at")?, *bars, pairs(points))?,
+        Action::RemoveLane { param, at } => {
+            return Ok(removed_value(&doc.remove_lane(param, bar0(*at, "at")?)?));
+        }
+        Action::SetLanePoints { param, at, points } => {
+            doc.set_lane_points(param, bar0(*at, "at")?, pairs(points))?;
+        }
         Action::SetParam { commit: false, .. }
         | Action::Play { .. }
         | Action::Stop
@@ -278,6 +290,11 @@ pub(crate) fn apply_action(
 /// The 0-based bar for the 1-based bar `bar` that argument `arg` gave.
 fn bar0(bar: u32, arg: &'static str) -> Result<u32, EditError> {
     bar.checked_sub(1).ok_or(EditError::BadBar { arg })
+}
+
+/// Lane points as the model holds them.
+fn pairs(points: &[[f64; 2]]) -> Vec<(f64, f64)> {
+    points.iter().map(|&[bar, value]| (bar, value)).collect()
 }
 
 /// What an edit removed, as the action's result: `{"removed": {"lanes":
