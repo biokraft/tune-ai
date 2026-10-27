@@ -12,10 +12,33 @@ use std::collections::BTreeSet;
 use tune_engine::{CompiledSong, SessionCue};
 use tune_song::{EditOpError, Song};
 
-use crate::action::Action;
+/// A live session action, as the studio checks, queues and sends it: one
+/// per session [`Action`](crate::action::Action) variant, which the
+/// studio's `handle_action` matches by name, so every match on these is
+/// exhaustive and a new session action fails to compile until it is
+/// handled.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SessionAction {
+    LaunchClip { track: String, scene: String },
+    LaunchScene { scene: String },
+    StopClip { track: String },
+    BackToArrangement { track: Option<String> },
+}
+
+impl SessionAction {
+    /// The action's wire name.
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Self::LaunchClip { .. } => "launch_clip",
+            Self::LaunchScene { .. } => "launch_scene",
+            Self::StopClip { .. } => "stop_clip",
+            Self::BackToArrangement { .. } => "back_to_arrangement",
+        }
+    }
+}
 
 /// Checks a session action against the open song: its track and scene exist, and a launched slot holds a clip.
-pub(crate) fn check(song: &Song, action: &Action) -> Result<(), EditOpError> {
+pub(crate) fn check(song: &Song, action: &SessionAction) -> Result<(), EditOpError> {
     let track = |id: &str| {
         song.tracks
             .contains_key(id)
@@ -28,31 +51,32 @@ pub(crate) fn check(song: &Song, action: &Action) -> Result<(), EditOpError> {
             .ok_or_else(|| EditOpError::NoSuchScene(id.to_owned()))
     };
     match action {
-        Action::LaunchClip { track: t, scene: s } => {
+        SessionAction::LaunchClip { track: t, scene: s } => {
             let slots = &scene(s)?.slots;
             track(t)?;
             if !slots.contains_key(t) {
                 return Err(empty_slot(s, t));
             }
         }
-        Action::LaunchScene { scene: s } => {
+        SessionAction::LaunchScene { scene: s } => {
             scene(s)?;
         }
-        Action::StopClip { track: t } | Action::BackToArrangement { track: Some(t) } => track(t)?,
-        _ => {}
+        SessionAction::StopClip { track: t }
+        | SessionAction::BackToArrangement { track: Some(t) } => track(t)?,
+        SessionAction::BackToArrangement { track: None } => {}
     }
     Ok(())
 }
 
 /// The engine cue for a checked session action, resolved against the song the engine plays.
-pub(crate) fn resolve(song: &CompiledSong, action: &Action) -> Option<SessionCue> {
+pub(crate) fn resolve(song: &CompiledSong, action: &SessionAction) -> Option<SessionCue> {
     lookup(song, action).ok()
 }
 
 /// Why a checked session action no longer resolves against `song`, as the
 /// studio reports dropping it: "dropped `launch_clip`: there is no scene
 /// `groove` any more".
-pub(crate) fn dropped(song: &CompiledSong, action: &Action) -> String {
+pub(crate) fn dropped(song: &CompiledSong, action: &SessionAction) -> String {
     match lookup(song, action) {
         Err(why) => format!("dropped `{}`: {why} any more", action.name()),
         Ok(_) => format!("dropped `{}`", action.name()),
@@ -60,7 +84,7 @@ pub(crate) fn dropped(song: &CompiledSong, action: &Action) -> String {
 }
 
 /// [`resolve`], with the reason when it does not.
-fn lookup(song: &CompiledSong, action: &Action) -> Result<SessionCue, EditOpError> {
+fn lookup(song: &CompiledSong, action: &SessionAction) -> Result<SessionCue, EditOpError> {
     let track = |id: &str| {
         song.track_index(id)
             .ok_or_else(|| EditOpError::NoSuchTrack(id.to_owned()))
@@ -70,7 +94,7 @@ fn lookup(song: &CompiledSong, action: &Action) -> Result<SessionCue, EditOpErro
             .ok_or_else(|| EditOpError::NoSuchScene(id.to_owned()))
     };
     Ok(match action {
-        Action::LaunchClip { track: t, scene: s } => {
+        SessionAction::LaunchClip { track: t, scene: s } => {
             let scene_index = scene(s)?;
             let track = track(t)?;
             let clip = song.scenes[scene_index]
@@ -81,12 +105,11 @@ fn lookup(song: &CompiledSong, action: &Action) -> Result<SessionCue, EditOpErro
                 .ok_or_else(|| empty_slot(s, t))?;
             SessionCue::Launch { track, clip }
         }
-        Action::LaunchScene { scene: s } => SessionCue::Scene(scene(s)?),
-        Action::StopClip { track: t } => SessionCue::Stop(track(t)?),
-        Action::BackToArrangement { track: t } => {
+        SessionAction::LaunchScene { scene: s } => SessionCue::Scene(scene(s)?),
+        SessionAction::StopClip { track: t } => SessionCue::Stop(track(t)?),
+        SessionAction::BackToArrangement { track: t } => {
             SessionCue::Back(t.as_deref().map(track).transpose()?)
         }
-        other => unreachable!("`{}` is not a session action", other.name()),
     })
 }
 
@@ -106,17 +129,18 @@ impl OffArrangement {
     /// `song`, the song it was resolved against: `launch_clip` and
     /// `stop_clip` take their track off the arrangement, `launch_scene`
     /// every track, `back_to_arrangement` sends one or all back.
-    pub(crate) fn apply(&mut self, action: &Action, song: &CompiledSong) {
+    pub(crate) fn apply(&mut self, action: &SessionAction, song: &CompiledSong) {
         match action {
-            Action::LaunchClip { track, .. } | Action::StopClip { track } => {
+            SessionAction::LaunchClip { track, .. } | SessionAction::StopClip { track } => {
                 self.0.insert(track.clone());
             }
-            Action::LaunchScene { .. } => self.0.extend(song.tracks.iter().map(|t| t.id.clone())),
-            Action::BackToArrangement { track: Some(track) } => {
+            SessionAction::LaunchScene { .. } => {
+                self.0.extend(song.tracks.iter().map(|t| t.id.clone()))
+            }
+            SessionAction::BackToArrangement { track: Some(track) } => {
                 self.0.remove(track);
             }
-            Action::BackToArrangement { track: None } => self.clear(),
-            _ => {}
+            SessionAction::BackToArrangement { track: None } => self.clear(),
         }
     }
 
@@ -147,15 +171,15 @@ mod tests {
         parse_song(SESSION).expect("the session fixture parses")
     }
 
-    fn launch_clip(track: &str, scene: &str) -> Action {
-        Action::LaunchClip {
+    fn launch_clip(track: &str, scene: &str) -> SessionAction {
+        SessionAction::LaunchClip {
             track: track.into(),
             scene: scene.into(),
         }
     }
 
-    fn back(track: Option<&str>) -> Action {
-        Action::BackToArrangement {
+    fn back(track: Option<&str>) -> SessionAction {
+        SessionAction::BackToArrangement {
             track: track.map(Into::into),
         }
     }
@@ -173,7 +197,7 @@ mod tests {
                 clip: a1
             })
         );
-        let groove = Action::LaunchScene {
+        let groove = SessionAction::LaunchScene {
             scene: "groove".into(),
         };
         assert_eq!(
@@ -183,7 +207,7 @@ mod tests {
         assert_eq!(
             resolve(
                 &compiled,
-                &Action::StopClip {
+                &SessionAction::StopClip {
                     track: "hat".into()
                 }
             ),
@@ -221,6 +245,30 @@ mod tests {
     }
 
     #[test]
+    fn names_are_the_actions_names() {
+        let pairs = [
+            (launch_clip("acid", "groove"), "launch_clip"),
+            (
+                SessionAction::LaunchScene {
+                    scene: "groove".into(),
+                },
+                "launch_scene",
+            ),
+            (
+                SessionAction::StopClip {
+                    track: "hat".into(),
+                },
+                "stop_clip",
+            ),
+            (back(None), "back_to_arrangement"),
+        ];
+        for (session, name) in pairs {
+            assert_eq!(session.name(), name);
+            assert!(crate::action::find_action(name).is_some(), "{name}");
+        }
+    }
+
+    #[test]
     fn checks_the_track_the_scene_and_the_slot() {
         let song = song();
         assert_eq!(check(&song, &launch_clip("acid", "groove")), Ok(()));
@@ -249,7 +297,7 @@ mod tests {
         let mut off = OffArrangement::default();
         off.apply(&launch_clip("acid", "groove"), &song);
         off.apply(
-            &Action::StopClip {
+            &SessionAction::StopClip {
                 track: "hat".into(),
             },
             &song,
@@ -260,7 +308,7 @@ mod tests {
         off.apply(&back(None), &song);
         assert!(!off.contains("hat"));
         off.apply(
-            &Action::LaunchScene {
+            &SessionAction::LaunchScene {
                 scene: "break".into(),
             },
             &song,

@@ -37,7 +37,7 @@ use crate::doc::{EditError, effective_value};
 use crate::error::{ErrorView, StudioError};
 use crate::log::Source;
 use crate::path::SongPath;
-use crate::session::{self, OffArrangement};
+use crate::session::{self, OffArrangement, SessionAction};
 use crate::view::StudioState;
 
 /// The actor's tick: playhead events go out at this rate while playing.
@@ -316,7 +316,7 @@ struct Player {
     loop_unsent: bool,
     /// Session actions checked but not sent yet, oldest first: each goes
     /// once the newest swap plays (see [`Actor::send_cues`]).
-    cues: VecDeque<Action>,
+    cues: VecDeque<SessionAction>,
     /// The playing generation the actor last saw, to notice a swap landing.
     landed: u64,
 }
@@ -531,10 +531,14 @@ impl Actor {
             }
             Action::SeekBar { bar } => self.seek(bar),
             Action::SetLoop { bars } => self.set_loop(bars),
-            action @ (Action::LaunchClip { .. }
-            | Action::LaunchScene { .. }
-            | Action::StopClip { .. }
-            | Action::BackToArrangement { .. }) => self.session(action),
+            Action::LaunchClip { track, scene } => {
+                self.session(SessionAction::LaunchClip { track, scene })
+            }
+            Action::LaunchScene { scene } => self.session(SessionAction::LaunchScene { scene }),
+            Action::StopClip { track } => self.session(SessionAction::StopClip { track }),
+            Action::BackToArrangement { track } => {
+                self.session(SessionAction::BackToArrangement { track })
+            }
             Action::Undo => self.undo_redo(true),
             Action::Redo => self.undo_redo(false),
             Action::SetParam {
@@ -785,7 +789,11 @@ impl Actor {
     /// `first` (the launch that starts playback) is cued against the first
     /// song before the device starts, so it lands at that bar line even
     /// when the device plays its first block at once.
-    fn play(&mut self, from_bar: Option<u32>, first: Option<Action>) -> Result<Value, StudioError> {
+    fn play(
+        &mut self,
+        from_bar: Option<u32>,
+        first: Option<SessionAction>,
+    ) -> Result<Value, StudioError> {
         let song = self.core()?.song().clone();
         let bar = from_bar
             .unwrap_or(self.cursor_bar)
@@ -913,20 +921,20 @@ impl Actor {
     /// at the cursor (a bar line, so it lands at once), and a stop or a
     /// return to the arrangement changes nothing. Nothing is written,
     /// logged or undoable.
-    fn session(&mut self, action: Action) -> Result<Value, StudioError> {
+    fn session(&mut self, action: SessionAction) -> Result<Value, StudioError> {
         session::check(self.core()?.song(), &action).map_err(EditError::from)?;
-        if self.player.is_none() {
-            if !matches!(
-                action,
-                Action::LaunchClip { .. } | Action::LaunchScene { .. }
-            ) {
-                return Ok(Value::Null);
-            }
-            self.play(None, Some(action))?;
-        } else if let Some(player) = &mut self.player {
-            player.cues.push_back(action);
-            self.send_cues();
-        }
+        let Some(player) = &mut self.player else {
+            return match action {
+                SessionAction::LaunchClip { .. } | SessionAction::LaunchScene { .. } => {
+                    self.play(None, Some(action))
+                }
+                SessionAction::StopClip { .. } | SessionAction::BackToArrangement { .. } => {
+                    Ok(Value::Null)
+                }
+            };
+        };
+        player.cues.push_back(action);
+        self.send_cues();
         Ok(Value::Null)
     }
 
