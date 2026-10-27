@@ -508,7 +508,8 @@ impl Actor {
     }
 
     /// Live and history actions drive the player and the undo history; an
-    /// edit goes through [`StudioCore::apply_edit`].
+    /// edit goes through [`StudioCore::apply_edit`], a run undo through
+    /// [`StudioCore::apply_now`].
     fn handle_action(&mut self, action: Action) -> Result<Value, StudioError> {
         match action {
             Action::Play { from_bar } => self.play(from_bar),
@@ -528,6 +529,11 @@ impl Actor {
                 commit: false,
             } => self.drag(track, param, value),
             action @ Action::SetParam { commit: true, .. } => self.release(&action),
+            // The producer's "Undo this run": written at once, one step.
+            action @ Action::UndoRun { .. } => {
+                let mut out = self.apply_now(&[action], &Origin::human())?;
+                Ok(out.results.pop().unwrap_or(Value::Null))
+            }
             edit => self.edit(&edit),
         }
     }

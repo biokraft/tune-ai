@@ -471,6 +471,13 @@ pub const ACTIONS: &[ActionSpec] = &[
             ),
         ],
     ),
+    // ----- runs -----
+    action(
+        "undo_run",
+        Edit,
+        "Undoes every edit of a run, keeping (and listing) what someone changed since.",
+        &[arg("run", Text, "run id, as given with --run")],
+    ),
 ];
 
 /// The catalog entry of the action named `name`.

@@ -8,9 +8,9 @@ use ts_rs::{Config, TS};
 use crate::action::ACTIONS;
 use crate::view::PlacementView;
 use crate::{
-    AcidStepView, Action, Change, DrumHitDto, ErrorView, Event, ExternalChange, FxView, LaneView,
-    MixView, NoteView, ParamView, PatternView, RunTag, SectionView, SongView, Source,
-    StudioCommand, StudioState, TrackView,
+    AcidStepView, Action, Change, DrumHitDto, ErrorView, Event, ExternalChange, FxView, KeptReason,
+    KeptTarget, LaneView, MixView, NoteView, ParamView, PatternView, RunTag, RunUndo, SectionView,
+    SongView, Source, StudioCommand, StudioState, TargetItem, TrackView,
 };
 
 /// `Command` is `StudioCommand | Action` on the wire (its `Deserialize`
@@ -48,6 +48,10 @@ pub fn wire_types_ts() -> String {
     decl(SongView::decl(&cfg));
     decl(StudioState::decl(&cfg));
     decl(Event::decl(&cfg));
+    decl(TargetItem::decl(&cfg));
+    decl(KeptReason::decl(&cfg));
+    decl(KeptTarget::decl(&cfg));
+    decl(RunUndo::decl(&cfg));
     decl(Action::decl(&cfg));
     decl(StudioCommand::decl(&cfg));
     decl(COMMAND_DECL.to_owned());

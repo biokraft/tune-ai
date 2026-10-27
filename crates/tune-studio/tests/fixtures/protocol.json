@@ -319,6 +319,12 @@
           ]
         ]
       }
+    },
+    {
+      "cmd": "undo_run",
+      "args": {
+        "run": "r1"
+      }
     }
   ],
   "events": [

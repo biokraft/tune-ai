@@ -18,6 +18,7 @@ mod doc;
 mod error;
 mod log;
 mod path;
+mod run_undo;
 mod set;
 mod studio;
 mod target;
@@ -38,6 +39,7 @@ pub use doc::{EditError, SongDoc, effective_value, placement_json};
 pub use error::{ErrorView, StudioError};
 pub use log::{ActionRecord, EditEntry, EditLog, Source, text_hash};
 pub use path::{SongPath, TrackField};
+pub use run_undo::{KeptReason, KeptTarget, RunUndo, TargetItem, undo_run};
 pub use set::{
     MigrateOutcome, SetOutcome, apply_to_file, migrate_file, parse_assignment, set_paths,
     write_atomic,

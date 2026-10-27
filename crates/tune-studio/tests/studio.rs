@@ -13,8 +13,8 @@ use serde_json::{Value, json};
 use tune_engine::{AudioOut, CompiledSong, LiveProcessor, RenderOptions, render};
 use tune_song::parse_song;
 use tune_studio::{
-    Action, Command, EditLog, Event, SongPath, Source, StudioCommand, StudioConfig, StudioError,
-    StudioHandle, StudioState, set_paths,
+    Action, Command, EditLog, Event, Origin, RunTag, SongPath, Source, StudioCommand, StudioConfig,
+    StudioError, StudioHandle, StudioState, set_paths,
 };
 
 const MINI: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
@@ -414,6 +414,43 @@ fn release_commits() {
     let deadline = Instant::now() + WAIT;
     while f.human_log_lines() == 0 && Instant::now() < deadline {
         sleep(Duration::from_millis(10));
+    }
+    assert_eq!(f.human_log_lines(), 1);
+}
+
+/// "Undo this run" from the UI is written before the call returns, as the
+/// producer's one undo step, and its result is the run undo.
+#[test]
+fn undo_run_from_the_ui_writes_at_once() {
+    let f = fixture(MINI);
+    let run = RunTag::new("r1", None).unwrap();
+    let bpm = Action::SetValue {
+        path: SongPath::Bpm,
+        value: json!(130),
+    };
+    f.studio
+        .run_actions(vec![bpm], Origin::claude(Some(run)))
+        .unwrap();
+    let out = f.call(Command::Action(Action::UndoRun { run: "r1".into() }));
+    assert_eq!(
+        out["reverted"],
+        json!([{ "target": "song.bpm", "item": null }])
+    );
+    assert_eq!(f.disk(), MINI);
+    match f.wait("applied", |e| {
+        matches!(
+            e,
+            Event::Applied {
+                source: Source::Human,
+                ..
+            }
+        )
+    }) {
+        Event::Applied { changes, run, .. } => {
+            assert_eq!(run, None);
+            assert_eq!(changes[0].path, SongPath::Bpm);
+        }
+        _ => unreachable!(),
     }
     assert_eq!(f.human_log_lines(), 1);
 }

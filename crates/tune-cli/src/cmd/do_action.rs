@@ -11,8 +11,8 @@ use std::process::ExitCode;
 
 use serde_json::{Value, json};
 use tune_studio::{
-    Action, ActionKind, ActionsOutcome, Origin, StudioError, action_from_cli, apply_to_file,
-    find_studio, studio_dir,
+    Action, ActionKind, ActionsOutcome, KeptReason, KeptTarget, Origin, RunUndo, Source,
+    StudioError, action_from_cli, apply_to_file, find_studio, studio_dir,
 };
 
 use super::set::{RunFlags, change_lines, failures, file_hash};
@@ -59,6 +59,8 @@ fn do_actions(a: &Args) -> Result<Success, Vec<Failure>> {
     match actions.as_slice() {
         // Undo and redo print what they changed, like an edit.
         [one] if one.kind() == ActionKind::Live => lines.push(format!("ran {}", one.name())),
+        // A run undo says what it reverted and kept.
+        [Action::UndoRun { .. }] => {}
         _ => lines.push(change_lines(&out.changes)),
     }
     lines.extend(out.results.iter().flat_map(result_lines));
@@ -102,6 +104,9 @@ fn read_batch() -> Result<Vec<Action>, String> {
 
 /// What an action's result says, one line per fact; nothing for `null`.
 fn result_lines(result: &Value) -> Vec<String> {
+    if let Ok(undo) = serde_json::from_value::<RunUndo>(result.clone()) {
+        return run_undo_lines(&undo);
+    }
     let mut lines = Vec::new();
     if let Some(id) = result.get("id").and_then(Value::as_str) {
         lines.push(format!("added device {id}"));
@@ -130,4 +135,83 @@ fn result_lines(result: &Value) -> Vec<String> {
         lines.push(result.to_string());
     }
     lines
+}
+
+/// `undid run r1: 4 reverted, 1 kept`, then one line per kept target.
+fn run_undo_lines(undo: &RunUndo) -> Vec<String> {
+    let head = format!(
+        "undid run {}: {} reverted, {} kept",
+        undo.run,
+        undo.reverted.len(),
+        undo.kept.len()
+    );
+    std::iter::once(head)
+        .chain(undo.kept.iter().map(kept_line))
+        .collect()
+}
+
+/// `kept <target>: <why>`; a placement or stretch is named by its bar.
+fn kept_line(k: &KeptTarget) -> String {
+    let at = k
+        .item
+        .as_ref()
+        .and_then(|i| i.get("at"))
+        .map_or_else(String::new, |at| format!(" at bar {at}"));
+    let why = match (k.reason, k.by) {
+        (KeptReason::StillUsed, _) => {
+            format!("still used: {}", k.message.as_deref().unwrap_or("refused"))
+        }
+        (KeptReason::ChangedLater, Some(Source::Human)) => "changed later by human".to_owned(),
+        (KeptReason::ChangedLater, Some(Source::Claude)) => {
+            "changed later by another run".to_owned()
+        }
+        (KeptReason::ChangedLater, Some(Source::External) | None) => {
+            "changed later outside the studio".to_owned()
+        }
+    };
+    format!("kept {}{at}: {why}", k.target)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn kept_lines_say_why() {
+        let kept = |item, reason, by, message: Option<&str>| KeptTarget {
+            target: "tracks.acid.play".parse().unwrap(),
+            item,
+            reason,
+            by,
+            message: message.map(str::to_owned),
+        };
+        let changed = KeptReason::ChangedLater;
+        let lines: Vec<String> = [
+            kept(None, changed, Some(Source::Human), None),
+            kept(None, changed, Some(Source::Claude), None),
+            kept(None, changed, Some(Source::External), None),
+            kept(Some(json!({ "at": 3 })), changed, None, None),
+            kept(
+                None,
+                KeptReason::StillUsed,
+                None,
+                Some("unknown clip `lead`"),
+            ),
+        ]
+        .iter()
+        .map(kept_line)
+        .collect();
+        assert_eq!(
+            lines,
+            [
+                "kept tracks.acid.play: changed later by human",
+                "kept tracks.acid.play: changed later by another run",
+                "kept tracks.acid.play: changed later outside the studio",
+                "kept tracks.acid.play at bar 3: changed later outside the studio",
+                "kept tracks.acid.play: still used: unknown clip `lead`",
+            ]
+        );
+    }
 }
