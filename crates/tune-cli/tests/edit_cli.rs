@@ -156,6 +156,35 @@ fn set_same_clip_on_a_phase_shifted_section_is_a_change() {
     assert_eq!(last["file_hash"], text_hash(&text));
 }
 
+/// Resizing a late section of a long song splits a placement that runs
+/// into it far into its clip; the split's offset is still valid.
+#[test]
+fn set_bars_splits_a_long_placement() {
+    let dir = tempfile::tempdir().unwrap();
+    let song = dir.path().join("song.toml");
+    fs::write(
+        &song,
+        "[song]\nversion = 2\nname = \"long\"\nbpm = 200\nseed = 1\n\n\
+         [tracks.k]\ninstrument = \"kick\"\nplay = [{ at = 1, clip = \"k4\", bars = 1210 }]\n\n\
+         [clips.k4]\nkind = \"drum\"\nsteps = \"x...x...x...x...\"\n\n\
+         [[sections]]\nname = \"a\"\nbars = 1000\n\n[[sections]]\nname = \"b\"\nbars = 200\n\n\
+         [[sections]]\nname = \"c\"\nbars = 10\n",
+    )
+    .unwrap();
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "sections[2].bars=8",
+        "--json",
+    ]));
+    assert_eq!(v["changes"][0]["path"], "sections[2].bars");
+    let text = fs::read_to_string(&song).unwrap();
+    assert!(
+        text.contains("{ at = 1201, clip = \"k4\", bars = 8, offset = 1200 }"),
+        "{text}"
+    );
+}
+
 #[test]
 fn set_on_v1_migrates_and_says_so() {
     let (dir, song) = fixture_of("commented-v1.toml");

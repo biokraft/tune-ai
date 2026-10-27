@@ -357,6 +357,16 @@ fn placement_rules() {
         "clip `k4` is a drum clip; track `acid` (acid303) plays acid clips",
     );
     fails_at(
+        &kick(r#"play = [{ at = 1, clip = "k4", bars = 2, offset = 2251 }]"#),
+        "2251",
+        0,
+        "offset must be 0 to 2250 (the most bars a song can have), got 2251",
+    );
+    parse(&kick(
+        r#"play = [{ at = 1, clip = "k4", bars = 2, offset = 2250 }]"#,
+    ))
+    .expect("the longest song's length is a valid offset");
+    fails_at(
         &kick(r#"play = [{ at = 1, clip = "x", bars = 2 }]"#),
         "\"x\"",
         0,

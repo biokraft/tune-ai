@@ -25,6 +25,9 @@ const BPM: RangeInclusive<f64> = 40.0..=300.0;
 const BARS: RangeInclusive<i64> = *SECTION_BARS.start() as i64..=*SECTION_BARS.end() as i64;
 const SAMPLE_RATE: RangeInclusive<i64> = 8_000..=384_000;
 const MAX_SECONDS: f64 = 30.0 * 60.0;
+/// The most bars a song can have: [`MAX_SECONDS`] at the highest bpm, 4
+/// beats per bar (2250).
+pub(super) const MAX_SONG_BARS: i64 = (MAX_SECONDS * *BPM.end() / 60.0 / 4.0) as i64;
 
 /// Builds the song, or returns `None` when anything was recorded in `errors`.
 pub(crate) fn validate(raw: RawSong, registry: &Registry, errors: &mut Errors) -> Option<Song> {
