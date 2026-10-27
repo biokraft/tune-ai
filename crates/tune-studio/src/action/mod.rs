@@ -47,6 +47,27 @@ pub enum Action {
         #[serde(default)]
         bars: Option<[u32; 2]>,
     },
+    // ----- live session (each lands at the next bar line) -----
+    /// Launches the clip in the slot of scene `scene` for `track`; the track
+    /// leaves the arrangement.
+    LaunchClip {
+        track: String,
+        scene: String,
+    },
+    /// Launches every slot of `scene`: a slot with a clip plays it, an empty
+    /// slot stops its track.
+    LaunchScene {
+        scene: String,
+    },
+    /// Silences `track` until it goes back to the arrangement.
+    StopClip {
+        track: String,
+    },
+    /// Sends `track`, or every track when `None`, back to the arrangement.
+    BackToArrangement {
+        #[serde(default)]
+        track: Option<String>,
+    },
     // ----- history -----
     Undo,
     Redo,
@@ -386,6 +407,10 @@ impl Action {
             Self::Stop => "stop",
             Self::SeekBar { .. } => "seek_bar",
             Self::SetLoop { .. } => "set_loop",
+            Self::LaunchClip { .. } => "launch_clip",
+            Self::LaunchScene { .. } => "launch_scene",
+            Self::StopClip { .. } => "stop_clip",
+            Self::BackToArrangement { .. } => "back_to_arrangement",
             Self::Undo => "undo",
             Self::Redo => "redo",
             Self::SetValue { .. } => "set_value",
@@ -506,7 +531,13 @@ impl Action {
                 vec![format!("scenes.{scene}"), format!("scenes.{to}")]
             }
             Self::MoveScene { .. } => vec!["scenes".to_owned()],
-            Self::SetSlot { scene, track, .. } => vec![format!("scenes.{scene}.slots.{track}")],
+            Self::SetSlot { scene, track, .. } | Self::LaunchClip { track, scene } => {
+                vec![format!("scenes.{scene}.slots.{track}")]
+            }
+            Self::LaunchScene { scene } => vec![format!("scenes.{scene}")],
+            Self::StopClip { track } | Self::BackToArrangement { track: Some(track) } => {
+                vec![format!("tracks.{track}")]
+            }
             Self::AddLane { param, .. }
             | Self::RemoveLane { param, .. }
             | Self::SetLanePoints { param, .. } => vec![format!("automation.{param}")],
@@ -518,6 +549,7 @@ impl Action {
             }
             // Which targets a run undo writes, the edit log says.
             Self::UndoRun { .. }
+            | Self::BackToArrangement { track: None }
             | Self::Play { .. }
             | Self::Stop
             | Self::SeekBar { .. }

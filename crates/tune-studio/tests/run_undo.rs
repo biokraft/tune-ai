@@ -2545,3 +2545,56 @@ fn an_order_already_back_is_not_reverted() {
     assert_eq!(already, ["scenes", "scenes.jam"]);
     assert_eq!(s.scenes(), ["groove", "break"]);
 }
+
+/// An audio device that holds the processor and never plays it.
+struct ParkedOut;
+
+impl tune_engine::AudioOut for ParkedOut {
+    fn sample_rate(&mut self, wanted: u32) -> Result<u32, String> {
+        Ok(wanted)
+    }
+
+    fn start(&mut self, processor: tune_engine::LiveProcessor) -> Result<Box<dyn Send>, String> {
+        Ok(Box::new(processor))
+    }
+}
+
+#[test]
+fn launches_are_not_part_of_a_run_end_to_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.toml");
+    fs::write(&path, SESSION).unwrap();
+    let config = tune_studio::StudioConfig {
+        audio: Box::new(ParkedOut),
+        songs_root: dir.path().to_owned(),
+    };
+    let studio = tune_studio::Studio::spawn(config, Some(path.clone())).unwrap();
+    let launch = Action::LaunchClip {
+        track: "acid".into(),
+        scene: "groove".into(),
+    };
+    studio.run_actions(vec![launch], run("r1")).unwrap();
+    studio.run_actions(vec![cutoff(820.0)], run("r1")).unwrap();
+    let records = EditLog::for_song(&path).read_records().unwrap();
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].run.as_deref(), Some("r1"));
+    assert_eq!(records[0].actions, ["set_value"]);
+
+    let out = studio
+        .run_actions(vec![undo_action("r1")], Origin::human())
+        .unwrap();
+    let undo: RunUndo = serde_json::from_value(out.results[0].clone()).unwrap();
+    assert_eq!(undo.reverted, reverted(&["tracks.acid.acid303.cutoff"]));
+    assert!(undo.kept.is_empty(), "{:?}", undo.kept);
+    assert_eq!(fs::read_to_string(&path).unwrap(), SESSION);
+
+    let scene = Action::LaunchScene {
+        scene: "groove".into(),
+    };
+    studio.run_actions(vec![scene], run("r2")).unwrap();
+    let err = studio
+        .run_actions(vec![undo_action("r2")], Origin::human())
+        .unwrap_err();
+    assert_eq!(err.to_string(), "no edits of run `r2` in the edit log");
+    studio.shutdown();
+}

@@ -2615,3 +2615,32 @@ fn slot_clean_ups_keep_comments_in_slots_tables_and_scene_less_songs() {
     s.ok(Action::RemoveClip { clip: "k4".into() });
     assert!(!s.text().contains("scenes"), "{}", s.text());
 }
+
+#[test]
+fn session_targets() {
+    let launch = Action::LaunchClip {
+        track: "acid".into(),
+        scene: "groove".into(),
+    };
+    assert_eq!(launch.targets(), ["scenes.groove.slots.acid"]);
+    let scene = Action::LaunchScene {
+        scene: "groove".into(),
+    };
+    assert_eq!(scene.targets(), ["scenes.groove"]);
+    let stop = Action::StopClip {
+        track: "hat".into(),
+    };
+    assert_eq!(stop.targets(), ["tracks.hat"]);
+    let back_one = Action::BackToArrangement {
+        track: Some("acid".into()),
+    };
+    assert_eq!(back_one.targets(), ["tracks.acid"]);
+    assert!(
+        Action::BackToArrangement { track: None }
+            .targets()
+            .is_empty()
+    );
+    for a in [launch, scene, stop, back_one] {
+        assert_eq!(a.kind(), tune_studio::ActionKind::Live, "{}", a.name());
+    }
+}

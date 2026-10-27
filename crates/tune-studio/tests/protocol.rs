@@ -28,6 +28,10 @@ fn wire_name(c: &Command) -> &'static str {
             Action::Stop => "stop",
             Action::SeekBar { .. } => "seek_bar",
             Action::SetLoop { .. } => "set_loop",
+            Action::LaunchClip { .. } => "launch_clip",
+            Action::LaunchScene { .. } => "launch_scene",
+            Action::StopClip { .. } => "stop_clip",
+            Action::BackToArrangement { .. } => "back_to_arrangement",
             Action::Undo => "undo",
             Action::Redo => "redo",
             Action::SetValue { .. } => "set_value",
@@ -114,6 +118,17 @@ fn sample_actions() -> Vec<Action> {
         Action::Stop,
         Action::SeekBar { bar: 8 },
         Action::SetLoop { bars: Some([2, 6]) },
+        Action::LaunchClip {
+            track: "acid".into(),
+            scene: "groove".into(),
+        },
+        Action::LaunchScene {
+            scene: "groove".into(),
+        },
+        Action::StopClip {
+            track: "hat".into(),
+        },
+        Action::BackToArrangement { track: None },
         Action::Undo,
         Action::Redo,
         Action::SetValue {

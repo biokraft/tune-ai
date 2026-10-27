@@ -299,6 +299,10 @@ pub(crate) fn apply_action(
         | Action::Stop
         | Action::SeekBar { .. }
         | Action::SetLoop { .. }
+        | Action::LaunchClip { .. }
+        | Action::LaunchScene { .. }
+        | Action::StopClip { .. }
+        | Action::BackToArrangement { .. }
         | Action::Undo
         | Action::Redo => return Err(StudioError::NotAnEdit),
     }

@@ -69,6 +69,33 @@ pub const ACTIONS: &[ActionSpec] = &[
             "[start, end): 0-based bars, end not included, e.g. [2, 6]; left out stops looping",
         )],
     ),
+    // ----- live session -----
+    action(
+        "launch_clip",
+        Live,
+        "Launches the clip in a scene's slot for a track at the next bar line; the track \
+         leaves the arrangement until it is sent back. Starts playback when stopped.",
+        &[TRACK, arg("scene", Id, "scene id")],
+    ),
+    action(
+        "launch_scene",
+        Live,
+        "Launches a scene at the next bar line: each track plays its slot's clip, and a track \
+         with an empty slot stops. Starts playback when stopped.",
+        &[arg("scene", Id, "scene id")],
+    ),
+    action(
+        "stop_clip",
+        Live,
+        "Silences a track from the next bar line until it is sent back to the arrangement.",
+        &[TRACK],
+    ),
+    action(
+        "back_to_arrangement",
+        Live,
+        "Sends a track, or every track, back to the arrangement at the next bar line.",
+        &[opt("track", Id, "track id; every track when left out")],
+    ),
     // ----- history -----
     action(
         "undo",

@@ -43,6 +43,31 @@
       }
     },
     {
+      "cmd": "launch_clip",
+      "args": {
+        "track": "acid",
+        "scene": "groove"
+      }
+    },
+    {
+      "cmd": "launch_scene",
+      "args": {
+        "scene": "groove"
+      }
+    },
+    {
+      "cmd": "stop_clip",
+      "args": {
+        "track": "hat"
+      }
+    },
+    {
+      "cmd": "back_to_arrangement",
+      "args": {
+        "track": null
+      }
+    },
+    {
       "cmd": "undo"
     },
     {
