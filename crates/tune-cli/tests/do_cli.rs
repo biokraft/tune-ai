@@ -138,6 +138,36 @@ fn do_reads_the_run_from_the_environment() {
     assert_eq!(e.last_entry()["run"], "r3");
 }
 
+/// `--run-title` names the run `TUNE_RUN` gives, for `set` and `do`.
+#[test]
+fn a_run_title_names_the_run_from_the_environment() {
+    let e = fixture();
+    let song = e.song.to_str().unwrap();
+    let title = ["--run-title", "open the filter", "--json"];
+    json_out(
+        e.tune()
+            .env("TUNE_RUN", "r9")
+            .args(["set", song, "song.bpm=130"])
+            .args(title),
+    );
+    let last = e.last_entry();
+    assert_eq!(
+        (&last["run"], &last["run_title"]),
+        (&json!("r9"), &json!("open the filter"))
+    );
+    json_out(
+        e.tune()
+            .env("TUNE_RUN", "r9")
+            .args(["do", song, "set_value", "path=song.bpm", "value=131"])
+            .args(title),
+    );
+    let last = e.last_entry();
+    assert_eq!(
+        (&last["run"], &last["run_title"]),
+        (&json!("r9"), &json!("open the filter"))
+    );
+}
+
 const BAD_BATCH: &str = r#"[{"cmd":"set_value","args":{"path":"song.bpm","value":130}},{"cmd":"set_value","args":{"path":"tracks.nope.gain_db","value":1}}]"#;
 const GOOD_BATCH: &str = r#"[{"cmd":"set_value","args":{"path":"song.bpm","value":130}},{"cmd":"set_value","args":{"path":"tracks.acid.gain_db","value":-2}}]"#;
 

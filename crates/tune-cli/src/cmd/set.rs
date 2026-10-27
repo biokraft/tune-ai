@@ -52,10 +52,12 @@ pub struct RunFlags {
 impl RunFlags {
     pub fn resolve(&self) -> Result<Option<RunTag>, String> {
         let env = |name| std::env::var(name).ok().filter(|v| !v.is_empty());
-        if self.run.is_none() && self.run_title.is_some() {
-            return Err("--run-title needs a run: give --run ID too".to_owned());
-        }
         let Some(id) = self.run.clone().or_else(|| env("TUNE_RUN")) else {
+            if self.run_title.is_some() {
+                return Err(
+                    "--run-title needs a run: give --run ID (or set TUNE_RUN) too".to_owned(),
+                );
+            }
             return Ok(None);
         };
         let title = self.run_title.clone().or_else(|| env("TUNE_RUN_TITLE"));
