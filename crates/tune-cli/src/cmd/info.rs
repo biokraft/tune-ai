@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use serde_json::{Map, Value, json};
 use tune_engine::Clock;
-use tune_song::{Device, SectionPlay, Song};
+use tune_song::{Clip, Device, SectionPlay, Song};
 use tune_studio::placement_json;
 
 use super::{load, note_migration, sample_rate};
@@ -109,6 +109,35 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
                     "placements": t.play.iter().map(placement_json).collect::<Vec<_>>(),
                 }));
             }
+            let mut clips = Vec::new();
+            let mut clip_texts = Vec::new();
+            for (id, clip) in &song.clips {
+                let steps = clip.steps();
+                let kind = clip.kind().name();
+                match clip {
+                    Clip::Notes(n) => {
+                        clip_texts.push(format!(
+                            "{id} {kind} {} bars {} notes",
+                            n.bars,
+                            n.notes.len()
+                        ));
+                        clips.push(json!({
+                            "id": id,
+                            "kind": kind,
+                            "steps": steps,
+                            "bars": n.bars,
+                            "notes": n.notes.len(),
+                        }));
+                    }
+                    _ => {
+                        clip_texts.push(format!("{id} {kind} {steps} steps"));
+                        clips.push(json!({ "id": id, "kind": kind, "steps": steps }));
+                    }
+                }
+            }
+            if !clip_texts.is_empty() {
+                let _ = write!(text, "\nclips: {}", clip_texts.join(", "));
+            }
             let mut success = Success {
                 text,
                 json: json!({
@@ -119,6 +148,7 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
                     "seconds": seconds,
                     "sections": Value::Array(sections),
                     "tracks": Value::Array(tracks),
+                    "clips": Value::Array(clips),
                 }),
             };
             note_migration(path, loaded.migrated_from, json, &mut success);
