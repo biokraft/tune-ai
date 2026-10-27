@@ -296,6 +296,9 @@ fn entry(ts: &str, source: Source, hash: Option<&str>) -> EditEntry {
         old: json!(120),
         new: json!(121),
         file_hash: hash.map(str::to_owned),
+        action: None,
+        run: None,
+        run_title: None,
     }
 }
 

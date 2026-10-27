@@ -249,6 +249,15 @@ The producer may have the studio (app or browser) open on the same song.
   the `until` from the last call (omit `--since` the first time). It lists the
   producer's knob moves and step edits (`human`), Claude's (`claude`) and
   anything else (`external`), oldest first. `--source human` narrows it.
+- `tune do <song> <action> [name=value]... --json` runs any action from
+  `tune actions` (`tune do <song> set_value path=song.bpm value=130`); with
+  `--batch` it reads a JSON array of `{"cmd", "args"}` objects from stdin and
+  applies them all or nothing (song edits only; `play`, `undo` and the other
+  live or history actions need the studio open and run on their own).
+  Tag the edits of one piece of work with a run: `--run ID --run-title TEXT`
+  (or `TUNE_RUN`, `TUNE_RUN_TITLE`; the flags win). `tune changes` shows
+  `(run ID)` on those entries. `tune set` takes the same flags and is a
+  shorthand for `set_value`.
 - Edit with `tune set <song> path=value... --json` while the app is open: the
   edits are all-or-nothing, keep the file's comments, and are tagged `claude`,
   so the app rings them in cyan with an Undo. Plain file edits still work and

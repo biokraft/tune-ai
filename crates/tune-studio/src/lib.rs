@@ -23,8 +23,8 @@ mod view;
 mod wire;
 
 pub use action::{
-    ACTIONS, Action, ActionKind, ActionSpec, ArgSpec, ArgType, DrumHitDto, action_from_cli,
-    find_action, parse_value,
+    ACTIONS, Action, ActionKind, ActionSpec, ActionsOutcome, ArgSpec, ArgType, DrumHitDto, Origin,
+    RunTag, Via, action_from_cli, find_action, parse_value,
 };
 pub use command::{Command, StudioCommand};
 pub use core::{
@@ -36,7 +36,8 @@ pub use error::{ErrorView, StudioError};
 pub use log::{EditEntry, EditLog, Source, text_hash};
 pub use path::{SongPath, TrackField};
 pub use set::{
-    MigrateOutcome, SetOutcome, migrate_file, parse_assignment, set_paths, write_atomic,
+    MigrateOutcome, SetOutcome, apply_to_file, migrate_file, parse_assignment, set_paths,
+    write_atomic,
 };
 pub use studio::{Event, PLAYHEAD_INTERVAL, Studio, StudioConfig, StudioHandle};
 pub use view::{

@@ -13,6 +13,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
+use crate::action::RunTag;
 use crate::diff::Change;
 
 /// Who made an edit.
@@ -38,6 +39,14 @@ pub struct EditEntry {
     /// FNV-1a hash of the file text after the edit (see [`text_hash`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_hash: Option<String>,
+    /// The name of the action that made the change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    /// The run the change belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_title: Option<String>,
 }
 
 fn ser_ts<S: Serializer>(ts: &Timestamp, s: S) -> Result<S::Ok, S::Error> {
@@ -68,25 +77,17 @@ impl EditLog {
     }
 
     /// Appends one entry per change, all from `source`, stamped now and
-    /// carrying `file_hash` (the file after the changes).
+    /// carrying `file_hash` (the file after the changes), the name of the
+    /// `action` that made them and the `run` they belong to.
     pub(crate) fn append_changes(
         &self,
         source: Source,
         changes: &[Change],
         file_hash: &str,
+        action: Option<&str>,
+        run: Option<&RunTag>,
     ) -> io::Result<()> {
-        let ts = Timestamp::now();
-        let entries: Vec<EditEntry> = changes
-            .iter()
-            .map(|c| EditEntry {
-                ts,
-                source,
-                path: c.path.to_string(),
-                old: c.old.clone(),
-                new: c.new.clone(),
-                file_hash: Some(file_hash.to_owned()),
-            })
-            .collect();
+        let entries = entries_for(Timestamp::now(), source, changes, file_hash, action, run);
         self.append(&entries)
     }
 
@@ -141,6 +142,31 @@ impl EditLog {
             Err(e) => Err(e),
         }
     }
+}
+
+/// One entry per change, all stamped `ts`.
+pub(crate) fn entries_for(
+    ts: Timestamp,
+    source: Source,
+    changes: &[Change],
+    file_hash: &str,
+    action: Option<&str>,
+    run: Option<&RunTag>,
+) -> Vec<EditEntry> {
+    changes
+        .iter()
+        .map(|c| EditEntry {
+            ts,
+            source,
+            path: c.path.to_string(),
+            old: c.old.clone(),
+            new: c.new.clone(),
+            file_hash: Some(file_hash.to_owned()),
+            action: action.map(str::to_owned),
+            run: run.map(|r| r.id.clone()),
+            run_title: run.and_then(|r| r.title.clone()),
+        })
+        .collect()
 }
 
 /// FNV-1a 64 of the UTF-8 bytes as 16 lowercase hex digits.

@@ -38,6 +38,14 @@ pub enum StudioError {
     NoSong,
     #[error("that command is not an edit")]
     NotAnEdit,
+    #[error("`{action}` needs the studio: open the song with `tune serve <song>` or the app first")]
+    NeedsStudio { action: String },
+    #[error("a batch holds song edits only; run `{action}` on its own")]
+    EditsOnly { action: String },
+    #[error("no edits of run `{0}` in the edit log")]
+    NoSuchRun(String),
+    #[error("the studio did not answer; check it before retrying")]
+    NoAnswer,
     #[error("{0}")]
     Audio(String),
     #[error("timed out")]

@@ -11,6 +11,7 @@ pub mod actions;
 pub mod analyze;
 pub mod changes;
 pub mod compare;
+pub mod do_action;
 pub mod info;
 pub mod migrate;
 pub mod params;

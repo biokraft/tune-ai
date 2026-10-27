@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tune_dsp::DrumHit;
 
+use crate::diff::Change;
+use crate::log::Source;
 use crate::path::{SongPath, TrackField};
 
 pub(crate) use apply::{ApplyCtx, apply_action};
@@ -288,6 +290,86 @@ impl Action {
             | Self::Redo => Vec::new(),
         }
     }
+}
+
+/// A run: the edits of one piece of work, named by Claude so the producer
+/// can undo them together.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+pub struct RunTag {
+    pub id: String,
+    pub title: Option<String>,
+}
+
+impl RunTag {
+    /// A run id is 1 to 64 letters, digits or `_.:-`; a title is one line of
+    /// 1 to 200 characters.
+    pub fn new(id: &str, title: Option<&str>) -> Result<Self, String> {
+        let id_ok = (1..=64).contains(&id.chars().count())
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_.:-".contains(c));
+        if !id_ok {
+            return Err(format!(
+                "run id must be 1 to 64 letters, digits or `_.:-`, got `{id}`"
+            ));
+        }
+        if let Some(t) = title
+            && (!(1..=200).contains(&t.chars().count()) || t.contains(['\n', '\r']))
+        {
+            return Err("a run title is one line of 1 to 200 characters".to_owned());
+        }
+        Ok(Self {
+            id: id.to_owned(),
+            title: title.map(str::to_owned),
+        })
+    }
+}
+
+/// Who is acting, and for which run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Origin {
+    pub source: Source,
+    pub run: Option<RunTag>,
+}
+
+impl Origin {
+    pub fn human() -> Self {
+        Self {
+            source: Source::Human,
+            run: None,
+        }
+    }
+
+    pub fn claude(run: Option<RunTag>) -> Self {
+        Self {
+            source: Source::Claude,
+            run,
+        }
+    }
+}
+
+/// How a set of actions reached the song.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Via {
+    /// Through the open studio.
+    Studio,
+    /// Straight into the file.
+    File,
+}
+
+/// What a set of actions did.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActionsOutcome {
+    pub via: Via,
+    pub changes: Vec<Change>,
+    /// One result per action, in order (`null` for most).
+    pub results: Vec<Value>,
+    /// FNV-1a hash of the file after the write; `None` when nothing was
+    /// written.
+    pub file_hash: Option<String>,
+    /// The format version the file was migrated from, when the write did.
+    pub migrated_from: Option<u32>,
 }
 
 /// One drum step on the wire.
