@@ -1338,3 +1338,154 @@ fn a_section_edit_is_kept_after_a_track_came_in_from_outside() {
     assert_eq!(s.text(), text);
     assert_eq!(s.value("tracks.x.play"), json!([placement(3, "a1", 2)]));
 }
+
+// ----- final review -----
+
+/// A song file with the studio closed: the run writes through
+/// `apply_to_file`, the producer edits the text by hand (no log entry).
+struct F {
+    _dir: tempfile::TempDir,
+    path: PathBuf,
+}
+
+fn closed() -> F {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.toml");
+    fs::write(&path, FIXTURE).unwrap();
+    F { _dir: dir, path }
+}
+
+impl F {
+    fn agent(&self, id: &str, actions: &[Action]) {
+        apply_to_file(&self.path, actions, &run(id)).unwrap();
+    }
+
+    /// A hand edit in an editor: `from` replaced by `to`, nothing logged.
+    fn hand(&self, from: &str, to: &str) {
+        let text = self.text();
+        assert!(text.contains(from), "{from:?} not in {text}");
+        fs::write(&self.path, text.replacen(from, to, 1)).unwrap();
+    }
+
+    fn undo_run(&self, id: &str) -> RunUndo {
+        let out = apply_to_file(&self.path, &[undo_action(id)], &Origin::claude(None)).unwrap();
+        serde_json::from_value(out.results[0].clone()).unwrap()
+    }
+
+    fn text(&self) -> String {
+        fs::read_to_string(&self.path).unwrap()
+    }
+
+    fn value(&self, t: &str) -> Value {
+        target_value(SongDoc::parse(&self.text()).unwrap().song(), &target(t))
+    }
+}
+
+/// C1: with the studio closed, the producer added a placement by hand
+/// between two of the run's writes to the same list. The run's second
+/// write carried it in its old and new values, so it is not the run's:
+/// the whole list is kept, nothing written.
+#[test]
+fn a_placement_added_by_hand_between_the_runs_writes_is_kept() {
+    let f = closed();
+    f.agent("r1", &[place("acid", "a1", 1, 1)]);
+    f.hand(
+        "  { at = 1, clip = \"a1\", bars = 1 },\n",
+        "  { at = 1, clip = \"a1\", bars = 1 },\n  { at = 2, clip = \"a1\", bars = 1 }, # mine\n",
+    );
+    f.agent(
+        "r1",
+        &[Action::ResizePlacement {
+            track: "acid".into(),
+            at: 3,
+            bars: 1,
+        }],
+    );
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let kept_at = |p: Value| kept_item("tracks.acid.play", p, None);
+    assert_eq!(
+        u.kept,
+        vec![
+            kept_at(placement(1, "a1", 1)),
+            kept_at(placement(2, "a1", 1)),
+            kept_at(placement(3, "a1", 1)),
+            kept_at(placement(3, "a1", 2)),
+        ]
+    );
+    assert_eq!(f.text(), text);
+    assert_eq!(
+        f.value("tracks.acid.play"),
+        json!([
+            placement(1, "a1", 1),
+            placement(2, "a1", 1),
+            placement(3, "a1", 1)
+        ])
+    );
+}
+
+/// C1: the same for a lane stretch the producer added by hand.
+#[test]
+fn a_stretch_added_by_hand_between_the_runs_writes_is_kept() {
+    let f = closed();
+    let param = "acid.acid303.cutoff";
+    f.agent(
+        "r1",
+        &[Action::AddLane {
+            param: param.into(),
+            at: 1,
+            bars: 1,
+            points: vec![[0.0, 0.2], [1.0, 0.6]],
+        }],
+    );
+    f.hand(
+        "# acid enters\n",
+        "# mine\n[[automation]]\nparam = \"acid.acid303.cutoff\"\nat = 2\nbars = 1\npoints = [[0, 0.5], [1, 0.5]]\n\n# acid enters\n",
+    );
+    f.agent(
+        "r1",
+        &[Action::SetLanePoints {
+            param: param.into(),
+            at: 1,
+            points: vec![[0.0, 0.3], [1.0, 0.9]],
+        }],
+    );
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let kept_at = |p: Value| kept_item("automation.acid.acid303.cutoff", p, None);
+    assert_eq!(
+        u.kept,
+        vec![
+            kept_at(lane_stretch(1, 1, json!([[0, 0.3], [1, 0.9]]))),
+            kept_at(lane_stretch(2, 1, json!([[0, 0.5], [1, 0.5]]))),
+        ]
+    );
+    assert_eq!(f.text(), text);
+    assert_eq!(
+        f.value("automation.acid.acid303.cutoff"),
+        json!([
+            lane_stretch(1, 1, json!([[0, 0.3], [1, 0.9]])),
+            lane_stretch(2, 1, json!([[0, 0.5], [1, 0.5]])),
+            lane_stretch(3, 2, json!([[0, 0.1], [2, 0.8]])),
+        ])
+    );
+}
+
+/// C1: a leaf the producer changed by hand between two of the run's
+/// writes is kept, never written back over their value or the run's
+/// original one.
+#[test]
+fn a_value_changed_by_hand_between_the_runs_writes_is_kept() {
+    let f = closed();
+    f.agent("r1", &[cutoff(800.0)]);
+    f.hand("\"acid303.cutoff\" = 800", "\"acid303.cutoff\" = 650");
+    f.agent("r1", &[cutoff(900.0)]);
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept("tracks.acid.acid303.cutoff", None)]);
+    assert_eq!(f.text(), text);
+    assert_eq!(f.value("tracks.acid.acid303.cutoff"), json!(900));
+}

@@ -7,12 +7,14 @@
 //! after its last. A target another write touched after the run's last
 //! change to it is kept (someone changed it later); one whose value now is
 //! not the run's is kept too (changed outside the studio, or by an edit the
-//! log missed). A track's placements and a lane's stretches are merged an
-//! element at a time, so the producer's own placements stay. Reverts are
-//! written newest first, each on a copy of the document; one the song
-//! refuses (a clip still placed) waits for the others and is kept if it
-//! still cannot be written. When in doubt a target is kept, never
-//! overwritten.
+//! log missed), and so is one that changed between two of the run's
+//! writes with no logged edit to explain it (a hand edit with the studio
+//! closed, carried along by the run's next write). A track's placements
+//! and a lane's stretches are merged an element at a time, so the
+//! producer's own placements stay. Reverts are written newest first, each
+//! on a copy of the document; one the song refuses (a clip still placed)
+//! waits for the others and is kept if it still cannot be written. When in
+//! doubt a target is kept, never overwritten.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -88,6 +90,10 @@ struct Plan {
     /// value when the change was to the target itself (`None` for a part
     /// folded in).
     touched: Vec<(usize, Option<Value>)>,
+    /// Each pair of the run's records touching it, one after the other,
+    /// between which its value changed: the later one's old value is not
+    /// what the earlier one left.
+    gaps: Vec<(usize, usize)>,
 }
 
 /// What to do with one target, decided when its turn comes.
@@ -332,7 +338,11 @@ fn plan(records: &[ActionRecord], mine: &[usize]) -> Vec<Plan> {
                 }
                 None => match plans.iter().position(|p| p.target == c.target) {
                     Some(k) => {
-                        plans[k].after = c.new.clone();
+                        let p = &mut plans[k];
+                        if !approx(p, &c.old, &p.after) {
+                            p.gaps.push((p.last, i));
+                        }
+                        p.after = c.new.clone();
                         (k, Some(c.old.clone()))
                     }
                     None => {
@@ -344,6 +354,7 @@ fn plan(records: &[ActionRecord], mine: &[usize]) -> Vec<Plan> {
                             last: i,
                             pos,
                             touched: Vec::new(),
+                            gaps: Vec::new(),
                         });
                         (plans.len() - 1, Some(c.old.clone()))
                     }
@@ -361,6 +372,16 @@ fn plan(records: &[ActionRecord], mine: &[usize]) -> Vec<Plan> {
 impl Plan {
     fn side(&self) -> (&Target, &Value, &Value) {
         (&self.target, &self.before, &self.after)
+    }
+
+    /// Whether something the edit log does not show changed the target
+    /// between two of the run's writes: a gap no other logged write (of
+    /// `foreign`, those touching it) explains. With the studio closed, a
+    /// hand edit made then is carried in the run's later write, as if the
+    /// run had made it.
+    fn unlogged_gap(&self, foreign: &[usize]) -> bool {
+        let logged = |a: usize, b: usize| foreign.iter().any(|&j| a < j && j < b);
+        self.gaps.iter().any(|&(a, b)| !logged(a, b))
     }
 }
 
@@ -380,6 +401,11 @@ fn decide(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionRecord]) 
             message: None,
         }])
     };
+    // Changed between the run's writes by an edit the log missed: what it
+    // held then is not known, so it is kept.
+    if p.unlogged_gap(foreign) {
+        return kept(None);
+    }
     let mut before = p.before.clone();
     if let Some(&j) = foreign.last() {
         let by = Some(records[j].source);
@@ -455,6 +481,18 @@ fn decide_list(
     let after = elements(&p.after);
     let added = minus(&after, &before);
     let removed = minus(&before, &after);
+    // Changed between the run's writes by an edit the log missed: the
+    // run's later write carried that edit, so what the run added is not
+    // known. Kept whole.
+    if p.unlogged_gap(foreign) {
+        return Decision::Kept(
+            added
+                .iter()
+                .chain(&removed)
+                .map(|e| kept_by(e, None))
+                .collect(),
+        );
+    }
     // Another write touched the list (or what it belongs to) while the
     // run was still working on it: the run's later edits started from
     // their state, which is not known element by element, so it is kept.

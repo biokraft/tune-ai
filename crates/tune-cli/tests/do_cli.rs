@@ -567,6 +567,63 @@ fn undo_run_from_the_cli() {
     assert_eq!(fs::read_to_string(&e.song).unwrap(), fixture_text);
 }
 
+/// With the studio closed, a placement added by hand between two of the
+/// run's writes to the same list stays, and the undo lists it as kept.
+#[test]
+fn undo_run_keeps_a_placement_added_by_hand_between_its_writes() {
+    let e = fixture();
+    let song = e.song.to_str().unwrap();
+    let run = ["--run", "r1", "--json"];
+    json_out(
+        e.tune()
+            .args([
+                "do",
+                song,
+                "add_placement",
+                "track=acid",
+                "clip=a1",
+                "at=1",
+                "bars=1",
+            ])
+            .args(run),
+    );
+    let text = fs::read_to_string(&e.song).unwrap();
+    let mine = "  { at = 2, clip = \"a1\", bars = 1 }, # mine\n";
+    let first = "  { at = 1, clip = \"a1\", bars = 1 },\n";
+    assert!(text.contains(first), "{text}");
+    fs::write(&e.song, text.replacen(first, &format!("{first}{mine}"), 1)).unwrap();
+    json_out(
+        e.tune()
+            .args([
+                "do",
+                song,
+                "resize_placement",
+                "track=acid",
+                "at=3",
+                "bars=1",
+            ])
+            .args(run),
+    );
+    let before = fs::read_to_string(&e.song).unwrap();
+    let v = json_out(e.tune().args(["do", song, "undo_run", "r1", "--json"]));
+    let undo = &v["results"][0];
+    assert_eq!(undo["reverted"], json!([]));
+    let kept = undo["kept"].as_array().unwrap();
+    assert!(
+        kept.iter()
+            .any(|k| k["item"]["at"] == 2 && k["by"].is_null() && k["reason"] == "changed_later"),
+        "{undo}"
+    );
+    let after = fs::read_to_string(&e.song).unwrap();
+    assert_eq!(after, before);
+    // The run's resize rewrote the list (dropping the comment); the
+    // placement itself is still there.
+    assert!(
+        after.contains("{ at = 2, clip = \"a1\", bars = 1 }"),
+        "{after}"
+    );
+}
+
 #[test]
 fn undo_run_says_what_it_kept() {
     let e = fixture();
