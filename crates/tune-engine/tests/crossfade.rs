@@ -187,7 +187,11 @@ const NOCOPY_FX: &str = r#"{ type = "nocopy" }"#;
 const EQ_200: &str = r#"{ type = "eq", params = { "eq.low_cut" = 200 } }"#;
 const EQ_FLAT: &str = r#"{ type = "eq" }"#;
 const HARD_18: &str = r#"{ type = "distortion", mode = "hard", params = { "dist.drive" = 18 } }"#;
-const SOFT_18: &str = r#"{ type = "distortion", mode = "soft", params = { "dist.drive" = 18 } }"#;
+// At drive 12 the tone's peaks reach 1 before the shaper, where `tanh` and
+// the hard clip part by a quarter: an instant soft-to-hard switch at a peak
+// jumps. At drive 18 both saturate alike and it would not.
+const SOFT_12: &str = r#"{ type = "distortion", mode = "soft", params = { "dist.drive" = 12 } }"#;
+const HARD_12: &str = r#"{ type = "distortion", mode = "hard", params = { "dist.drive" = 12 } }"#;
 
 /// A `tone` track `id` with `phase`, the chain `fx` and `extra` keys, playing
 /// `x` (a hit every step) over both bars.
@@ -297,7 +301,7 @@ fn structural_pairs() -> Vec<(&'static str, Arc<CompiledSong>, Arc<CompiledSong>
         ("fx added", t(&[]), t(&[FLIP_FX])),
         ("fx removed", t(&[FLIP_FX]), t(&[])),
         ("fx reordered", t(&[EQ_200, HARD_18]), t(&[HARD_18, EQ_200])),
-        ("mode changed", t(&[SOFT_18]), t(&[HARD_18])),
+        ("mode changed", t(&[SOFT_12]), t(&[HARD_12])),
         (
             "instrument swapped",
             song(&[track("t", "sin", &[], "")]),
@@ -343,14 +347,19 @@ fn no_click_at_a_structural_swap() {
 
 #[test]
 fn a_hard_switch_would_click() {
-    for (name, a, b) in structural_pairs().into_iter().take(2) {
+    // Every pair must be able to fail `no_click_at_a_structural_swap`: an
+    // instant switch (the offline render of `a` up to `S`, then `b`'s, which
+    // is what the swap would play without a fade) breaks the criterion.
+    for (name, a, b) in structural_pairs() {
         let (ra, rb) = (offline(&a), offline(&b));
         let s = next_step_start(&a, BAR + 1000);
         let before = max_jump(&ra, s - 4800..s);
-        let jump = (left(&rb, s) - left(&ra, s - 1)).abs();
+        let mut spliced = ra[..2 * s as usize].to_vec();
+        spliced.extend_from_slice(&rb[2 * s as usize..]);
+        let after = max_jump(&spliced, s..s + 960);
         assert!(
-            jump > 1.5 * before,
-            "{name}: an instant switch jumps {jump}, {before} before"
+            after > 1.5 * before,
+            "{name}: an instant switch jumps {after}, {before} before"
         );
     }
 }
