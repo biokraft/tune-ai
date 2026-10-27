@@ -1800,6 +1800,43 @@ fn the_first_stretch_creates_the_automation_list() {
 }
 
 #[test]
+fn add_lane_into_an_inline_automation_array() {
+    let head = "automation = [{ param = \"kick.kick.decay\", at = 5, bars = 2, points = [[0, 0], [2, 1]] }]\n\n";
+    let rest = "[song]\nversion = 2\nname = \"t\"\nbpm = 120\n\n[tracks]\nkick = { instrument = \"kick\" }\n\n[[sections]]\nname = \"a\"\nbars = 4\n\n[[sections]]\nname = \"b\"\nbars = 4\n";
+    let s = song_with(&format!("{head}{rest}"));
+    s.ok(add_lane("mix.reverb.size", 1, 2, &[[0.0, 0.2], [2.0, 0.6]]));
+    let text = s.text();
+    // The new entry comes first (section a), the old one is untouched.
+    assert!(
+        text.starts_with(
+            "automation = [{ param = \"mix.reverb.size\", at = 1, bars = 2, points = [[0, 0.2], [2, 0.6]] }, \
+             { param = \"kick.kick.decay\", at = 5, bars = 2, points = [[0, 0], [2, 1]] }]"
+        ),
+        "{text}"
+    );
+    assert!(text.ends_with(rest), "{text}");
+    assert_eq!(
+        lanes_of(&s.song()),
+        [
+            ("mix.reverb.size".to_owned(), 1, 2),
+            ("kick.kick.decay".to_owned(), 5, 2)
+        ]
+    );
+    let mut want = parse_song(&format!("{head}{rest}")).expect("parses");
+    want.automation.insert(
+        0,
+        tune_song::Lane {
+            track: "mix".into(),
+            param: "reverb.size".into(),
+            start_bar: 0,
+            bars: 2,
+            points: vec![(0.0, 0.2), (2.0, 0.6)],
+        },
+    );
+    assert_eq!(s.song(), want);
+}
+
+#[test]
 fn lane_rules() {
     let s = fixture();
     let points = [[0.0, 0.2], [2.0, 0.6]];
@@ -1844,6 +1881,12 @@ fn lane_rules() {
         s.refused(remove_lane("acid.acid303.cutoff", 0)),
         "bars are 1-based: `at` must be at least 1"
     );
+    assert_eq!(
+        s.refused(set_lane_points("acid.acid303.cutoff", 0, &points)),
+        "bars are 1-based: `at` must be at least 1"
+    );
+    let err = s.refused(add_lane("acid.acid303.resonance", 1, 0, &points));
+    assert!(err.contains("bars must be at least 1, got 0"), "{err}");
 
     // A stretch is addressed by the bar it starts at.
     let s = fixture();
