@@ -1288,3 +1288,134 @@ fn a_split_lane_value_is_written_rounded() {
     assert!(!out.contains("0.30000000000000004"), "{out}");
     assert_eq!(SongDoc::parse(&out).unwrap().song(), d.song());
 }
+
+/// A version 2 song with a drum clip and a two-note notes clip, with a
+/// comment on each key the note-clip tests edit.
+const NOTE_SONG: &str = r#"[song]
+version = 2
+name = "notes"
+bpm = 120
+
+[tracks.kick]
+instrument = "kick"
+play = [{ at = 1, clip = "k4", bars = 1 }]
+
+[tracks.acid]
+instrument = "acid303"
+play = [{ at = 1, clip = "lead", bars = 1 }]
+
+[clips.k4]
+kind = "drum"
+steps = "x...x...x...x..."
+
+[clips.lead]
+kind = "notes"
+bars = 1 # one bar
+notes = [
+  { start = 0, pitch = "C3", len = 3 },
+  { start = 2.5, pitch = "D#3", len = 2, vel = 120 },
+]
+
+[[sections]]
+name = "a"
+bars = 1
+"#;
+
+#[test]
+fn clip_notes_paths() {
+    for p in ["clips.lead.notes", "clips.lead.bars"] {
+        assert_eq!(path(p).to_string(), p);
+    }
+    for bad in ["clips.lead.note", "clips..notes", "patterns.lead.notes"] {
+        assert!(bad.parse::<SongPath>().is_err(), "{bad}");
+    }
+
+    let mut d = SongDoc::parse(NOTE_SONG).unwrap();
+    assert_eq!(
+        d.get(&path("clips.lead.notes")),
+        Some(json!([
+            { "start": 0, "pitch": "C3", "len": 3, "vel": 100 },
+            { "start": 2.5, "pitch": "D#3", "len": 2, "vel": 120 },
+        ]))
+    );
+    assert_eq!(d.get(&path("clips.lead.bars")), Some(json!(1)));
+    // Null for the other kinds, and no steps for a notes clip.
+    assert_eq!(d.get(&path("clips.k4.notes")), Some(Value::Null));
+    assert_eq!(d.get(&path("clips.k4.bars")), Some(Value::Null));
+    assert_eq!(d.get(&path("clips.lead.steps")), Some(Value::Null));
+    assert_eq!(d.get(&path("clips.nope.notes")), None);
+
+    let before = d.text();
+    d.set(
+        &path("clips.lead.notes"),
+        &json!([
+            { "start": 0, "pitch": "C3", "len": 2 },
+            { "start": 4, "pitch": "G3", "len": 1, "vel": 120 },
+        ]),
+    )
+    .unwrap();
+    let after = d.text();
+    assert_eq!(
+        after,
+        before.replace(
+            "[\n  { start = 0, pitch = \"C3\", len = 3 },\n  { start = 2.5, pitch = \"D#3\", len = 2, vel = 120 },\n]",
+            "[\n  { start = 0, pitch = \"C3\", len = 2 },\n  { start = 4, pitch = \"G3\", len = 1, vel = 120 },\n]",
+        )
+    );
+    assert_ne!(after, before);
+    assert!(after.contains("bars = 1 # one bar"));
+
+    // Bars: an integer, comment kept.
+    d.set(&path("clips.lead.bars"), &json!(2)).unwrap();
+    assert!(d.text().contains("bars = 2 # one bar"), "{}", d.text());
+    assert_eq!(d.get(&path("clips.lead.bars")), Some(json!(2)));
+}
+
+#[test]
+fn clip_notes_refuse_bad_values_and_kinds() {
+    let mut d = SongDoc::parse(NOTE_SONG).unwrap();
+    let before = d.text();
+    let err = d
+        .set(
+            &path("clips.lead.notes"),
+            &json!([{ "start": 0.3, "pitch": "C3", "len": 1 }]),
+        )
+        .unwrap_err();
+    assert!(matches!(err, EditError::Invalid(_)), "{err:?}");
+    assert!(err.to_string().contains("off the grid"), "{err}");
+    assert_eq!(d.text(), before);
+
+    let msg = |d: &mut SongDoc, p: &str, v: Value| match d.set(&path(p), &v).unwrap_err() {
+        EditError::BadValue { message, .. } => message,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        msg(&mut d, "clips.k4.notes", json!([])),
+        "clip `k4` is a drum clip: it has no notes"
+    );
+    assert_eq!(
+        msg(&mut d, "clips.k4.bars", json!(2)),
+        "clip `k4` is a drum clip: it has no bars"
+    );
+    assert_eq!(
+        msg(&mut d, "clips.lead.steps", json!("x...")),
+        "clip `lead` is a notes clip: it has no steps (set clips.lead.notes)"
+    );
+    assert_eq!(
+        msg(&mut d, "clips.lead.notes", json!("C3")),
+        "expected an array of notes, each {start, pitch, len, vel}"
+    );
+    assert_eq!(
+        msg(
+            &mut d,
+            "clips.lead.notes",
+            json!([{ "start": 0, "pitch": "C3", "len": 1, "foo": 1 }])
+        ),
+        "a note has start, pitch, len and vel, not `foo`"
+    );
+    assert_eq!(d.text(), before);
+    assert!(matches!(
+        d.set(&path("clips.nope.notes"), &json!([])).unwrap_err(),
+        EditError::NoSuchTarget(_)
+    ));
+}

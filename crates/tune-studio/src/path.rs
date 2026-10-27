@@ -39,6 +39,11 @@ pub enum SongPath {
     /// `clips.<c>.steps`; `patterns.<c>.steps`, the version 1 spelling,
     /// parses to it too.
     Clip { clip: String },
+    /// `clips.<c>.notes`: a notes clip's notes, an array of `{start, pitch,
+    /// len, vel}` (`start` and `len` in 16th steps).
+    ClipNotes { clip: String },
+    /// `clips.<c>.bars`: a notes clip's length in whole bars.
+    ClipBars { clip: String },
     /// `sections[<i>].bars`
     SectionBars(usize),
     /// `sections[<i>].name`
@@ -124,6 +129,8 @@ impl fmt::Display for SongPath {
             Self::MixDuckSource => f.write_str("mix.duck_source"),
             Self::Track { track } => write!(f, "tracks.{track}"),
             Self::Clip { clip } => write!(f, "clips.{clip}.steps"),
+            Self::ClipNotes { clip } => write!(f, "clips.{clip}.notes"),
+            Self::ClipBars { clip } => write!(f, "clips.{clip}.bars"),
             Self::SectionBars(i) => write!(f, "sections[{i}].bars"),
             Self::SectionName(i) => write!(f, "sections[{i}].name"),
             Self::SectionPlay { section, track } => write!(f, "sections[{section}].play.{track}"),
@@ -140,7 +147,7 @@ impl FromStr for SongPath {
         parse(s).ok_or_else(|| {
             format!(
                 "unknown path `{s}` (expected e.g. song.bpm, tracks.<track>.gain_db, \
-                 tracks.<track>.<param id>, mix.<param id>, clips.<clip>.steps, \
+                 tracks.<track>.<param id>, mix.<param id>, clips.<clip>.steps|notes|bars, \
                  sections[<i>].bars)"
             )
         })
@@ -163,11 +170,23 @@ fn parse(s: &str) -> Option<SongPath> {
     if let Some(rest) = s.strip_prefix("mix.") {
         return parse_mix(rest);
     }
-    if let Some(rest) = s
-        .strip_prefix("clips.")
-        .or_else(|| s.strip_prefix("patterns."))
+    if let Some(rest) = s.strip_prefix("clips.") {
+        let (clip, field) = rest.rsplit_once('.')?;
+        if !is_id(clip) {
+            return None;
+        }
+        let clip = clip.to_owned();
+        return match field {
+            "steps" => Some(SongPath::Clip { clip }),
+            "notes" => Some(SongPath::ClipNotes { clip }),
+            "bars" => Some(SongPath::ClipBars { clip }),
+            _ => None,
+        };
+    }
+    if let Some(clip) = s
+        .strip_prefix("patterns.")
+        .and_then(|rest| rest.strip_suffix(".steps"))
     {
-        let clip = rest.strip_suffix(".steps")?;
         return is_id(clip).then(|| SongPath::Clip {
             clip: clip.to_owned(),
         });
