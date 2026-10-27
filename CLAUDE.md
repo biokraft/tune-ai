@@ -382,8 +382,9 @@ The producer may have the studio (app or browser) open on the same song.
   anywhere in the song. A rename (`rename_track`, `rename_clip`,
   `rename_device`) likewise goes back whole with everything its write
   changed (the lanes, placements and duck source that followed it), or
-  is kept whole when any part of it changed later, so the old name never
-  comes back beside the new one. A target someone set back to
+  is kept whole when any part of it changed later (the new name renamed
+  again or removed included), so the old name never comes back beside the
+  new one. A target someone set back to
   its value before the run is listed in `already`, not `kept`. The
   result is `{"run", "title", "reverted": [{"target",
   "item"}], "kept": [{"target", "item", "reason", "by", "message"}],
