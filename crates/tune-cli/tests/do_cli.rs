@@ -531,3 +531,65 @@ fn lanes_from_the_cli() {
         "{err}"
     );
 }
+
+#[test]
+fn undo_run_from_the_cli() {
+    let e = fixture();
+    let song = e.song.to_str().unwrap();
+    let edits = [
+        ["path=tracks.acid.acid303.cutoff", "value=820"],
+        ["path=song.bpm", "value=130"],
+    ];
+    for edit in edits {
+        json_out(
+            e.tune()
+                .args(["do", song, "set_value"])
+                .args(edit)
+                .args(["--run", "r1", "--json"]),
+        );
+    }
+    let v = json_out(e.tune().args(["do", song, "undo_run", "r1", "--json"]));
+    assert_eq!(v["via"], "file");
+    let undo = &v["results"][0];
+    let mut reverted: Vec<&str> = undo["reverted"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["target"].as_str().unwrap())
+        .collect();
+    reverted.sort_unstable();
+    assert_eq!(reverted, ["song.bpm", "tracks.acid.acid303.cutoff"]);
+    assert_eq!(undo["kept"], json!([]));
+    let fixture_text = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-studio/tests/fixtures/commented.toml"),
+    )
+    .unwrap();
+    assert_eq!(fs::read_to_string(&e.song).unwrap(), fixture_text);
+}
+
+#[test]
+fn undo_run_says_what_it_kept() {
+    let e = fixture();
+    let song = e.song.to_str().unwrap();
+    for edit in ["tracks.acid.acid303.cutoff=820", "song.bpm=130"] {
+        json_out(e.tune().args(["set", song, edit, "--run", "r1", "--json"]));
+    }
+    let text = fs::read_to_string(&e.song).unwrap();
+    fs::write(&e.song, text.replace("= 820", "= 900")).unwrap();
+    let out = e
+        .tune()
+        .args(["do", song, "undo_run", "r1"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "undid run r1: 1 reverted, 1 kept\n\
+         kept tracks.acid.acid303.cutoff: changed later outside the studio"
+    );
+    let err = fails(e.tune().args(["do", song, "undo_run", "zz"]));
+    assert!(
+        err.contains("no edits of run `zz` in the edit log"),
+        "{err}"
+    );
+}

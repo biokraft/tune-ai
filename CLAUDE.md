@@ -345,6 +345,30 @@ The producer may have the studio (app or browser) open on the same song.
   | `remove_lane` | `tune do <song> remove_lane param=acid.acid303.cutoff at=3` drops the stretch's table with its comments (the result lists it) |
   | `set_lane_points` | `tune do <song> set_lane_points param=acid.acid303.cutoff at=3 points='[[0, 0.3], [2, 0.9]]'` changes only the `points` line |
 
+- Undo a whole run: `tune do <song> undo_run <run id> --json` (the studio
+  open or closed; the app's "Undo this run" does the same). It reads the
+  run's action records in `edits.jsonl` and puts back every target the run
+  changed, newest first, as one write and one undo step (⌘Z brings the run
+  back; nothing to revert writes nothing). It never overwrites a later
+  edit: a target someone changed after the run is kept and listed
+  (`changed_later`, `by` `human`, `claude` for another run, or `external`
+  / `null` for a change outside the studio or one the log missed), and so
+  is one the song refuses to take back (`still_used`, e.g. a clip that is
+  placed again, with the validator's `message`). A track's placements and
+  a lane's stretches go back one at a time: a placement the run added
+  goes if it is still there, one it removed comes back if nothing there
+  now overlaps it. The result is `{"run", "title", "reverted": [{"target",
+  "item"}], "kept": [{"target", "item", "reason", "by", "message"}],
+  "already": [<target>]}` (`item` is the placement or stretch for
+  `tracks.<t>.play` and `automation.<t>.<param>`, else `null`; `already`
+  lists targets back at their value before the run); the text is `undid
+  run r1: 4 reverted, 1 kept` and one `kept <target>: changed later by
+  human` (`by another run`, `outside the studio`, `still used: <message>`)
+  line each. A damaged record line in the log refuses it ("the edit log
+  has a damaged record at line N; nothing was changed"). Costs: a removed
+  lane, track or clip comes back without its comments (so do the lanes
+  `rename_device` moved, and a section `rename_section` renamed loses the
+  comment above it), and a restored clip goes to the end of the clip pool.
 - To see the UI: `tune serve <song> --device null --port 4580` (in the
   background; `task ui:build` first), then drive Chrome with the
   `agent-browser` skill: start the agent Chrome, pick a session

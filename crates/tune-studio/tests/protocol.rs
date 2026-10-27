@@ -62,6 +62,7 @@ fn wire_name(c: &Command) -> &'static str {
             Action::AddLane { .. } => "add_lane",
             Action::RemoveLane { .. } => "remove_lane",
             Action::SetLanePoints { .. } => "set_lane_points",
+            Action::UndoRun { .. } => "undo_run",
         },
     }
 }
@@ -250,6 +251,7 @@ fn sample_actions() -> Vec<Action> {
             at: 3,
             points: vec![[0.0, 0.3], [2.0, 0.9]],
         },
+        Action::UndoRun { run: "r1".into() },
     ]
 }
 

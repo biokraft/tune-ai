@@ -5,6 +5,7 @@ use tune_dsp::DrumPattern;
 use tune_dsp::acid303::{AcidPattern, AcidStep};
 use tune_song::{Clip, Removed};
 
+use std::io;
 use std::slice;
 
 use jiff::Timestamp;
@@ -17,14 +18,14 @@ use crate::error::StudioError;
 use crate::log::EditLog;
 use crate::log::{EditEntry, Source, entries_for};
 use crate::path::{SongPath, TrackField};
+use crate::run_undo::undo_run;
 
 /// Committed knob and mix values keep this many significant digits.
 const SIGNIFICANT_DIGITS: usize = 4;
 
 /// What an action may read besides the document.
 pub(crate) struct ApplyCtx<'a> {
-    /// The song's edit log. Task 11's `undo_run` reads it.
-    #[expect(dead_code, reason = "no action reads the edit log yet")]
+    /// The song's edit log, which `undo_run` reads.
     pub log: Option<&'a EditLog>,
 }
 
@@ -92,14 +93,16 @@ pub(crate) fn apply_all(
 }
 
 /// Applies one edit action to `doc`, all or nothing, and returns its result
-/// (`null` for most edits; `{"id": …}` for `add_effect`, `{"removed": …}` for the removals and `set_instrument`). Works on any document, so a pending
+/// (`null` for most edits; `{"id": …}` for `add_effect`, `{"removed": …}`
+/// for the removals and `set_instrument`, the [`RunUndo`](crate::RunUndo)
+/// for `undo_run`). Works on any document, so a pending
 /// action can be applied again onto a newer file. Live and history actions
 /// (and a knob drag, `set_param` with `commit: false`) give
 /// [`StudioError::NotAnEdit`].
 pub(crate) fn apply_action(
     doc: &mut SongDoc,
     action: &Action,
-    _ctx: &ApplyCtx<'_>,
+    ctx: &ApplyCtx<'_>,
 ) -> Result<Value, StudioError> {
     match action {
         Action::SetValue { path, value } => doc.set(path, value)?,
@@ -276,6 +279,14 @@ pub(crate) fn apply_action(
         Action::SetLanePoints { param, at, points } => {
             doc.set_lane_points(param, bar0(*at, "at")?, pairs(points))?;
         }
+        Action::UndoRun { run } => {
+            let records = match ctx.log {
+                Some(log) => log.read_records().map_err(log_error)?,
+                None => Vec::new(),
+            };
+            let undo = undo_run(doc, &records, run)?;
+            return Ok(serde_json::to_value(undo).unwrap_or(Value::Null));
+        }
         Action::SetParam { commit: false, .. }
         | Action::Play { .. }
         | Action::Stop
@@ -285,6 +296,18 @@ pub(crate) fn apply_action(
         | Action::Redo => return Err(StudioError::NotAnEdit),
     }
     Ok(Value::Null)
+}
+
+/// Why the edit log could not be read for a run undo, which then changes
+/// nothing.
+fn log_error(e: io::Error) -> StudioError {
+    if e.kind() == io::ErrorKind::InvalidData {
+        StudioError::Io(format!("{e}; nothing was changed"))
+    } else {
+        StudioError::Io(format!(
+            "cannot read the edit log: {e}; nothing was changed"
+        ))
+    }
 }
 
 /// The 0-based bar for the 1-based bar `bar` that argument `arg` gave.

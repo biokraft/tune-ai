@@ -258,6 +258,12 @@ pub enum Action {
         at: u32,
         points: Vec<[f64; 2]>,
     },
+    // ----- runs -----
+    /// Undoes every edit of run `run` that nobody changed since (see
+    /// [`crate::undo_run`]); its result is the [`crate::RunUndo`].
+    UndoRun {
+        run: String,
+    },
 }
 
 fn yes() -> bool {
@@ -386,6 +392,7 @@ impl Action {
             Self::AddLane { .. } => "add_lane",
             Self::RemoveLane { .. } => "remove_lane",
             Self::SetLanePoints { .. } => "set_lane_points",
+            Self::UndoRun { .. } => "undo_run",
         }
     }
 
@@ -468,7 +475,9 @@ impl Action {
             | Self::AddSection { .. } => {
                 vec!["sections".to_owned()]
             }
-            Self::Play { .. }
+            // Which targets a run undo writes, the edit log says.
+            Self::UndoRun { .. }
+            | Self::Play { .. }
             | Self::Stop
             | Self::SeekBar { .. }
             | Self::SetLoop { .. }
