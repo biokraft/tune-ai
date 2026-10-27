@@ -5,10 +5,17 @@ use tune_dsp::DrumPattern;
 use tune_dsp::acid303::{AcidPattern, AcidStep};
 use tune_song::Clip;
 
-use super::Action;
+use std::slice;
+
+use jiff::Timestamp;
+use tune_song::FORMAT_VERSION;
+
+use super::{Action, RunTag};
+use crate::diff::{Change, diff_songs, version_change};
 use crate::doc::{EditError, SongDoc};
 use crate::error::StudioError;
 use crate::log::EditLog;
+use crate::log::{EditEntry, Source, entries_for};
 use crate::path::{SongPath, TrackField};
 
 /// Committed knob and mix values keep this many significant digits.
@@ -19,6 +26,69 @@ pub(crate) struct ApplyCtx<'a> {
     /// The song's edit log. Task 11's `undo_run` reads it.
     #[expect(dead_code, reason = "no action reads the edit log yet")]
     pub log: Option<&'a EditLog>,
+}
+
+/// Actions applied in order to one document: each one's result, and every
+/// change with the name of the action that made it.
+pub(crate) struct AppliedAll {
+    pub results: Vec<Value>,
+    pub changes: Vec<Change>,
+    /// One per change: its action's name; `None` for the `song.version`
+    /// change of a migration.
+    pub names: Vec<Option<&'static str>>,
+}
+
+impl AppliedAll {
+    /// One log entry per change, all stamped `ts`, each under its action's
+    /// name and in `run`.
+    pub fn entries(
+        &self,
+        ts: Timestamp,
+        source: Source,
+        file_hash: &str,
+        run: Option<&RunTag>,
+    ) -> Vec<EditEntry> {
+        self.changes
+            .iter()
+            .zip(&self.names)
+            .flat_map(|(c, name)| {
+                entries_for(ts, source, slice::from_ref(c), file_hash, *name, run)
+            })
+            .collect()
+    }
+}
+
+/// Applies `actions` to `doc` in order, all or nothing (on an error `doc`
+/// may hold some of them: apply to a copy). Each action's changes are its
+/// own diff, so each log entry can name its action. A text in format
+/// `from_version` older than the newest gets the `song.version` change
+/// first. `map_err` turns an action's error into the caller's.
+pub(crate) fn apply_all(
+    doc: &mut SongDoc,
+    actions: &[Action],
+    ctx: &ApplyCtx<'_>,
+    from_version: u32,
+    map_err: impl Fn(StudioError, &Action) -> StudioError,
+) -> Result<AppliedAll, StudioError> {
+    let mut all = AppliedAll {
+        results: Vec::with_capacity(actions.len()),
+        changes: Vec::new(),
+        names: Vec::new(),
+    };
+    if let Some(change) = version_change(from_version, FORMAT_VERSION) {
+        all.changes.push(change);
+        all.names.push(None);
+    }
+    for action in actions {
+        let before = doc.song().clone();
+        let result = apply_action(doc, action, ctx).map_err(|e| map_err(e, action))?;
+        all.results.push(result);
+        for change in diff_songs(&before, doc.song()) {
+            all.changes.push(change);
+            all.names.push(Some(action.name()));
+        }
+    }
+    Ok(all)
 }
 
 /// Applies one edit action to `doc`, all or nothing, and returns its result

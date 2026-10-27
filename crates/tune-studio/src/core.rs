@@ -38,12 +38,12 @@ use serde_json::Value;
 use tune_song::{FORMAT_VERSION, Song};
 
 use crate::action::{
-    Action, ActionKind, ActionsOutcome, ApplyCtx, Origin, RunTag, Via, apply_action,
+    Action, ActionKind, ActionsOutcome, ApplyCtx, Origin, RunTag, Via, apply_action, apply_all,
 };
 use crate::diff::{Change, diff_files, diff_songs, is_whole_replace, version_change};
 use crate::doc::SongDoc;
 use crate::error::{ErrorView, StudioError};
-use crate::log::{EditLog, Source, entries_for, text_hash};
+use crate::log::{EditEntry, EditLog, Source, entries_for, text_hash};
 use crate::path::SongPath;
 use crate::set::write_atomic;
 use crate::view::SongView;
@@ -617,33 +617,22 @@ impl StudioCore {
             return Err(StudioError::FileInvalid);
         }
         let mut doc = self.doc.clone();
-        let mut results = Vec::with_capacity(actions.len());
-        // Each action's own changes, so every log entry names its action.
-        let mut groups: Vec<(Option<&'static str>, Vec<Change>)> = Vec::new();
-        if let Some(change) = version_change(self.disk_version, FORMAT_VERSION) {
-            groups.push((None, vec![change]));
-        }
-        for action in actions {
-            let before = doc.song().clone();
-            results.push(self.apply_one(&mut doc, action)?);
-            groups.push((Some(action.name()), diff_songs(&before, doc.song())));
-        }
+        let ctx = ApplyCtx {
+            log: Some(&self.log),
+        };
+        let applied = apply_all(&mut doc, actions, &ctx, self.disk_version, |e, _| e)?;
         let text = doc.text();
         if text == self.doc.text() {
             return Ok(ActionsOutcome {
                 via: Via::Studio,
                 changes: Vec::new(),
-                results,
+                results: applied.results,
                 file_hash: None,
                 migrated_from: None,
             });
         }
         let hash = self.write(&text)?;
         let migrated_from = (self.disk_version != FORMAT_VERSION).then_some(self.disk_version);
-        let (names, changes): (Vec<_>, Vec<_>) = groups
-            .into_iter()
-            .flat_map(|(name, group)| group.into_iter().map(move |c| (name, c)))
-            .unzip();
         let before = std::mem::replace(&mut self.disk_text, text.clone());
         self.disk_version = FORMAT_VERSION;
         self.disk_song = doc.song().clone();
@@ -652,20 +641,15 @@ impl StudioCore {
             before,
             after: text,
             source: origin.source,
-            changes: changes.clone(),
+            changes: applied.changes.clone(),
         });
         self.redo.clear();
-        self.log_changes(
-            origin.source,
-            &changes,
-            &hash,
-            |i| names[i],
-            origin.run.as_ref(),
-        )?;
+        let entries = applied.entries(Timestamp::now(), origin.source, &hash, origin.run.as_ref());
+        self.append_log(&entries)?;
         Ok(ActionsOutcome {
             via: Via::Studio,
-            changes,
-            results,
+            changes: applied.changes,
+            results: applied.results,
             file_hash: Some(hash),
             migrated_from,
         })
@@ -804,7 +788,11 @@ impl StudioCore {
             .enumerate()
             .flat_map(|(i, c)| entries_for(ts, source, slice::from_ref(c), hash, action(i), run))
             .collect();
-        self.log.append(&entries).map_err(|e| {
+        self.append_log(&entries)
+    }
+
+    fn append_log(&self, entries: &[EditEntry]) -> Result<(), StudioError> {
+        self.log.append(entries).map_err(|e| {
             StudioError::Io(format!(
                 "the song was written, but the edit log failed: {e}"
             ))
