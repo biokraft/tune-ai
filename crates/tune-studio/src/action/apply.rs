@@ -285,7 +285,9 @@ pub(crate) fn apply_action(
                 None => Vec::new(),
             };
             let undo = undo_run(doc, &records, run)?;
-            return Ok(serde_json::to_value(undo).unwrap_or(Value::Null));
+            let undo =
+                serde_json::to_value(undo).expect("a run undo holds only strings and JSON values");
+            return Ok(undo);
         }
         Action::SetParam { commit: false, .. }
         | Action::Play { .. }
