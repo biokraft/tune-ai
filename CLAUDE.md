@@ -369,8 +369,10 @@ The producer may have the studio (app or browser) open on the same song.
   ⌘⇧Z, an identical placement made again) is kept, and so is one, added
   or removed, when another write rebuilt what it belongs to (its track,
   its clip or the sections for a placement; its track, the track's
-  instrument or effects, or the sections for a lane stretch). A list
-  another edit touched while the run was still working on it is kept
+  instrument or effects, or the sections for a lane stretch); a lane
+  stretch is kept whenever the run's change to its whole track is (a
+  track made again by hand under a removed one's id gets no old lane). A
+  list another edit touched while the run was still working on it is kept
   whole. A target that changed between two of the run's writes with no
   edit in the log to say so (a hand edit with the studio closed, which
   the run's next write carried along) is kept, a list whole, with `by`

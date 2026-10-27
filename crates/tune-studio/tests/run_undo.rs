@@ -1708,3 +1708,37 @@ fn a_clip_rename_the_producer_renamed_again_is_kept_whole() {
     assert_eq!(s.text(), text);
     assert_eq!(s.value("clips.h2"), Value::Null);
 }
+
+// ----- review round 3: a removed track made again by hand -----
+
+/// M1 (p20): with the studio closed, the run removed a track and the
+/// producer added a track under its id by hand. The track is kept (the
+/// log does not say who made it), and so is the removed track's lane: it
+/// does not come back onto the producer's hand-made track.
+#[test]
+fn a_removed_tracks_lane_stays_off_a_track_made_by_hand() {
+    let f = closed();
+    f.agent(
+        "r1",
+        &[Action::RemoveTrack {
+            track: "acid".into(),
+        }],
+    );
+    f.hand(
+        "[clips.k4]",
+        "[tracks.acid]\ninstrument = \"acid303\"\n\n[clips.k4]",
+    );
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let lane = lane_stretch(3, 2, json!([[0, 0.1], [2, 0.8]]));
+    assert_eq!(
+        u.kept,
+        vec![
+            kept_item("automation.acid.acid303.cutoff", lane, None),
+            kept("tracks.acid", None),
+        ]
+    );
+    assert_eq!(f.text(), text);
+    assert_eq!(f.value("automation.acid.acid303.cutoff"), json!([]));
+}
