@@ -146,15 +146,21 @@ pub fn undo_run(
     let mut waiting = Vec::new();
     for k in order {
         let p = &plans[k];
-        let foreign: Vec<usize> = (p.first + 1..records.len())
+        // The other writes since the run first changed the target, and
+        // those of them that touch it.
+        let others: Vec<usize> = (p.first + 1..records.len())
             .filter(|&j| records[j].run.as_deref() != Some(run))
+            .collect();
+        let foreign: Vec<usize> = others
+            .iter()
+            .copied()
             .filter(|&j| {
                 let mut targets = records[j].targets.iter();
                 targets.any(|c| overlap(p.side(), (&c.target, &c.old, &c.new)))
             })
             .collect();
         let decision = if is_list(&p.target) {
-            decide_list(doc, p, &foreign, records)
+            decide_list(doc, p, &others, &foreign, records)
         } else {
             decide(doc, p, &foreign, records)
         };
@@ -294,22 +300,45 @@ fn decide(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionRecord]) 
 }
 
 /// A track's placements or a lane's stretches, element by element: an
-/// element the run added goes if it is still there; one it removed comes
-/// back if nothing there now overlaps it and every element the run added
-/// was still there.
-fn decide_list(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionRecord]) -> Decision {
+/// element the run added goes if it is still there and no other write took
+/// it away or put it there again since; one it removed comes back if no
+/// other write put it back or took it again, or rebuilt what it belongs to
+/// (see [`container`]), nothing there now overlaps it and every element
+/// the run added was still there.
+fn decide_list(
+    doc: &SongDoc,
+    p: &Plan,
+    others: &[usize],
+    foreign: &[usize],
+    records: &[ActionRecord],
+) -> Decision {
     let current = target_value(doc.song(), &p.target);
     if current == p.before {
         return Decision::Already;
     }
-    let by = foreign.last().map(|&j| records[j].source);
-    let kept = |item: &Value| KeptTarget {
+    let last_by = foreign.last().map(|&j| records[j].source);
+    let kept_by = |item: &Value, by: Option<Source>| KeptTarget {
         target: p.target.clone(),
         item: Some(item.clone()),
         reason: KeptReason::ChangedLater,
         by,
         message: None,
     };
+    let kept = |item: &Value| kept_by(item, last_by);
+    // The last other write that added or took away element `e` here, or
+    // (`container`) rebuilt what `e` belongs to.
+    let has = |v: &Value, e: &Value| v.as_array().is_some_and(|a| a.contains(e));
+    let last_other = |hit: &dyn Fn(&TargetChange) -> bool| {
+        let mut changes = others
+            .iter()
+            .rev()
+            .filter(|&&j| records[j].targets.iter().any(hit));
+        changes.next().map(|&j| records[j].source)
+    };
+    let touched = |e: &Value| {
+        last_other(&|c: &TargetChange| c.target == p.target && has(&c.old, e) != has(&c.new, e))
+    };
+    let rebuilt = |e: &Value| last_other(&|c: &TargetChange| container(&p.target, e, &c.target));
     let before = elements(&p.before);
     let after = elements(&p.after);
     let added = minus(&after, &before);
@@ -321,6 +350,11 @@ fn decide_list(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionReco
     let mut items = Vec::new();
     let mut out = Vec::new();
     for a in &added {
+        // Someone else took it away or put it there again: theirs now.
+        if let Some(by) = touched(a) {
+            out.push(kept_by(a, Some(by)));
+            continue;
+        }
         match next.iter().position(|e| e == a) {
             Some(i) => {
                 next.remove(i);
@@ -334,7 +368,11 @@ fn decide_list(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionReco
     // copy, so the removals are kept too.
     let changed_later = !out.is_empty();
     for r in &removed {
-        if changed_later || next.iter().any(|e| spans_overlap(e, r)) {
+        if changed_later {
+            out.push(kept(r));
+        } else if let Some(by) = touched(r).or_else(|| rebuilt(r)) {
+            out.push(kept_by(r, Some(by)));
+        } else if next.iter().any(|e| spans_overlap(e, r)) {
             out.push(kept(r));
         } else {
             next.push(r.clone());
@@ -349,6 +387,23 @@ fn decide_list(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionReco
         value: Value::Array(next),
         items,
         kept: out,
+    }
+}
+
+/// Whether a change to `other` rebuilds what element `e` of list `list`
+/// belongs to, so that `e` would not come back to the thing it left: for a
+/// placement, its track, its clip or the sections (which set what its bars
+/// mean); for a lane stretch, its track, the track's instrument or effects
+/// (whose devices own the param), or the sections.
+fn container(list: &Target, e: &Value, other: &Target) -> bool {
+    match (list, other) {
+        (_, Target::Sections) => true,
+        (Target::Play(t), Target::Track(u)) => t == u,
+        (Target::Play(_), Target::Clip(c)) => e["clip"].as_str() == Some(c.as_str()),
+        (Target::Lanes { track, .. }, Target::Track(u) | Target::Instrument(u) | Target::Fx(u)) => {
+            track == u
+        }
+        _ => false,
     }
 }
 
