@@ -239,6 +239,31 @@ pub(crate) fn apply_action(
         Action::RemoveClip { clip } => return Ok(removed_value(&doc.remove_clip(clip)?)),
         Action::RenameClip { clip, to } => doc.rename_clip(clip, to)?,
         Action::DuplicateClip { clip, to } => doc.duplicate_clip(clip, to)?,
+        Action::AddPlacement {
+            track,
+            clip,
+            at,
+            bars,
+            offset,
+        } => doc.add_placement(track, clip, bar0(*at, "at")?, *bars, offset.unwrap_or(0))?,
+        Action::MovePlacement { track, at, to } => {
+            doc.move_placement(track, bar0(*at, "at")?, bar0(*to, "to")?)?;
+        }
+        Action::ResizePlacement { track, at, bars } => {
+            doc.resize_placement(track, bar0(*at, "at")?, *bars)?;
+        }
+        Action::RemovePlacement { track, at } => {
+            return Ok(removed_value(
+                &doc.remove_placement(track, bar0(*at, "at")?)?,
+            ));
+        }
+        Action::AddSection { name, bars, index } => {
+            let index = index.unwrap_or(doc.song().sections.len());
+            doc.insert_section(index, name, *bars)?;
+        }
+        Action::RenameSection { index, name } => {
+            doc.set(&SongPath::SectionName(*index), &Value::from(name.as_str()))?;
+        }
         Action::SetParam { commit: false, .. }
         | Action::Play { .. }
         | Action::Stop
@@ -248,6 +273,11 @@ pub(crate) fn apply_action(
         | Action::Redo => return Err(StudioError::NotAnEdit),
     }
     Ok(Value::Null)
+}
+
+/// The 0-based bar for the 1-based bar `bar` that argument `arg` gave.
+fn bar0(bar: u32, arg: &'static str) -> Result<u32, EditError> {
+    bar.checked_sub(1).ok_or(EditError::BadBar { arg })
 }
 
 /// What an edit removed, as the action's result: `{"removed": {"lanes":

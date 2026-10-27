@@ -229,6 +229,54 @@
         "clip": "h",
         "to": "h2"
       }
+    },
+    {
+      "cmd": "add_placement",
+      "args": {
+        "track": "acid",
+        "clip": "a1",
+        "at": 1,
+        "bars": 2,
+        "offset": null
+      }
+    },
+    {
+      "cmd": "move_placement",
+      "args": {
+        "track": "acid",
+        "at": 3,
+        "to": 1
+      }
+    },
+    {
+      "cmd": "resize_placement",
+      "args": {
+        "track": "acid",
+        "at": 3,
+        "bars": 1
+      }
+    },
+    {
+      "cmd": "remove_placement",
+      "args": {
+        "track": "kick",
+        "at": 3
+      }
+    },
+    {
+      "cmd": "add_section",
+      "args": {
+        "name": "break",
+        "bars": 2,
+        "index": 1
+      }
+    },
+    {
+      "cmd": "rename_section",
+      "args": {
+        "index": 1,
+        "name": "drop"
+      }
     }
   ],
   "events": [

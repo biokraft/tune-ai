@@ -357,6 +357,74 @@ pub const ACTIONS: &[ActionSpec] = &[
         "Copies a clip as a new one, right after the original in the pool.",
         &[arg("clip", Id, "clip id"), arg("to", Id, "id of the copy")],
     ),
+    // ----- placements and sections -----
+    action(
+        "add_placement",
+        Edit,
+        "Adds a placement of a clip on a track from bar `at` (1-based) for `bars` bars, \
+         starting `offset` bars into the clip (0 by default).",
+        &[
+            arg("track", Id, "track id"),
+            arg("clip", Id, "clip id"),
+            arg("at", Int, "first bar, from 1"),
+            arg("bars", Int, "length in bars"),
+            opt("offset", Int, "bars into the clip at which it starts"),
+        ],
+    ),
+    action(
+        "move_placement",
+        Edit,
+        "Moves the placement that starts at bar `at` to start at bar `to` (both 1-based).",
+        &[
+            arg("track", Id, "track id"),
+            arg("at", Int, "start bar of the placement, from 1"),
+            arg("to", Int, "new start bar, from 1"),
+        ],
+    ),
+    action(
+        "resize_placement",
+        Edit,
+        "Makes the placement that starts at bar `at` (1-based) `bars` bars long.",
+        &[
+            arg("track", Id, "track id"),
+            arg("at", Int, "start bar of the placement, from 1"),
+            arg("bars", Int, "new length in bars"),
+        ],
+    ),
+    action(
+        "remove_placement",
+        Edit,
+        "Removes the placement that starts at bar `at` (1-based); the result lists it.",
+        &[
+            arg("track", Id, "track id"),
+            arg("at", Int, "start bar of the placement, from 1"),
+        ],
+    ),
+    action(
+        "add_section",
+        Edit,
+        "Inserts an empty section of `bars` bars before section `index` (appended by default). \
+         A placement or lane stretch crossing the insert point is split there, and everything \
+         from it on moves later.",
+        &[
+            arg("name", Text, "section name"),
+            arg("bars", Int, "length in bars, 1 to 1024"),
+            opt(
+                "index",
+                Int,
+                "0-based section to insert before; the end by default",
+            ),
+        ],
+    ),
+    action(
+        "rename_section",
+        Edit,
+        "Renames a section.",
+        &[
+            arg("index", Int, "0-based section"),
+            arg("name", Text, "new name"),
+        ],
+    ),
 ];
 
 /// The catalog entry of the action named `name`.

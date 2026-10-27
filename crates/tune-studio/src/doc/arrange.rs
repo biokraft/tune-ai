@@ -13,7 +13,7 @@ use super::{as_integer, section_table, track_table};
 
 /// What a section operation does to the `[[sections]]` tables themselves.
 #[derive(Clone, Copy)]
-pub(super) enum Tables {
+pub(super) enum Tables<'a> {
     /// Nothing: only what plays changes.
     Keep,
     /// Moves section `.0` to index `.1`.
@@ -23,18 +23,20 @@ pub(super) enum Tables {
     Delete(usize),
     /// Section `.0` gets `bars = .1`.
     Bars(usize, u32),
+    /// A new section named `.1` of `.2` bars goes in at index `.0`.
+    Insert(usize, &'a str, u32),
 }
 
 /// Applies `tables` to the sections, written as `[[sections]]` or as an
 /// inline array. The indices were checked by the section operation.
-pub(super) fn section_tables(doc: &mut DocumentMut, tables: Tables) -> Option<()> {
+pub(super) fn section_tables(doc: &mut DocumentMut, tables: Tables<'_>) -> Option<()> {
     match tables {
         Tables::Keep => return Some(()),
         Tables::Bars(index, bars) => {
             section_table(doc, index)?.put("bars", toml_edit::Value::from(i64::from(bars)));
             return Some(());
         }
-        Tables::Move(..) | Tables::Duplicate(_) | Tables::Delete(_) => {}
+        Tables::Move(..) | Tables::Duplicate(_) | Tables::Delete(_) | Tables::Insert(..) => {}
     }
     match doc.as_table_mut().get_mut("sections")? {
         Item::ArrayOfTables(aot) => match tables {
@@ -49,6 +51,13 @@ pub(super) fn section_tables(doc: &mut DocumentMut, tables: Tables) -> Option<()
             Tables::Delete(index) => {
                 aot.remove(index);
             }
+            Tables::Insert(index, name, bars) => {
+                let mut table = Table::new();
+                table.decor_mut().set_prefix("\n");
+                table.insert("name", toml_edit::value(name));
+                table.insert("bars", toml_edit::value(i64::from(bars)));
+                aot.insert(index, table);
+            }
             Tables::Keep | Tables::Bars(..) => {}
         },
         Item::Value(toml_edit::Value::Array(array)) => reshape(array, |values| match tables {
@@ -62,6 +71,13 @@ pub(super) fn section_tables(doc: &mut DocumentMut, tables: Tables) -> Option<()
             }
             Tables::Delete(index) => {
                 values.remove(index);
+            }
+            Tables::Insert(index, name, bars) => {
+                let mut section = InlineTable::new();
+                section.insert("name", toml_edit::Value::from(name));
+                section.insert("bars", toml_edit::Value::from(i64::from(bars)));
+                section.fmt();
+                values.insert(index, section.into());
             }
             Tables::Keep | Tables::Bars(..) => {}
         }),
