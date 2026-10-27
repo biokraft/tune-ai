@@ -28,7 +28,7 @@ use std::fmt;
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -431,9 +431,24 @@ impl fmt::Debug for StudioLink {
 /// within 200 ms (deleting them when the connection is refused: nothing
 /// listens there any more), and returns the first whose song is `song` (both
 /// canonical).
+///
+/// Only a private directory is trusted: one with any group or other
+/// permission bit set may hold a file another local user planted, naming
+/// their own port, so it gives `None` (and nothing in it is deleted). A
+/// file not owned by the directory's owner is skipped too. In a private
+/// directory only its owner (whom reading it shows to be us) can have
+/// written the files.
 pub fn find_studio(dir: &Path, song: &Path) -> Option<StudioLink> {
     let song = fs::canonicalize(song).ok()?;
+    let meta = fs::metadata(dir).ok()?;
+    if meta.mode() & 0o077 != 0 {
+        return None;
+    }
+    let owner = meta.uid();
     for file in endpoint_files(dir) {
+        if !fs::symlink_metadata(&file).is_ok_and(|m| m.uid() == owner) {
+            continue;
+        }
         let Some(link) = fs::read_to_string(&file)
             .ok()
             .and_then(|text| serde_json::from_str::<EndpointFile>(&text).ok())
