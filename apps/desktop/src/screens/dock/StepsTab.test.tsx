@@ -79,6 +79,24 @@ describe("StepsTab", () => {
     expect(screen.queryByRole("group", { name: "303 step sequencer" })).toBeNull();
   });
 
+  it("a note clip shows as read only", () => {
+    const s = structuredClone(song);
+    s.patterns.push({
+      kind: "notes",
+      id: "lead",
+      bars: 1,
+      notes: [{ start: 0, pitch: 48, len: 3, vel: 100 }],
+    });
+    s.sections[1]!.play.acid = "lead";
+    setup("acid", 1, s);
+    const name = s.sections[1]!.name;
+    expect(
+      screen.getByText(`acid plays the note clip lead in ${name} (read only).`),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "303 step sequencer" })).toBeNull();
+    expect(screen.queryAllByRole("button", { name: /Step \d+/ })).toHaveLength(0);
+  });
+
   it("says so when no section is under the playhead", () => {
     setup("kick", null);
     expect(

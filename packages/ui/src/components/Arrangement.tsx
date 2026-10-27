@@ -40,7 +40,7 @@ export type ArrangementTrack = {
 /** A pattern as its block draws it: one glyph value per step (rest 0, hit or note 0.6, accent 1). */
 export type ArrangementPattern = {
   id: string;
-  kind: "acid" | "drum";
+  kind: "acid" | "drum" | "notes";
   glyph: number[];
 };
 
@@ -1172,11 +1172,17 @@ const Blocks = memo(function Blocks({
   );
 });
 
-type GlyphProps = { kind: "acid" | "drum"; glyph: number[]; w: number; h: number; color: string };
+type GlyphProps = {
+  kind: "acid" | "drum" | "notes";
+  glyph: number[];
+  w: number;
+  h: number;
+  color: string;
+};
 
 /**
  * A pattern's shape across its block. Drums: a bar per step, `value` × 60 % of the block tall.
- * Acid: a 2 px dash per note, raised by its value (accents sit higher) but kept under the id.
+ * Acid and notes: a 2 px dash per note, raised by its value (accents sit higher) but kept under the id.
  */
 function Glyph({ kind, glyph, w, h, color }: GlyphProps) {
   const inner = w - 2 * GLYPH_PAD;

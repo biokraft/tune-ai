@@ -145,9 +145,13 @@ export type MixView = {
   reverb_active: boolean;
 };
 
+/** One note of a note clip; `start` and `len` are in 16th steps. */
+export type NoteView = { start: number; pitch: number; len: number; vel: number };
+
 export type PatternView =
   | { kind: "acid"; id: string; steps: AcidStep[] }
-  | { kind: "drum"; id: string; hits: DrumHit[] };
+  | { kind: "drum"; id: string; hits: DrumHit[] }
+  | { kind: "notes"; id: string; bars: number; notes: NoteView[] };
 
 export type SongView = {
   name: string;

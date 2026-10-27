@@ -34,6 +34,6 @@ pub use set::{
 };
 pub use studio::{Event, PLAYHEAD_INTERVAL, Studio, StudioConfig, StudioHandle};
 pub use view::{
-    AcidStepView, FxView, LaneView, MixView, ParamView, PatternView, SectionView, SongView,
-    StudioState, TrackView,
+    AcidStepView, FxView, LaneView, MixView, NoteView, ParamView, PatternView, SectionView,
+    SongView, StudioState, TrackView,
 };

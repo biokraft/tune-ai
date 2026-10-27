@@ -35,6 +35,10 @@ describe("describeChange on clips", () => {
     expect(change("clips.k4.steps", "x... x...", "x... X...")).toBe("k4 pattern (1 step)");
     expect(change("clips.a1.steps", null, "C2 C3")).toBe("Pattern a1 added");
   });
+  it("describes a note clip's notes and length", () => {
+    expect(change("clips.lead.notes", [], [{ start: 0 }])).toBe("Changed the notes of lead");
+    expect(change("clips.lead.bars", 1, 2)).toBe("Changed the length of lead");
+  });
 });
 
 describe("describeChange on v2 songs", () => {

@@ -39,6 +39,7 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
           { id: "a1", kind: "acid", glyph: [0.6, 0, 1, 0] },
           { id: "a2", kind: "acid", glyph: [1, 1] },
           { id: "d1", kind: "drum", glyph: [0.6, 0, 0, 0, 1, 0, 0, 0] },
+          { id: "n1", kind: "notes", glyph: [0.6, 0, 1, 0] },
         ]}
         playhead={0}
         selected={null}
@@ -486,6 +487,14 @@ describe("Arrangement blocks", () => {
     expect(dashes).toHaveLength(2);
     for (const d of dashes) expect(d).toHaveAttribute("height", "2");
     // The accented note sits higher.
+    expect(Number(dashes[1]!.getAttribute("y"))).toBeLessThan(Number(dashes[0]!.getAttribute("y")));
+  });
+
+  it("draws a note clip's block with its glyph", () => {
+    setup([sec("a", 0, 16, { play: { acid: "n1" } })]);
+    const dashes = within(blk("n1 in a")).getAllByTestId("glyph-step");
+    expect(dashes).toHaveLength(2);
+    for (const d of dashes) expect(d).toHaveAttribute("height", "2");
     expect(Number(dashes[1]!.getAttribute("y"))).toBeLessThan(Number(dashes[0]!.getAttribute("y")));
   });
 
