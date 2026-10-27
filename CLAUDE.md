@@ -384,7 +384,7 @@ The producer may have the studio (app or browser) open on the same song.
 
   | Action | Example |
   | --- | --- |
-  | `launch_clip` | `tune do <song> launch_clip track=acid scene=groove` plays the clip in the scene's slot for the track from its start, looping; the track leaves the arrangement until it is sent back, so its lanes no longer drive it and a knob released on it is written |
+  | `launch_clip` | `tune do <song> launch_clip track=acid scene=groove` plays the clip in the scene's slot for the track from its start, looping; from the bar it lands at the track is off the arrangement until it is sent back, so its lanes no longer drive it. A knob released on it is written from the moment the studio sends the launch to the engine (at once, unless it waits for an edit to play) until a return is sent |
   | `launch_scene` | `tune do <song> launch_scene scene=groove` launches the row: each track whose slot holds a clip plays it, and each track with an empty slot stops |
   | `stop_clip` | `tune do <song> stop_clip track=hat` silences the track (one playing the arrangement too) until it is sent back |
   | `back_to_arrangement` | `tune do <song> back_to_arrangement track=acid` sends the track back to the arrangement; without `track`, every track |
@@ -399,7 +399,8 @@ The producer may have the studio (app or browser) open on the same song.
   cannot play) stops, and a renamed or new track follows the arrangement. A
   launch sent right after an edit waits until the engine plays the edit, so
   it can land one bar later; one whose scene or track an edit took away in
-  the meantime is dropped with an error event. Session clips do not make the
+  the meantime, or whose slot an edit emptied (`set_slot`, or a new
+  instrument that cannot play the clip), is dropped with an error event. Session clips do not make the
   song longer: it still ends where the arrangement ends, so loop to jam on. A
   `~` on the last step before the bar line still slides into the launched
   clip's first note when the old clip or arrangement has a note next, because

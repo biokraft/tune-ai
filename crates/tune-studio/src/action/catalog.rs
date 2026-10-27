@@ -73,8 +73,9 @@ pub const ACTIONS: &[ActionSpec] = &[
     action(
         "launch_clip",
         Live,
-        "Launches the clip in a scene's slot for a track at the next bar line; the track \
-         leaves the arrangement until it is sent back. Starts playback when stopped.",
+        "Launches the clip in a scene's slot for a track at the next bar line; from that bar \
+         the track is off the arrangement (its lanes do not drive it) until it is sent back. \
+         Starts playback when stopped.",
         &[TRACK, arg("scene", Id, "scene id")],
     ),
     action(
