@@ -2230,3 +2230,138 @@ fn a_scene_whose_track_the_producer_rebuilt_is_kept() {
     assert_eq!(s.scenes(), ["break"]);
     assert_eq!(s.value("scenes.groove"), Value::Null);
 }
+
+// ----- Plan 10: the scene order around the run's own scenes -----
+
+/// The session fixture with a third, empty scene `drop` after `break`.
+fn three_scenes() -> String {
+    SESSION.replacen("[[sections]]", "[scenes.drop]\n\n[[sections]]", 1)
+}
+
+fn remove_scene(scene: &str) -> Action {
+    Action::RemoveScene {
+        scene: scene.into(),
+    }
+}
+
+/// The run's own adds and removes around its moves are the run's: the
+/// order goes back with them, nothing kept, nobody blamed.
+#[test]
+fn the_order_goes_back_around_the_runs_own_scenes() {
+    let cases: [&[Action]; 4] = [
+        &[
+            add_scene("jam", None),
+            move_scene("jam", 0),
+            set_slot("jam", "acid", Some("a1")),
+        ],
+        &[
+            move_scene("break", 0),
+            add_scene("jam", None),
+            move_scene("jam", 0),
+        ],
+        &[
+            add_scene("jam", None),
+            move_scene("jam", 0),
+            remove_scene("jam"),
+        ],
+        &[move_scene("break", 0), remove_scene("groove")],
+    ];
+    for actions in cases {
+        let mut s = session();
+        for a in actions {
+            s.agent("r1", std::slice::from_ref(a));
+        }
+        let u = s.undo_run("r1");
+        assert_eq!(u.kept, vec![], "{actions:?}");
+        assert_eq!(s.scenes(), ["groove", "break"], "{actions:?}");
+        assert_eq!(
+            target_changes(&session_song(), s.core.song()),
+            vec![],
+            "{actions:?}"
+        );
+    }
+
+    // A scene the run removed after moving it comes back before the order
+    // is put back, so it lands in its place.
+    let three = three_scenes();
+    let mut s = open_on(&three);
+    for a in [
+        move_scene("drop", 0),
+        remove_scene("drop"),
+        move_scene("break", 0),
+    ] {
+        s.agent("r1", &[a]);
+    }
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(s.scenes(), ["groove", "break", "drop"]);
+}
+
+/// Protects a reorder by hand with the studio closed between two of the
+/// run's writes: the run's later write carried it, so the order is kept
+/// with `by` null, and so are the scenes the run added or removed in it.
+#[test]
+fn a_scene_reorder_by_hand_between_the_runs_writes_is_kept() {
+    // The producer moved `drop` down a row; the run then removed it.
+    let f = closed_on(&three_scenes());
+    f.agent("r1", &[move_scene("drop", 0)]);
+    f.hand("[scenes.drop]\n\n# jam rows\n", "# jam rows\n");
+    f.hand("# hats alone\n", "[scenes.drop]\n\n# hats alone\n");
+    f.agent("r1", &[remove_scene("drop")]);
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(kept_targets(&u, None), ["scenes", "scenes.drop"]);
+    assert_eq!(f.text(), text);
+
+    // The producer swapped the rows back; the run then added a scene.
+    let f = closed_on(SESSION);
+    f.agent("r1", &[move_scene("break", 0)]);
+    let block = "# hats alone\n[scenes.break]\nslots = { hat = \"h\" }\n\n";
+    f.hand(block, "");
+    f.hand("[[sections]]", &format!("{block}[[sections]]"));
+    f.agent("r1", &[add_scene("jam", None)]);
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(kept_targets(&u, None), ["scenes", "scenes.jam"]);
+    assert_eq!(f.text(), text);
+}
+
+/// Protects the producer's move of a scene through the studio between two
+/// of the run's writes: the order and the run's scene in it are kept, by
+/// the producer.
+#[test]
+fn a_scene_move_through_the_studio_between_the_runs_writes_is_kept() {
+    let mut s = session();
+    s.agent("r1", &[move_scene("break", 0)]);
+    s.human(move_scene("groove", 0));
+    s.agent("r1", &[add_scene("jam", None)]);
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        kept_targets(&u, Some(Source::Human)),
+        ["scenes", "scenes.jam"]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["groove", "break", "jam"]);
+
+    // The same with a move of the run's after its add: the add is the
+    // run's next change to the order after the producer's move, and it
+    // gives no value of the order to go back to, so the order is kept.
+    let mut s = session();
+    s.agent("r1", &[move_scene("break", 0)]);
+    s.human(move_scene("groove", 0));
+    s.agent("r1", &[add_scene("jam", None)]);
+    s.agent("r1", &[move_scene("jam", 0)]);
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        kept_targets(&u, Some(Source::Human)),
+        ["scenes", "scenes.jam"]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["jam", "groove", "break"]);
+}

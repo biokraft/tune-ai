@@ -418,9 +418,10 @@ The producer may have the studio (app or browser) open on the same song.
   slot); a scene the run added or removed (`scenes.<s>`, with the slots
   the run set in a scene it added) is kept when someone since changed it
   or any slot in it, moved any scene, or made, removed or rebuilt a track
-  or clip its slots name.
-  The scene order (`scenes`, from `move_scene`) goes back unless someone
-  added, removed or moved a scene since; a slot edit does not keep it.
+  or clip its slots name. The scene order (`scenes`, from `move_scene`)
+  goes back unless someone added, removed or moved a scene since; a slot
+  edit does not keep it. The scenes the run added or removed around its
+  moves go back with the order, or are kept with it.
   Live session actions (`launch_clip`, `launch_scene`, `stop_clip`,
   `back_to_arrangement`) are never part of a run. A target someone set
   back to its value before the run is listed in `already`, not `kept`. The

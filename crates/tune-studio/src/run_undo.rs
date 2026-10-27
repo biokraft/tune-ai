@@ -154,6 +154,10 @@ pub fn undo_run(
     if !section.is_empty() {
         groups.insert(0, section.clone());
     }
+    let order = scene_order_group(&plans);
+    if !order.is_empty() {
+        groups.push(order);
+    }
     let groups = merged(groups);
     let mut units: Vec<(Vec<usize>, bool)> = (0..plans.len())
         .filter(|k| !groups.iter().any(|g| g.contains(k)))
@@ -468,6 +472,30 @@ fn rename_groups(plans: &[Plan], records: &[ActionRecord], mine: &[usize]) -> Ve
         .collect()
 }
 
+/// The plans of the scene order the run changed and of each scene it names
+/// that the run added or removed: they go back together (the order put
+/// last, once the scenes are back or gone) or are kept together. Empty
+/// when the run moved no scene, or added or removed none the order names.
+fn scene_order_group(plans: &[Plan]) -> Vec<usize> {
+    let Some(order) = plans.iter().position(|p| p.target == Target::SceneOrder) else {
+        return Vec::new();
+    };
+    let named = |s: &str| {
+        let values = [&plans[order].before, &plans[order].after];
+        let mut ids = values.into_iter().filter_map(Value::as_array).flatten();
+        ids.any(|id| id.as_str() == Some(s))
+    };
+    let mut group = vec![order];
+    group.extend((0..plans.len()).filter(|&k| {
+        let p = &plans[k];
+        matches!(&p.target, Target::Scene(s) if named(s)) && p.before.is_null() != p.after.is_null()
+    }));
+    if group.len() == 1 {
+        return Vec::new();
+    }
+    group
+}
+
 /// `groups` with every two that share a plan joined into one.
 fn merged(groups: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
     let mut out: Vec<Vec<usize>> = Vec::new();
@@ -508,7 +536,7 @@ fn plan(records: &[ActionRecord], mine: &[usize]) -> Vec<Plan> {
                     Some(k) => {
                         let p = &mut plans[k];
                         if !approx(p, &c.old, &p.after) {
-                            p.gaps.push((p.last, i));
+                            p.gaps.push((p.gap_start(), i));
                         }
                         p.after = c.new.clone();
                         (k, Some(c.old.clone()))
@@ -533,13 +561,83 @@ fn plan(records: &[ActionRecord], mine: &[usize]) -> Vec<Plan> {
             p.pos = pos;
             p.touched.push((i, own));
         }
+        fold_scenes_into_order(&mut plans, &records[i], i);
     }
     plans
+}
+
+/// Folds the scenes record `i` of the run added or removed into the scene
+/// order the run changed before it: the order's value names every scene,
+/// but a write that only adds or removes one records no `scenes` change.
+/// An added scene goes in at its new index; a removed one must sit where
+/// the order has it (checked before any goes), else something the log
+/// does not show moved it, and the order has a gap there.
+fn fold_scenes_into_order(plans: &mut [Plan], record: &ActionRecord, i: usize) {
+    if record
+        .targets
+        .iter()
+        .any(|c| c.target == Target::SceneOrder)
+    {
+        return;
+    }
+    let Some(p) = plans.iter_mut().find(|p| p.target == Target::SceneOrder) else {
+        return;
+    };
+    let changes: Vec<(usize, &str, &TargetChange)> = record
+        .targets
+        .iter()
+        .enumerate()
+        .filter_map(|(pos, c)| match &c.target {
+            Target::Scene(s) if c.old.is_null() != c.new.is_null() => Some((pos, s.as_str(), c)),
+            _ => None,
+        })
+        .collect();
+    let Some(&(pos, ..)) = changes.last() else {
+        return;
+    };
+    let index = |v: &Value| v["index"].as_u64().and_then(|n| usize::try_from(n).ok());
+    let mut ids: Vec<String> = elements(&p.after)
+        .iter()
+        .filter_map(|id| id.as_str().map(str::to_owned))
+        .collect();
+    let gone = changes.iter().filter(|(_, _, c)| c.new.is_null());
+    let mut known = gone
+        .clone()
+        .all(|(_, s, c)| ids.iter().position(|id| id == s) == index(&c.old));
+    ids.retain(|id| !gone.clone().any(|(_, s, _)| id == s));
+    for (_, s, c) in changes.iter().filter(|(_, _, c)| c.old.is_null()) {
+        match index(&c.new) {
+            Some(at) if at <= ids.len() && !ids.iter().any(|id| id == s) => {
+                ids.insert(at, (*s).to_owned());
+            }
+            _ => known = false,
+        }
+    }
+    if !known {
+        p.gaps.push((p.gap_start(), i));
+    }
+    p.after = Value::Array(ids.into_iter().map(Value::from).collect());
+    p.last = i;
+    p.pos = pos;
+    p.touched.push((i, None));
 }
 
 impl Plan {
     fn side(&self) -> (&Target, &Value, &Value) {
         (&self.target, &self.before, &self.after)
+    }
+
+    /// The record a gap found now starts at: the run's last change to the
+    /// target. For the scene order, the last whose value the log gave: a
+    /// scene the run added or removed since is folded into the order the
+    /// run knew, so a change by someone else before the fold shows only
+    /// at the run's next change to the order.
+    fn gap_start(&self) -> usize {
+        if self.target != Target::SceneOrder {
+            return self.last;
+        }
+        let read = self.touched.iter().rev().find(|(_, old)| old.is_some());
+        read.map_or(self.last, |&(i, _)| i)
     }
 
     /// Whether something the edit log does not show changed the target
@@ -842,12 +940,15 @@ type Put = (Target, Value, Vec<Option<Value>>);
 /// a section edit's sections go last (the placements move back inside the
 /// longer song first), else first (the song grows back before they move);
 /// failing both, a put the song refuses waits for the others (a renamed
-/// track's lane goes back once the track is there).
+/// track's lane goes back once the track is there). The scene order goes
+/// last in each: it can only place the scenes that are there.
 fn put_all(doc: &mut SongDoc, puts: &[Put]) -> Result<(), EditError> {
     let in_order = |order: Vec<&Put>| -> Result<SongDoc, EditError> {
         let mut copy = doc.clone();
         rename_scenes_back(&mut copy, &order);
-        for (target, value, _) in order {
+        let (orders, rest): (Vec<&Put>, Vec<&Put>) =
+            order.into_iter().partition(|p| p.0 == Target::SceneOrder);
+        for (target, value, _) in rest.into_iter().chain(orders) {
             copy.put(target, value)?;
         }
         Ok(copy)
@@ -874,20 +975,24 @@ fn put_all(doc: &mut SongDoc, puts: &[Put]) -> Result<(), EditError> {
 /// others, until all are in (`Some`) or none of the rest goes in.
 fn waiting_for_others(doc: &SongDoc, puts: &[Put]) -> Option<SongDoc> {
     let mut copy = doc.clone();
-    let mut rest: Vec<&Put> = puts.iter().collect();
-    rename_scenes_back(&mut copy, &rest);
-    while !rest.is_empty() {
-        let before = rest.len();
-        rest.retain(|(target, value, _)| {
-            let mut next = copy.clone();
-            let refused = next.put(target, value).is_err();
-            if !refused {
-                copy = next;
+    rename_scenes_back(&mut copy, &puts.iter().collect::<Vec<_>>());
+    // The scene order once all the others are in.
+    let (orders, others): (Vec<&Put>, Vec<&Put>) =
+        puts.iter().partition(|p| p.0 == Target::SceneOrder);
+    for mut rest in [others, orders] {
+        while !rest.is_empty() {
+            let before = rest.len();
+            rest.retain(|(target, value, _)| {
+                let mut next = copy.clone();
+                let refused = next.put(target, value).is_err();
+                if !refused {
+                    copy = next;
+                }
+                refused
+            });
+            if rest.len() == before {
+                return None;
             }
-            refused
-        });
-        if rest.len() == before {
-            return None;
         }
     }
     Some(copy)
