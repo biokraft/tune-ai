@@ -358,7 +358,16 @@ The producer may have the studio (app or browser) open on the same song.
   a lane's stretches go back one at a time: a placement the run added
   goes if it is still there, one it removed comes back if nothing there
   now overlaps it; when one the run added was changed later, every one it
-  removed from that list is kept too (it may have been moved on). The
+  removed from that list is kept too (it may have been moved on). An
+  element another write took away or put there again since (a ⌘Z then
+  ⌘⇧Z, an identical placement made again) is kept, and a removed one
+  stays away when another write rebuilt what it belongs to (its track,
+  its clip or the sections for a placement; its track, the track's
+  instrument or effects, or the sections for a lane stretch). A section
+  edit (`add_section`, `move_section`, `resize_section` and the like)
+  goes back whole with the placements and stretches it moved, or is kept
+  whole when any part of it changed later. A target someone set back to
+  its value before the run is listed in `already`, not `kept`. The
   result is `{"run", "title", "reverted": [{"target",
   "item"}], "kept": [{"target", "item", "reason", "by", "message"}],
   "already": [<target>]}` (`item` is the placement or stretch for
@@ -370,7 +379,8 @@ The producer may have the studio (app or browser) open on the same song.
   has a damaged record at line N; nothing was changed"). Costs: a removed
   lane, track or clip comes back without its comments (so do the lanes
   `rename_device` moved, and a section `rename_section` renamed loses the
-  comment above it), and a restored clip goes to the end of the clip pool.
+  comment above it), a restored clip goes to the end of the clip pool, and
+  an explicit `send.* = -60` (a silent bus) is not restored.
 - To see the UI: `tune serve <song> --device null --port 4580` (in the
   background; `task ui:build` first), then drive Chrome with the
   `agent-browser` skill: start the agent Chrome, pick a session
