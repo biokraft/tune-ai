@@ -9,8 +9,8 @@ use crate::action::ACTIONS;
 use crate::view::PlacementView;
 use crate::{
     AcidStepView, Action, Change, DrumHitDto, ErrorView, Event, ExternalChange, FxView, LaneView,
-    MixView, NoteView, ParamView, PatternView, SectionView, SongView, Source, StudioCommand,
-    StudioState, TrackView,
+    MixView, NoteView, ParamView, PatternView, RunTag, SectionView, SongView, Source,
+    StudioCommand, StudioState, TrackView,
 };
 
 /// `Command` is `StudioCommand | Action` on the wire (its `Deserialize`
@@ -33,6 +33,7 @@ pub fn wire_types_ts() -> String {
     decl(DrumHitDto::decl(&cfg));
     decl(ErrorView::decl(&cfg));
     decl(Change::decl(&cfg));
+    decl(RunTag::decl(&cfg));
     decl(ExternalChange::decl(&cfg));
     decl(ParamView::decl(&cfg));
     decl(FxView::decl(&cfg));

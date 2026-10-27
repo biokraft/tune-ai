@@ -121,13 +121,13 @@ fn burst_is_one_undo_step() {
         "{flushed}"
     );
 
-    let undone = core.undo().unwrap();
+    let undone = core.undo(Source::Human).unwrap();
     assert_eq!(undone.len(), 1);
     assert_eq!(disk(&s), FIXTURE, "undo restores the bytes");
     assert!(core.can_redo());
     assert!(!core.can_undo(), "the burst was one step");
 
-    core.redo().unwrap();
+    core.redo(Source::Human).unwrap();
     assert_eq!(disk(&s), flushed);
     assert!(core.can_undo());
     assert!(!core.can_redo());
@@ -167,7 +167,7 @@ fn held_arrow_coalesces() {
         )
     );
     assert!(core.can_undo());
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert!(!core.can_undo(), "exactly one undo entry");
     assert_eq!(disk(&s), FIXTURE);
 }
@@ -178,14 +178,14 @@ fn undo_flushes_pending_first() {
     let mut core = open(&s);
     core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
     assert!(core.can_undo(), "pending edits are undoable");
-    let undone = core.undo().unwrap();
+    let undone = core.undo(Source::Human).unwrap();
     assert_eq!(undone.len(), 1);
     assert_eq!(undone[0].new, json!(500));
     assert_eq!(disk(&s), FIXTURE);
     assert!(core.pending().is_empty());
     assert_eq!(log(&s).len(), 2, "the flush and the undo");
     assert!(core.can_redo());
-    core.redo().unwrap();
+    core.redo(Source::Human).unwrap();
     assert!(disk(&s).contains("\"acid303.cutoff\" = 820"));
 }
 
@@ -196,13 +196,13 @@ fn new_edit_clears_redo() {
     let t0 = Instant::now();
     core.apply_edit(&cutoff(820.0), t0).unwrap();
     core.flush().unwrap();
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert!(core.can_redo());
     core.apply_edit(&cutoff(700.0), t0 + ms(500)).unwrap();
     assert!(!core.can_redo());
     core.flush().unwrap();
     assert!(!core.can_redo());
-    assert_eq!(core.redo().unwrap(), vec![]);
+    assert_eq!(core.redo(Source::Human).unwrap(), vec![]);
     assert!(disk(&s).contains("\"acid303.cutoff\" = 700"));
 }
 
@@ -212,8 +212,8 @@ fn undo_logged_as_human_reversed() {
     let mut core = open(&s);
     core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
     core.flush().unwrap();
-    core.undo().unwrap();
-    core.redo().unwrap();
+    core.undo(Source::Human).unwrap();
+    core.redo(Source::Human).unwrap();
     let entries: Vec<_> = log(&s).iter().map(entry_summary).collect();
     let p = || "tracks.acid.acid303.cutoff".to_owned();
     assert_eq!(
@@ -490,7 +490,7 @@ fn own_writes_are_remembered() {
     assert!(core.is_own_write(&hashes[8]));
     assert!(core.is_own_write(&hashes[1]));
     assert!(!core.is_own_write(&hashes[0]), "the ring holds 8");
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert!(
         core.is_own_write(&text_hash(&disk(&s))),
         "undo writes count"
@@ -508,10 +508,10 @@ fn undo_depth_capped() {
     }
     for n in 0..500 {
         assert!(core.can_undo(), "undo {n}");
-        assert_eq!(core.undo().unwrap().len(), 1, "undo {n}");
+        assert_eq!(core.undo(Source::Human).unwrap().len(), 1, "undo {n}");
     }
     assert!(!core.can_undo());
-    assert_eq!(core.undo().unwrap(), vec![]);
+    assert_eq!(core.undo(Source::Human).unwrap(), vec![]);
     assert!(
         disk(&s).contains("\"acid303.cutoff\" = 600,"),
         "the oldest step was dropped"
@@ -829,7 +829,7 @@ fn open_v1_migrates_writes_logs_and_can_undo() {
     // The watcher's report of the write is the text already open.
     assert!(core.on_disk_text(migrated.clone()).is_none());
 
-    let undone = core.undo().unwrap();
+    let undone = core.undo(Source::Human).unwrap();
     assert_eq!(disk(&s), FIXTURE_V1, "undo puts the v1 bytes back");
     assert_eq!(core.migrated_from(), None);
     assert_eq!(undone.len(), 1);
@@ -846,7 +846,7 @@ fn open_v1_migrates_writes_logs_and_can_undo() {
         tune_studio::SongDoc::parse(FIXTURE).unwrap().song()
     );
     assert!(core.can_redo());
-    core.redo().unwrap();
+    core.redo(Source::Human).unwrap();
     assert_eq!(disk(&s), FIXTURE);
     assert_eq!(core.migrated_from(), Some(1));
 }
@@ -855,7 +855,7 @@ fn open_v1_migrates_writes_logs_and_can_undo() {
 fn edit_after_undoing_the_migration_writes_v2_again() {
     let s = song_with(FIXTURE_V1);
     let mut core = open(&s);
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert_eq!(disk(&s), FIXTURE_V1);
     let t0 = Instant::now();
     core.apply_edit(&cutoff(820.0), t0).unwrap();
@@ -880,7 +880,7 @@ fn edit_after_undoing_the_migration_writes_v2_again() {
         ]
     );
     // Undoing the edit goes back to the v1 bytes.
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert_eq!(disk(&s), FIXTURE_V1);
 }
 
@@ -975,8 +975,8 @@ fn the_log_names_each_change_s_action() {
     core.apply_edit(&cutoff(820.0), t0).unwrap();
     core.apply_edit(&drum_step(0, DrumHitDto::Hit), t0).unwrap();
     core.flush().unwrap();
-    core.undo().unwrap();
-    core.redo().unwrap();
+    core.undo(Source::Human).unwrap();
+    core.redo(Source::Human).unwrap();
     let named: Vec<(String, Option<String>, Option<String>)> = log(&s)
         .iter()
         .map(|e| (e.path.clone(), e.action.clone(), e.run.clone()))

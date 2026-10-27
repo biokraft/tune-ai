@@ -17,7 +17,8 @@ and lock-free live playback) driven through the `tune` CLI.
   live (`live`, lock-free swap for hot reload). Headless.
 - `crates/tune-studio` - the studio core: in-place song edits by path
   (`SongPath`, comments kept), the action layer, the edit log, undo,
-  external-change merge, and the `Studio` actor the app talks to. Headless.
+  external-change merge, the `Studio` actor the app talks to and its local
+  control endpoint for the CLI. Headless.
 - `crates/tune-cli` - the `tune` binary: `validate`, `info`, `params`,
   `render`, `play`, `render-303`, `set`, `migrate`, `changes`, `serve`, `analyze`,
   `compare`, `refs`, `actions`, `do`. `ctrlc`, `tokio` and `axum` live only
@@ -254,6 +255,15 @@ The producer may have the studio (app or browser) open on the same song.
   `--batch` it reads a JSON array of `{"cmd", "args"}` objects from stdin and
   applies them all or nothing (song edits only; `play`, `undo` and the other
   live or history actions need the studio open and run on their own).
+  With the studio open on the song (the app or `tune serve`), `tune do` and
+  `tune set` go through it: the change shows up at once, is written before
+  the command returns and is one undo step per command (the producer's
+  ⌘Z steps back one command at a time), and the JSON says `"via":
+  "studio"` (`"file"` without a studio). Live and history actions need it.
+  If the studio does not answer, the command fails rather than writing the
+  file behind its back; check the studio before retrying. The studio's
+  endpoint files live under `~/.tune/studios` (`TUNE_STUDIO_DIR` moves
+  them); they hold a secret, so never read or print them.
   Tag the edits of one piece of work with a run: `--run ID --run-title TEXT`
   (or `TUNE_RUN`, `TUNE_RUN_TITLE`; the flags win). `tune changes` shows
   `(run ID)` on those entries. `tune set` takes the same flags and is a

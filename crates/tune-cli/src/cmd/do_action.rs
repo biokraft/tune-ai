@@ -1,11 +1,19 @@
 //! `tune do`: run an action on a song, or a batch of song edits.
+//!
+//! With the song open in a studio (the app or `tune serve`), the actions go
+//! through it: they show up at once and are one undo step each, and live
+//! and history actions work. Without one, edits go straight into the file
+//! and the others need the studio.
 
 use std::io::Read;
 use std::path::Path;
 use std::process::ExitCode;
 
 use serde_json::{Value, json};
-use tune_studio::{Action, ActionKind, Origin, StudioError, action_from_cli, apply_to_file};
+use tune_studio::{
+    Action, ActionKind, ActionsOutcome, Origin, StudioError, action_from_cli, apply_to_file,
+    find_studio, studio_dir,
+};
 
 use super::set::{RunFlags, change_lines, failures, file_hash};
 use super::tag_migrated;
@@ -46,8 +54,13 @@ fn do_actions(a: &Args) -> Result<Success, Vec<Failure>> {
         ));
     }
     let out =
-        apply_to_file(a.song, &actions, &Origin::claude(run)).map_err(|e| failures(a.song, e))?;
-    let mut lines = vec![change_lines(&out.changes)];
+        run_actions(a.song, &actions, &Origin::claude(run)).map_err(|e| failures(a.song, e))?;
+    let mut lines = Vec::new();
+    match actions.as_slice() {
+        // Undo and redo print what they changed, like an edit.
+        [one] if one.kind() == ActionKind::Live => lines.push(format!("ran {}", one.name())),
+        _ => lines.push(change_lines(&out.changes)),
+    }
     lines.extend(out.results.iter().flat_map(result_lines));
     let mut json = json!({
         "via": out.via,
@@ -60,6 +73,21 @@ fn do_actions(a: &Args) -> Result<Success, Vec<Failure>> {
         text: lines.join("\n"),
         json,
     })
+}
+
+/// Runs `actions` through the studio that has `song` open, else edits into
+/// the file (live and history actions then give
+/// [`StudioError::NeedsStudio`]). An error once the studio has the request
+/// (no answer, or its refusal) is the result: the file is never tried after.
+pub(crate) fn run_actions(
+    song: &Path,
+    actions: &[Action],
+    origin: &Origin,
+) -> Result<ActionsOutcome, StudioError> {
+    match find_studio(&studio_dir(), song) {
+        Some(link) => link.run(actions, origin),
+        None => apply_to_file(song, actions, origin),
+    }
 }
 
 /// A batch: a JSON array of action objects on stdin.

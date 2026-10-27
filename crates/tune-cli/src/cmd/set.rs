@@ -1,14 +1,16 @@
-//! `tune set`: Claude's tagged, all-or-nothing edits by path.
+//! `tune set`: Claude's tagged, all-or-nothing edits by path, through the
+//! open studio when there is one (see `tune do`).
 
 use std::path::Path;
 use std::process::ExitCode;
 
 use serde_json::{Value, json};
 use tune_studio::{
-    Action, ActionsOutcome, Change, Origin, RunTag, SongPath, StudioError, apply_to_file,
-    parse_assignment, text_hash,
+    Action, ActionsOutcome, Change, Origin, RunTag, SongPath, StudioError, parse_assignment,
+    text_hash,
 };
 
+use super::do_action::run_actions;
 use super::tag_migrated;
 use crate::report::{Failure, Success, finish};
 
@@ -27,10 +29,11 @@ fn set(song: &Path, assignments: &[String], run: &RunFlags) -> Result<Success, V
         .into_iter()
         .map(|(path, value)| Action::SetValue { path, value })
         .collect();
-    let out = apply_to_file(song, &actions, &Origin::claude(run)).map_err(|e| failures(song, e))?;
+    let out = run_actions(song, &actions, &Origin::claude(run)).map_err(|e| failures(song, e))?;
     let text = change_lines(&out.changes);
     // `migrated_from` only for a migrated file, as every command reports it.
     let mut json = json!({
+        "via": out.via,
         "changes": out.changes,
         "file_hash": file_hash(song, &out),
     });

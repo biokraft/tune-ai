@@ -104,6 +104,7 @@ describe("createStudioStore", () => {
       event: "applied",
       source: "human",
       changes: [{ path: "tracks.acid.acid303.cutoff", old: 500, new: 820 }],
+      run: null,
     });
     expect(store.get()).toBe(before);
   });
@@ -118,6 +119,7 @@ describe("createStudioStore", () => {
       event: "applied",
       source: "human",
       changes: [{ path: "tracks.acid.acid303.cutoff", old: 500, new: 820 }],
+      run: null,
     });
     // Undo now reverts the producer's edit, not the notice's change.
     expect(store.get().notice).not.toBeNull();

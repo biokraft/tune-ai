@@ -976,14 +976,18 @@
     },
     {
       "event": "applied",
-      "source": "human",
+      "source": "claude",
       "changes": [
         {
-          "path": "tracks.acid.acid303.cutoff",
-          "old": 500,
-          "new": 820
+          "path": "song.bpm",
+          "old": 120,
+          "new": 130
         }
-      ]
+      ],
+      "run": {
+        "id": "r1",
+        "title": "open the filter"
+      }
     },
     {
       "event": "external_change",

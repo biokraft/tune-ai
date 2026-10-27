@@ -4718,6 +4718,7 @@ dependencies = [
 name = "tune-studio"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "indexmap 2.14.2",
  "jiff",
  "serde",

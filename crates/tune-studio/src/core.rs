@@ -34,9 +34,12 @@ use std::time::{Duration, Instant};
 
 use jiff::Timestamp;
 use serde::Serialize;
+use serde_json::Value;
 use tune_song::{FORMAT_VERSION, Song};
 
-use crate::action::{Action, ApplyCtx, RunTag, apply_action};
+use crate::action::{
+    Action, ActionKind, ActionsOutcome, ApplyCtx, Origin, RunTag, Via, apply_action,
+};
 use crate::diff::{Change, diff_files, diff_songs, is_whole_replace, version_change};
 use crate::doc::SongDoc;
 use crate::error::{ErrorView, StudioError};
@@ -539,9 +542,9 @@ impl StudioCore {
     }
 
     /// Flushes pending edits, then restores the text before the last undo
-    /// step and logs the reversed changes as `human`. Nothing to undo gives
-    /// no changes.
-    pub fn undo(&mut self) -> Result<Vec<Change>, StudioError> {
+    /// step and logs the reversed changes as `source`, under the action
+    /// `undo`. Nothing to undo gives no changes.
+    pub fn undo(&mut self, source: Source) -> Result<Vec<Change>, StudioError> {
         self.flush()?;
         if !self.file_errors.is_empty() {
             return Err(StudioError::FileInvalid);
@@ -552,7 +555,7 @@ impl StudioCore {
         match self.restore(&entry.before) {
             Ok((changes, hash)) => {
                 self.redo.push(entry);
-                self.log_changes(Source::Human, &changes, &hash, |_| Some("undo"), None)?;
+                self.log_changes(source, &changes, &hash, |_| Some("undo"), None)?;
                 Ok(changes)
             }
             Err(e) => {
@@ -562,8 +565,9 @@ impl StudioCore {
         }
     }
 
-    /// Re-applies the last undone step (see [`undo`](Self::undo)).
-    pub fn redo(&mut self) -> Result<Vec<Change>, StudioError> {
+    /// Re-applies the last undone step (see [`undo`](Self::undo)), logged
+    /// under the action `redo`.
+    pub fn redo(&mut self, source: Source) -> Result<Vec<Change>, StudioError> {
         self.flush()?;
         if !self.file_errors.is_empty() {
             return Err(StudioError::FileInvalid);
@@ -574,7 +578,7 @@ impl StudioCore {
         match self.restore(&entry.after) {
             Ok((changes, hash)) => {
                 self.push_undo(entry);
-                self.log_changes(Source::Human, &changes, &hash, |_| Some("redo"), None)?;
+                self.log_changes(source, &changes, &hash, |_| Some("redo"), None)?;
                 Ok(changes)
             }
             Err(e) => {
@@ -582,6 +586,94 @@ impl StudioCore {
                 Err(e)
             }
         }
+    }
+
+    /// Runs edit actions at once, as `origin`: writes the pending edits
+    /// first (their own `human` step, through [`flush`](Self::flush), so an
+    /// unseen change on disk is merged first), then applies every action to
+    /// a copy (all or nothing), writes the result, pushes one undo step with
+    /// `origin.source`, clears redo and logs one entry per change with its
+    /// action's name and the run. A `set_param` here is a plain write: no
+    /// automation check. A file in an older format (adopted from disk and
+    /// not written since) is written in the newest, with a `song.version`
+    /// change first. Changing nothing writes nothing. A live or history
+    /// action gives [`StudioError::EditsOnly`]; while the file does not
+    /// parse, [`StudioError::FileInvalid`].
+    pub fn apply_now(
+        &mut self,
+        actions: &[Action],
+        origin: &Origin,
+    ) -> Result<ActionsOutcome, StudioError> {
+        if !self.file_errors.is_empty() {
+            return Err(StudioError::FileInvalid);
+        }
+        if let Some(live) = actions.iter().find(|a| a.kind() != ActionKind::Edit) {
+            return Err(StudioError::EditsOnly {
+                action: live.name().to_owned(),
+            });
+        }
+        self.flush()?;
+        if !self.file_errors.is_empty() {
+            return Err(StudioError::FileInvalid);
+        }
+        let mut doc = self.doc.clone();
+        let mut results = Vec::with_capacity(actions.len());
+        // Each action's own changes, so every log entry names its action.
+        let mut groups: Vec<(Option<&'static str>, Vec<Change>)> = Vec::new();
+        if let Some(change) = version_change(self.disk_version, FORMAT_VERSION) {
+            groups.push((None, vec![change]));
+        }
+        for action in actions {
+            let before = doc.song().clone();
+            results.push(self.apply_one(&mut doc, action)?);
+            groups.push((Some(action.name()), diff_songs(&before, doc.song())));
+        }
+        let text = doc.text();
+        if text == self.doc.text() {
+            return Ok(ActionsOutcome {
+                via: Via::Studio,
+                changes: Vec::new(),
+                results,
+                file_hash: None,
+                migrated_from: None,
+            });
+        }
+        let hash = self.write(&text)?;
+        let migrated_from = (self.disk_version != FORMAT_VERSION).then_some(self.disk_version);
+        let (names, changes): (Vec<_>, Vec<_>) = groups
+            .into_iter()
+            .flat_map(|(name, group)| group.into_iter().map(move |c| (name, c)))
+            .unzip();
+        let before = std::mem::replace(&mut self.disk_text, text.clone());
+        self.disk_version = FORMAT_VERSION;
+        self.disk_song = doc.song().clone();
+        self.doc = doc;
+        self.push_undo(UndoEntry {
+            before,
+            after: text,
+            source: origin.source,
+            changes: changes.clone(),
+        });
+        self.redo.clear();
+        self.log_changes(
+            origin.source,
+            &changes,
+            &hash,
+            |i| names[i],
+            origin.run.as_ref(),
+        )?;
+        Ok(ActionsOutcome {
+            via: Via::Studio,
+            changes,
+            results,
+            file_hash: Some(hash),
+            migrated_from,
+        })
+    }
+
+    /// The hash of the text on disk, as the studio last wrote or read it.
+    pub(crate) fn disk_hash(&self) -> String {
+        text_hash(&self.disk_text)
     }
 
     /// Whether `bar` (0-based) lies in a stretch of the lane for this
@@ -641,10 +733,15 @@ impl StudioCore {
     /// Applies `action` to `doc`, a copy of the document (see
     /// [`apply_action`]).
     fn apply(&self, doc: &mut SongDoc, action: &Action) -> Result<(), StudioError> {
+        self.apply_one(doc, action).map(drop)
+    }
+
+    /// [`apply`](Self::apply), keeping the action's result.
+    fn apply_one(&self, doc: &mut SongDoc, action: &Action) -> Result<Value, StudioError> {
         let ctx = ApplyCtx {
             log: Some(&self.log),
         };
-        apply_action(doc, action, &ctx).map(drop)
+        apply_action(doc, action, &ctx)
     }
 
     fn clear_pending(&mut self) {
