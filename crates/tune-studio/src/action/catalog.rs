@@ -297,6 +297,22 @@ pub const ACTIONS: &[ActionSpec] = &[
             arg("to", Id, "new device id; not `send` or `duck`"),
         ],
     ),
+    action(
+        "set_instrument",
+        Edit,
+        "Swaps a track's instrument. The new device gets the module's prefix as its id and \
+         default settings; the old instrument's params and lane stretches go, as do placements \
+         of clips the new module cannot play (the clips stay) and a `mix.duck_source` naming the \
+         track when the new module plays no drum clips. The result lists what went.",
+        &[
+            TRACK,
+            arg(
+                "module",
+                Text,
+                "instrument module, e.g. acid303, kick, clap, hat_closed, hat_open or ride",
+            ),
+        ],
+    ),
 ];
 
 /// The catalog entry of the action named `name`.

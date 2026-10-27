@@ -309,6 +309,7 @@ The producer may have the studio (app or browser) open on the same song.
   | `remove_effect` | `tune do <song> remove_effect track=acid device=eq2` removes the effect and its lanes |
   | `move_effect` | `tune do <song> move_effect track=acid device=dist index=0` |
   | `rename_device` | `tune do <song> rename_device track=acid device=acid303 to=bass303` renames the instrument or an effect, its param keys and lanes |
+  | `set_instrument` | `tune do <song> set_instrument track=acid module=kick` swaps the instrument; the new device is `kick` with default settings, so the old instrument's params, lane stretches and placements of clips the new module cannot play go (the result lists them; the clips stay) and so does a `mix.duck_source` naming the track when the new module plays no drum clips; strip params stay |
 
 - To see the UI: `tune serve <song> --device null --port 4580` (in the
   background; `task ui:build` first), then drive Chrome with the

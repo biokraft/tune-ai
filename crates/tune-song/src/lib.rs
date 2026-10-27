@@ -30,7 +30,7 @@ pub use arrange::{
 };
 pub use edit::{
     EditOpError, Edited, Removed, add_effect, add_track, move_effect, remove_effect, remove_track,
-    rename_device, rename_track,
+    rename_device, rename_track, set_instrument,
 };
 pub use error::{LoadError, SongError};
 pub use migrate::{Migration, migrate};

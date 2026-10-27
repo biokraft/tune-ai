@@ -92,7 +92,7 @@ pub(crate) fn apply_all(
 }
 
 /// Applies one edit action to `doc`, all or nothing, and returns its result
-/// (`null` for most edits; `{"id": …}` for `add_effect`, `{"removed": …}` for the removals). Works on any document, so a pending
+/// (`null` for most edits; `{"id": …}` for `add_effect`, `{"removed": …}` for the removals and `set_instrument`). Works on any document, so a pending
 /// action can be applied again onto a newer file. Live and history actions
 /// (and a knob drag, `set_param` with `commit: false`) give
 /// [`StudioError::NotAnEdit`].
@@ -226,6 +226,9 @@ pub(crate) fn apply_action(
             index,
         } => doc.move_effect(track, device, *index)?,
         Action::RenameDevice { track, device, to } => doc.rename_device(track, device, to)?,
+        Action::SetInstrument { track, module } => {
+            return Ok(removed_value(&doc.set_instrument(track, module)?));
+        }
         Action::SetParam { commit: false, .. }
         | Action::Play { .. }
         | Action::Stop

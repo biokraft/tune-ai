@@ -347,3 +347,46 @@ fn do_goes_through_a_running_studio() {
     assert!(fs::read_to_string(&e.song).unwrap().contains("bpm = 128"));
     studio.shutdown();
 }
+
+#[test]
+fn swap_from_the_cli() {
+    let e = fixture();
+    let v = json_out(e.tune().args([
+        "do",
+        e.song.to_str().unwrap(),
+        "set_instrument",
+        "track=acid",
+        "module=kick",
+        "--json",
+    ]));
+    assert_eq!(v["results"][0]["removed"]["placements"][0]["clip"], "a1");
+    assert!(
+        fs::read_to_string(&e.song)
+            .unwrap()
+            .contains("instrument = \"kick\"")
+    );
+
+    // Text mode says what went, on a fresh copy.
+    let e = fixture();
+    let out = e
+        .tune()
+        .args([
+            "do",
+            e.song.to_str().unwrap(),
+            "set_instrument",
+            "track=acid",
+            "module=kick",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("removed placement a1 on acid at bar 3"),
+        "{text}"
+    );
+    assert!(
+        text.contains("removed lane acid.acid303.cutoff at bar 3"),
+        "{text}"
+    );
+}
