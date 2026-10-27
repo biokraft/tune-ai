@@ -134,6 +134,58 @@
         "mute": true,
         "solo": false
       }
+    },
+    {
+      "cmd": "add_track",
+      "args": {
+        "track": "bass",
+        "instrument": "acid303"
+      }
+    },
+    {
+      "cmd": "remove_track",
+      "args": {
+        "track": "bass"
+      }
+    },
+    {
+      "cmd": "rename_track",
+      "args": {
+        "track": "acid",
+        "to": "bass"
+      }
+    },
+    {
+      "cmd": "add_effect",
+      "args": {
+        "track": "acid",
+        "module": "eq",
+        "id": null,
+        "index": 0
+      }
+    },
+    {
+      "cmd": "remove_effect",
+      "args": {
+        "track": "acid",
+        "device": "dist"
+      }
+    },
+    {
+      "cmd": "move_effect",
+      "args": {
+        "track": "acid",
+        "device": "dist",
+        "index": 1
+      }
+    },
+    {
+      "cmd": "rename_device",
+      "args": {
+        "track": "acid",
+        "device": "dist",
+        "to": "drive2"
+      }
     }
   ],
   "events": [

@@ -1,9 +1,9 @@
 //! Applying an edit action to a document.
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tune_dsp::DrumPattern;
 use tune_dsp::acid303::{AcidPattern, AcidStep};
-use tune_song::Clip;
+use tune_song::{Clip, Removed};
 
 use std::slice;
 
@@ -12,7 +12,7 @@ use tune_song::FORMAT_VERSION;
 
 use super::{Action, RunTag};
 use crate::diff::{Change, diff_songs, version_change};
-use crate::doc::{EditError, SongDoc};
+use crate::doc::{EditError, SongDoc, num, placement_json};
 use crate::error::StudioError;
 use crate::log::EditLog;
 use crate::log::{EditEntry, Source, entries_for};
@@ -92,7 +92,7 @@ pub(crate) fn apply_all(
 }
 
 /// Applies one edit action to `doc`, all or nothing, and returns its result
-/// (`null` for every edit so far). Works on any document, so a pending
+/// (`null` for most edits; `{"id": …}` for `add_effect`, `{"removed": …}` for the removals). Works on any document, so a pending
 /// action can be applied again onto a newer file. Live and history actions
 /// (and a knob drag, `set_param` with `commit: false`) give
 /// [`StudioError::NotAnEdit`].
@@ -203,6 +203,29 @@ pub(crate) fn apply_action(
             }
             *doc = next;
         }
+        Action::AddTrack { track, instrument } => doc.add_track(track, instrument)?,
+        Action::RemoveTrack { track } => {
+            return Ok(removed_value(&doc.remove_track(track)?));
+        }
+        Action::RenameTrack { track, to } => doc.rename_track(track, to)?,
+        Action::AddEffect {
+            track,
+            module,
+            id,
+            index,
+        } => {
+            let id = doc.add_effect(track, module, id.as_deref(), *index)?;
+            return Ok(json!({ "id": id }));
+        }
+        Action::RemoveEffect { track, device } => {
+            return Ok(removed_value(&doc.remove_effect(track, device)?));
+        }
+        Action::MoveEffect {
+            track,
+            device,
+            index,
+        } => doc.move_effect(track, device, *index)?,
+        Action::RenameDevice { track, device, to } => doc.rename_device(track, device, to)?,
         Action::SetParam { commit: false, .. }
         | Action::Play { .. }
         | Action::Stop
@@ -212,6 +235,46 @@ pub(crate) fn apply_action(
         | Action::Redo => return Err(StudioError::NotAnEdit),
     }
     Ok(Value::Null)
+}
+
+/// What an edit removed, as the action's result: `{"removed": {"lanes":
+/// […], "placements": […], "duck_source": …}}`. A lane is `{"param": "<track>.<param>",
+/// "at", "bars", "points"}` (`at` 1-based), a placement
+/// `{"track", "at", "clip", "bars", "offset"}`.
+fn removed_value(removed: &Removed) -> Value {
+    let lanes: Vec<Value> = removed
+        .lanes
+        .iter()
+        .map(|l| {
+            let points: Vec<Value> = l
+                .points
+                .iter()
+                .map(|&(x, v)| json!([num(x), num(v)]))
+                .collect();
+            json!({
+                "param": format!("{}.{}", l.track, l.param),
+                "at": l.start_bar + 1,
+                "bars": l.bars,
+                "points": points,
+            })
+        })
+        .collect();
+    let placements: Vec<Value> = removed
+        .placements
+        .iter()
+        .map(|(track, p)| {
+            let mut value = json!({ "track": track });
+            if let (Some(map), Value::Object(fields)) = (value.as_object_mut(), placement_json(p)) {
+                map.extend(fields);
+            }
+            value
+        })
+        .collect();
+    json!({ "removed": {
+        "lanes": lanes,
+        "placements": placements,
+        "duck_source": removed.duck_source,
+    } })
 }
 
 fn clip_of<'d>(doc: &'d SongDoc, path: &SongPath, clip: &str) -> Result<&'d Clip, EditError> {

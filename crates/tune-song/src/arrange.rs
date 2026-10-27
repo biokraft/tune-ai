@@ -26,13 +26,17 @@ pub enum LaneOrigin {
     Split(usize),
     /// A copy made by [`duplicate_section`].
     Copy(usize),
+    /// A stretch with no old table (one an edit adds); the writer gives it
+    /// a table of its own.
+    New,
 }
 
 impl LaneOrigin {
-    /// The index into the old `automation`.
-    fn source(self) -> usize {
+    /// The index into the old `automation`, if the stretch came from one.
+    fn source(self) -> Option<usize> {
         match self {
-            Self::Kept(i) | Self::Split(i) | Self::Copy(i) => i,
+            Self::Kept(i) | Self::Split(i) | Self::Copy(i) => Some(i),
+            Self::New => None,
         }
     }
 }
@@ -301,7 +305,7 @@ impl Edit {
             if lane.start_bar < bar && bar < lane.span().end {
                 let (left, right) = split_lane(&lane, bar);
                 self.push(left, origin);
-                self.push(right, LaneOrigin::Split(origin.source()));
+                self.push(right, LaneOrigin::Split(source_of(origin)));
             } else {
                 self.push(lane, origin);
             }
@@ -334,7 +338,7 @@ impl Edit {
                 self.push(moved(&lane, span), origin);
             }
             if let Some(span) = copy {
-                self.push(moved(&lane, span), LaneOrigin::Copy(origin.source()));
+                self.push(moved(&lane, span), LaneOrigin::Copy(source_of(origin)));
             }
         }
     }
@@ -361,6 +365,14 @@ impl Edit {
             lanes: origins,
         }
     }
+}
+
+/// The old stretch an operation's own item came from: every item of a
+/// section operation starts as a kept stretch of the song.
+fn source_of(origin: LaneOrigin) -> usize {
+    origin
+        .source()
+        .expect("a section operation starts from kept stretches")
 }
 
 /// `lane` over the bars `span`, with the same points.

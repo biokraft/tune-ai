@@ -6,11 +6,13 @@
 //! at once, each with a 1-based `line:column`. It reads format versions 1
 //! and 2; [`Song::to_toml`] writes version 2, and [`migrate`] rewrites a
 //! version 1 file as version 2, keeping its comments. [`move_section`] and its
-//! siblings edit the arrangement one section at a time.
+//! siblings edit the arrangement one section at a time, [`add_track`] and its
+//! siblings the tracks and their devices.
 
 #![forbid(unsafe_code)]
 
 mod arrange;
+mod edit;
 mod error;
 mod migrate;
 mod model;
@@ -26,6 +28,10 @@ pub use arrange::{
     ArrangeError, Arranged, LaneOrigin, delete_section, duplicate_section, move_section,
     resize_section, set_section_play,
 };
+pub use edit::{
+    EditOpError, Edited, Removed, add_effect, add_track, move_effect, remove_effect, remove_track,
+    rename_device, rename_track,
+};
 pub use error::{LoadError, SongError};
 pub use migrate::{Migration, migrate};
 pub use model::{
@@ -35,7 +41,7 @@ pub use model::{
 };
 pub use tune_modules::{ClipKind, ModuleDescriptor, Registry, SettingSpec};
 pub use watch::{RawReload, Reload, SongWatcher};
-pub use write::{notes_toml, placements_toml};
+pub use write::{fx_entry_toml, notes_toml, placements_toml, track_table_toml};
 
 /// The newest song format version, the one [`Song::to_toml`] writes.
 pub const FORMAT_VERSION: u32 = 2;

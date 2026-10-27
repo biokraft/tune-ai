@@ -22,14 +22,15 @@ use tune_song::toml_doc::{
     Slot, element_mut, inline_element, normalize_positions, root_child, walk, walk_mut,
 };
 use tune_song::{
-    ArrangeError, Arranged, Clip, Device, FORMAT_VERSION, MIX_TRACK_ID, Migration, Note, Placement,
-    Registry, SectionPlay, SettingSpec, Song, SongError, TICKS_PER_STEP, Track, find_mix_param,
-    migrate, parse, pitch_name, section_bars_error,
+    ArrangeError, Arranged, Clip, Device, EditOpError, FORMAT_VERSION, MIX_TRACK_ID, Migration,
+    Note, Placement, Registry, SectionPlay, SettingSpec, Song, SongError, TICKS_PER_STEP, Track,
+    find_mix_param, migrate, parse, pitch_name, section_bars_error,
 };
 
 use crate::path::{SongPath, TrackField};
 
 mod arrange;
+mod items;
 
 use arrange::{Tables, block_start, rerank, section_tables, write_automation, write_plays};
 
@@ -58,6 +59,9 @@ pub enum EditError {
     /// song the validator accepts).
     #[error("the arrangement would be too long")]
     TooLong,
+    /// A track or device edit the song model refused.
+    #[error("{0}")]
+    Op(#[from] EditOpError),
     #[error("the edit would make the song invalid:\n{}", summary(.0))]
     Invalid(Vec<SongError>),
     /// The studio could not carry out an edit it accepted: a bug, never a
@@ -439,7 +443,7 @@ pub fn placement_json(p: &Placement) -> Value {
 }
 
 /// A number as JSON, exact integers as integers (`-6`, not `-6.0`).
-fn num(v: f64) -> Value {
+pub(crate) fn num(v: f64) -> Value {
     match as_integer(v) {
         Some(i) => Value::from(i),
         None => serde_json::Number::from_f64(v).map_or(Value::Null, Value::Number),

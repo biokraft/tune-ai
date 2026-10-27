@@ -962,3 +962,23 @@ fn drag_mix_knob_overrides_live() {
         "the file plays, not the dragged value"
     );
 }
+
+#[test]
+fn a_new_track_plays_live_and_is_one_undo_step() {
+    let f = fixture(MINI);
+    f.call(play(None));
+    f.pull(4 * BLOCK);
+    let add = Command::Action(Action::AddTrack {
+        track: "bass".into(),
+        instrument: "acid303".into(),
+    });
+    assert_eq!(f.call(add), Value::Null);
+    let text = f.disk_until(WAIT, "gained the track", |t| t.contains("[tracks.bass]"));
+    assert!(parse_song(&text).is_ok_and(|s| s.tracks.contains_key("bass")));
+    // The swap reached the player, which keeps producing frames.
+    f.pull(4 * BLOCK);
+    let undone = f.call(Command::Action(Action::Undo));
+    assert_eq!(undone[0]["path"], json!("tracks.bass"));
+    f.disk_until(WAIT, "lost the track", |t| !t.contains("bass"));
+    assert_eq!(f.disk(), MINI);
+}

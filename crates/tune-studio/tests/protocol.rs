@@ -41,6 +41,13 @@ fn wire_name(c: &Command) -> &'static str {
             Action::DeleteSection { .. } => "delete_section",
             Action::SetSectionPlay { .. } => "set_section_play",
             Action::SetTrackMix { .. } => "set_track_mix",
+            Action::AddTrack { .. } => "add_track",
+            Action::RemoveTrack { .. } => "remove_track",
+            Action::RenameTrack { .. } => "rename_track",
+            Action::AddEffect { .. } => "add_effect",
+            Action::RemoveEffect { .. } => "remove_effect",
+            Action::MoveEffect { .. } => "move_effect",
+            Action::RenameDevice { .. } => "rename_device",
         },
     }
 }
@@ -132,6 +139,37 @@ fn sample_actions() -> Vec<Action> {
             pan: None,
             mute: Some(true),
             solo: Some(false),
+        },
+        Action::AddTrack {
+            track: "bass".into(),
+            instrument: "acid303".into(),
+        },
+        Action::RemoveTrack {
+            track: "bass".into(),
+        },
+        Action::RenameTrack {
+            track: "acid".into(),
+            to: "bass".into(),
+        },
+        Action::AddEffect {
+            track: "acid".into(),
+            module: "eq".into(),
+            id: None,
+            index: Some(0),
+        },
+        Action::RemoveEffect {
+            track: "acid".into(),
+            device: "dist".into(),
+        },
+        Action::MoveEffect {
+            track: "acid".into(),
+            device: "dist".into(),
+            index: 1,
+        },
+        Action::RenameDevice {
+            track: "acid".into(),
+            device: "dist".into(),
+            to: "drive2".into(),
         },
     ]
 }

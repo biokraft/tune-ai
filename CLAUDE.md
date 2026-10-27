@@ -296,6 +296,20 @@ The producer may have the studio (app or browser) open on the same song.
   Section operations (`play`, `bars`) rewrite a track's `play` list and drop
   the comments inside it.
 
+- Actions (`tune actions` lists them all; each is `tune do <song> <name> name=value...`).
+  The track and device ones, each refused with a plain message when the id is
+  taken, malformed or unknown, and the file left as it was:
+
+  | Action | Example |
+  | --- | --- |
+  | `add_track` | `tune do <song> add_track track=bass instrument=acid303` appends a default track (gain and pan 0, no effects or placements) |
+  | `remove_track` | `tune do <song> remove_track track=bass` removes the track, its placements and its lanes (the result lists the lanes) |
+  | `rename_track` | `tune do <song> rename_track track=bass to=lead`; lanes and `mix.duck_source` follow, but its noise changes (seeded from the track id) |
+  | `add_effect` | `tune do <song> add_effect track=acid module=eq index=0` returns the new device's id (`eq`, then `eq2`); `id=` names it |
+  | `remove_effect` | `tune do <song> remove_effect track=acid device=eq2` removes the effect and its lanes |
+  | `move_effect` | `tune do <song> move_effect track=acid device=dist index=0` |
+  | `rename_device` | `tune do <song> rename_device track=acid device=acid303 to=bass303` renames the instrument or an effect, its param keys and lanes |
+
 - To see the UI: `tune serve <song> --device null --port 4580` (in the
   background; `task ui:build` first), then drive Chrome with the
   `agent-browser` skill: start the agent Chrome, pick a session

@@ -15,6 +15,7 @@ mod cli;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tune_dsp::DrumHit;
+use tune_song::Registry;
 
 use crate::diff::Change;
 use crate::log::Source;
@@ -124,6 +125,46 @@ pub enum Action {
         #[serde(default)]
         solo: Option<bool>,
     },
+    // ----- tracks and devices -----
+    /// Appends track `track` playing a new `instrument` module.
+    AddTrack {
+        track: String,
+        instrument: String,
+    },
+    /// Removes a track with its placements and lane stretches.
+    RemoveTrack {
+        track: String,
+    },
+    RenameTrack {
+        track: String,
+        to: String,
+    },
+    /// Inserts an effect of `module` into the track's chain at `index`
+    /// (the end by default); `id` defaults to the module's next free id.
+    AddEffect {
+        track: String,
+        module: String,
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        index: Option<usize>,
+    },
+    RemoveEffect {
+        track: String,
+        device: String,
+    },
+    /// Moves an effect to `index` of the chain.
+    MoveEffect {
+        track: String,
+        device: String,
+        index: usize,
+    },
+    /// Renames a device (the instrument or an effect) of a track.
+    RenameDevice {
+        track: String,
+        device: String,
+        to: String,
+    },
 }
 
 fn yes() -> bool {
@@ -231,6 +272,13 @@ impl Action {
             Self::DeleteSection { .. } => "delete_section",
             Self::SetSectionPlay { .. } => "set_section_play",
             Self::SetTrackMix { .. } => "set_track_mix",
+            Self::AddTrack { .. } => "add_track",
+            Self::RemoveTrack { .. } => "remove_track",
+            Self::RenameTrack { .. } => "rename_track",
+            Self::AddEffect { .. } => "add_effect",
+            Self::RemoveEffect { .. } => "remove_effect",
+            Self::MoveEffect { .. } => "move_effect",
+            Self::RenameDevice { .. } => "rename_device",
         }
     }
 
@@ -277,6 +325,21 @@ impl Action {
             .filter(|(_, given)| *given)
             .map(|(field, _)| format!("tracks.{track}.{field}"))
             .collect(),
+            Self::AddTrack { track, .. }
+            | Self::RemoveTrack { track }
+            | Self::RenameTrack { track, .. } => vec![format!("tracks.{track}")],
+            Self::AddEffect { track, .. }
+            | Self::RemoveEffect { track, .. }
+            | Self::MoveEffect { track, .. } => vec![format!("tracks.{track}.fx")],
+            // The action names a device by id, not by role: a device whose
+            // id is an instrument's module name reads as the instrument.
+            Self::RenameDevice { track, device, .. } => {
+                let is_instrument = Registry::builtin()
+                    .instruments()
+                    .any(|m| m.prefix == device);
+                let role = if is_instrument { "instrument" } else { "fx" };
+                vec![format!("tracks.{track}.{role}")]
+            }
             Self::MoveSection { .. }
             | Self::DuplicateSection { .. }
             | Self::DeleteSection { .. } => {
