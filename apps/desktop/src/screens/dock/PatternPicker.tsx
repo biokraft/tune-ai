@@ -2,6 +2,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { cn } from "@tune/ui";
 import { useState } from "react";
 import type { SongView } from "../../client/protocol";
+import { partialClipsIn } from "../../lib/song";
 
 export type PatternPickerProps = {
   song: SongView;
@@ -20,11 +21,28 @@ const option = cn(
   focusRing,
 );
 
-/** Which clip the track plays in the section: the clips its instrument can play, plus "None". */
+/**
+ * The label of what the track plays in the section: the clip, "partial: <clip>" or "mixed" when it
+ * plays part of a clip there (or from mid-clip) that no one clip names, else "—".
+ */
+function currentLabel(song: SongView, track: string, section: number): string {
+  const current = song.sections[section]?.play[track];
+  if (current !== undefined) return current;
+  const partial = partialClipsIn(song, section, track);
+  if (partial.length === 0) return "—";
+  return partial.length === 1 ? `partial: ${partial[0]}` : "mixed";
+}
+
+/**
+ * Which clip the track plays in the section: the clips its instrument can play, plus "None". A
+ * section the track plays only in part shows that, so "None" there visibly removes something.
+ */
 export function PatternPicker({ song, track, section, onPick }: PatternPickerProps) {
   const [open, setOpen] = useState(false);
   const plays = song.tracks.find((t) => t.id === track)?.plays ?? [];
   const current = song.sections[section]?.play[track];
+  const label = currentLabel(song, track, section);
+  const partial = current === undefined && label !== "—";
   const pick = (pattern: string | null) => {
     onPick(pattern);
     setOpen(false);
@@ -35,14 +53,19 @@ export function PatternPicker({ song, track, section, onPick }: PatternPickerPro
         <button
           type="button"
           aria-label={`${track} in section ${section + 1}`}
+          title={
+            partial
+              ? "Plays part of a clip here (read only); picking replaces what lies in the section"
+              : undefined
+          }
           className={cn(
             "inline-flex h-[26px] flex-none items-center gap-1.5 rounded-rs border border-line bg-ink/[.04] px-2",
             "font-mono text-[11.5px] hover:bg-ink/[.09]",
-            current ? "text-ink" : "text-ink3",
+            current || partial ? "text-ink" : "text-ink3",
             focusRing,
           )}
         >
-          {current ?? "—"}
+          {label}
           <svg
             viewBox="0 0 24 24"
             aria-hidden="true"

@@ -8,7 +8,7 @@ import {
 } from "@tune/ui";
 import { memo, useMemo } from "react";
 import type { Command, SongView, TrackView } from "../../client/protocol";
-import { highlightedSteps, patternIn, stepInPattern } from "../../lib/song";
+import { highlightedSteps, partialClipsIn, patternIn, stepInPattern } from "../../lib/song";
 import type { HighlightKind } from "../../store/studioStore";
 import { usePlayheadStep } from "../../store/useStudio";
 
@@ -107,9 +107,19 @@ export const StepsTab = memo(function StepsTab({
   }
   const pattern = patternIn(song, section, track.id);
   if (!pattern) {
+    const name = song.sections[section]?.name;
+    const partial = partialClipsIn(song, section, track.id);
+    if (partial.length > 0) {
+      return (
+        <p className={empty}>
+          {track.id} plays part of {partial.join(", ")} in {name} (read only). Pick a pattern above
+          to replace it.
+        </p>
+      );
+    }
     return (
       <p className={empty}>
-        {track.id} plays nothing in {song.sections[section]?.name}. Pick a pattern above.
+        {track.id} plays nothing in {name}. Pick a pattern above.
       </p>
     );
   }
