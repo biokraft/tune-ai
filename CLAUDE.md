@@ -260,8 +260,10 @@ The producer may have the studio (app or browser) open on the same song.
   the command returns and is one undo step per command (the producer's
   ⌘Z steps back one command at a time), and the JSON says `"via":
   "studio"` (`"file"` without a studio). Live and history actions need it.
-  If the studio does not answer, the command fails rather than writing the
-  file behind its back; check the studio before retrying. The studio's
+  A studio that does not answer the first probe (it asks which song is
+  open) is skipped and the file is written; once the request is sent, no
+  answer makes the command fail rather than write the file behind its
+  back, so check the studio before retrying. The studio's
   endpoint files live under `~/.tune/studios` (`TUNE_STUDIO_DIR` moves
   them and must be an absolute path, else `do` and `set` refuse; a
   directory with any group or other permission bit is not trusted, as if
@@ -313,7 +315,7 @@ The producer may have the studio (app or browser) open on the same song.
   | `remove_effect` | `tune do <song> remove_effect track=acid device=eq2` removes the effect and its lanes |
   | `move_effect` | `tune do <song> move_effect track=acid device=dist index=0` |
   | `rename_device` | `tune do <song> rename_device track=acid device=acid303 to=bass303` renames the instrument or an effect, its param keys and lanes |
-  | `set_instrument` | `tune do <song> set_instrument track=acid module=kick` swaps the instrument; the new device is `kick` with default settings, so the old instrument's params, lane stretches and placements of clips the new module cannot play go (the result lists them; the clips stay) and so does a `mix.duck_source` naming the track when the new module plays no drum clips; strip params stay |
+  | `set_instrument` | `tune do <song> set_instrument track=acid module=kick` swaps the instrument; the new device is `kick` with default settings, so the old instrument's params, lane stretches and placements of clips the new module cannot play go (the result lists them; the clips stay) and so does a `mix.duck_source` naming the track when the new module plays no drum clips; strip params stay. Dropping placements rewrites the `play` list, which drops the comments inside it, and a swap the song would not take (the only kick, while a track ducks to it) is refused with the validator's message |
 
   The clip ones, refused the same way:
 
@@ -333,7 +335,7 @@ The producer may have the studio (app or browser) open on the same song.
   | `move_placement` | `tune do <song> move_placement track=acid at=3 to=1` |
   | `resize_placement` | `tune do <song> resize_placement track=acid at=3 bars=1` |
   | `remove_placement` | `tune do <song> remove_placement track=kick at=3` (the result lists it) |
-  | `add_section` | `tune do <song> add_section name=break bars=2 index=1` inserts an empty section before section 1 (0-based; the end by default); a placement or lane stretch crossing the insert point is split there, and everything from it on moves 2 bars later |
+  | `add_section` | `tune do <song> add_section name=break bars=2 index=1` inserts an empty section before section 1 (0-based; the end by default); a placement or lane stretch crossing the insert point is split there, and everything from it on moves `bars` later |
   | `rename_section` | `tune do <song> rename_section index=1 name=drop` |
 
   These rewrite a track's `play` list (and `add_section` the lane tables), which drops
