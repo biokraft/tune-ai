@@ -406,12 +406,22 @@ The producer may have the studio (app or browser) open on the same song.
   whole when any part of it changed later, and also when any other edit
   since changed placements, lane stretches, sections or a whole track
   anywhere in the song. A rename (`rename_track`, `rename_clip`,
-  `rename_device`) likewise goes back whole with everything its write
-  changed (the lanes, placements and duck source that followed it), or
-  is kept whole when any part of it changed later (the new name renamed
-  again or removed included), so the old name never comes back beside the
-  new one. A target someone set back to
-  its value before the run is listed in `already`, not `kept`. The
+  `rename_device`, `rename_scene`) likewise goes back whole with
+  everything its write changed (the lanes, placements, scene slots and
+  duck source that followed it), or is kept whole when any part of it
+  changed later (the new name renamed again or removed included), so the
+  old name never comes back beside the new one.
+  Scenes go back one at a time too: a slot (`scenes.<s>.slots.<t>`) is
+  kept when someone changed it, its scene or its whole track since (a
+  scene the producer removed does not come back for it, and a track they
+  made again gets no old slot); a scene the run added or removed
+  (`scenes.<s>`, with the slots the run set in a scene it added) is kept
+  when someone changed it or any slot in it, or moved any scene, since.
+  The scene order (`scenes`, from `move_scene`) goes back unless someone
+  added, removed or moved a scene since; a slot edit does not keep it.
+  Live session actions (`launch_clip`, `launch_scene`, `stop_clip`,
+  `back_to_arrangement`) are never part of a run. A target someone set
+  back to its value before the run is listed in `already`, not `kept`. The
   result is `{"run", "title", "reverted": [{"target",
   "item"}], "kept": [{"target", "item", "reason", "by", "message"}],
   "already": [<target>]}` (`item` is the placement or stretch for
@@ -421,10 +431,12 @@ The producer may have the studio (app or browser) open on the same song.
   human` (`by another run`, `outside the studio`, `still used: <message>`)
   line each. A damaged record line in the log refuses it ("the edit log
   has a damaged record at line N; nothing was changed"). Costs: a removed
-  lane, track or clip comes back without its comments (so do the lanes
-  `rename_device` moved, and a section `rename_section` renamed loses the
-  comment above it), a restored clip goes to the end of the clip pool, and
-  an explicit `send.* = -60` (a silent bus) is not restored.
+  lane, track, clip or scene comes back without its comments (so do the
+  lanes `rename_device` moved, a section `rename_section` renamed loses
+  the comment above it, and so does a scene `rename_scene` renamed when
+  the run also changed its slots), a restored clip goes to the end of the
+  clip pool, and an explicit `send.* = -60` (a silent bus) is not
+  restored.
 - To see the UI: `tune serve <song> --device null --port 4580` (in the
   background; `task ui:build` first), then drive Chrome with the
   `agent-browser` skill: start the agent Chrome, pick a session

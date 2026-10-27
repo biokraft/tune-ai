@@ -124,8 +124,8 @@ struct Waiting {
 /// A section edit's changes (the sections, and the placements and lane
 /// stretches of the records that changed them) go back together or not
 /// at all: kept whole when any part of it would be kept, written in one
-/// go otherwise. So does each rename (of a track, clip or device) with
-/// everything its record changed.
+/// go otherwise. So does each rename (of a track, clip, device or scene)
+/// with everything its record changed.
 pub fn undo_run(
     doc: &mut SongDoc,
     records: &[ActionRecord],
@@ -433,13 +433,19 @@ fn section_group(plans: &[Plan], records: &[ActionRecord], mine: &[usize]) -> Ve
     group
 }
 
-/// One group per record of the run that renamed a track, clip or device:
-/// every plan its changes belong to (the target, or the item the run
+/// One group per record of the run that renamed a track, clip, device or
+/// scene: every plan its changes belong to (the target, or the item the run
 /// created that it folded into). A rename is a removal and an addition
-/// (`tracks.<old>` gone, `tracks.<new>` made, the lanes moved over):
-/// reverting one half without the other doubles the item or orphans it.
+/// (`tracks.<old>` gone, `tracks.<new>` made, the lanes and slots moved
+/// over): reverting one half without the other doubles the item or orphans
+/// it.
 fn rename_groups(plans: &[Plan], records: &[ActionRecord], mine: &[usize]) -> Vec<Vec<usize>> {
-    const RENAMES: [&str; 3] = ["rename_track", "rename_clip", "rename_device"];
+    const RENAMES: [&str; 4] = [
+        "rename_track",
+        "rename_clip",
+        "rename_device",
+        "rename_scene",
+    ];
     let renames = mine.iter().map(|&i| &records[i]).filter(|r| {
         let mut actions = r.actions.iter();
         actions.any(|a| RENAMES.contains(&a.as_str()))
@@ -486,7 +492,8 @@ fn merged(groups: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
 
 /// The run's targets, in the order the run first changed them. A change
 /// to a part of an item the run created (a leaf of a new track, effect,
-/// instrument or clip, a new track's placements) folds into that item.
+/// instrument or clip, a new track's placements, a new scene's slots) folds
+/// into that item.
 fn plan(records: &[ActionRecord], mine: &[usize]) -> Vec<Plan> {
     let mut plans: Vec<Plan> = Vec::new();
     for &i in mine {
@@ -794,6 +801,7 @@ type Put = (Target, Value, Vec<Option<Value>>);
 fn put_all(doc: &mut SongDoc, puts: &[Put]) -> Result<(), EditError> {
     let in_order = |order: Vec<&Put>| -> Result<SongDoc, EditError> {
         let mut copy = doc.clone();
+        rename_scenes_back(&mut copy, &order);
         for (target, value, _) in order {
             copy.put(target, value)?;
         }
@@ -822,6 +830,7 @@ fn put_all(doc: &mut SongDoc, puts: &[Put]) -> Result<(), EditError> {
 fn waiting_for_others(doc: &SongDoc, puts: &[Put]) -> Option<SongDoc> {
     let mut copy = doc.clone();
     let mut rest: Vec<&Put> = puts.iter().collect();
+    rename_scenes_back(&mut copy, &rest);
     while !rest.is_empty() {
         let before = rest.len();
         rest.retain(|(target, value, _)| {
@@ -839,6 +848,37 @@ fn waiting_for_others(doc: &SongDoc, puts: &[Put]) -> Option<SongDoc> {
     Some(copy)
 }
 
+/// Renames back each scene `puts` take away whose place and slots one they
+/// bring back has: a scene rename the run made, undone in place so its
+/// table keeps its comments (a put writes a fresh table). The song is the
+/// one the two puts would give; they then change nothing.
+fn rename_scenes_back(doc: &mut SongDoc, puts: &[&Put]) {
+    for (target, value, _) in puts {
+        let Target::Scene(to) = target else {
+            continue;
+        };
+        if value.is_null() || doc.song().scenes.contains_key(to) {
+            continue;
+        }
+        let from = puts.iter().find_map(|(other, gone, _)| match other {
+            Target::Scene(from) if gone.is_null() => {
+                let index = doc.song().scenes.get_index_of(from)?;
+                let now = target_value(doc.song(), other);
+                let same = value["index"].as_u64() == u64::try_from(index).ok()
+                    && without_index(&now) == without_index(value);
+                same.then(|| from.clone())
+            }
+            _ => None,
+        });
+        if let Some(from) = from {
+            let mut next = doc.clone();
+            if next.rename_scene(&from, to).is_ok() {
+                *doc = next;
+            }
+        }
+    }
+}
+
 fn reverted_items(puts: Vec<Put>) -> Vec<TargetItem> {
     puts.into_iter()
         .flat_map(|(target, _, items)| {
@@ -851,12 +891,13 @@ fn reverted_items(puts: Vec<Put>) -> Vec<TargetItem> {
 }
 
 /// Whether `x` and `y` are the same value of the planned target: a track
-/// regardless of its position; an effect chain by its devices' ids and
-/// modules in order, plus the whole of each device the run added (the
-/// others' params are targets of their own); anything else exactly.
+/// or a scene regardless of its position (the scene order is a target of
+/// its own); an effect chain by its devices' ids and modules in order,
+/// plus the whole of each device the run added (the others' params are
+/// targets of their own); anything else exactly.
 fn approx(p: &Plan, x: &Value, y: &Value) -> bool {
     match &p.target {
-        Target::Track(_) => without_index(x) == without_index(y),
+        Target::Track(_) | Target::Scene(_) => without_index(x) == without_index(y),
         Target::Fx(_) => {
             let before = device_keys(&p.before);
             let added: Vec<(&str, &str)> = device_keys(&p.after)
@@ -896,8 +937,22 @@ fn device_ids(v: &Value) -> Vec<&str> {
 }
 
 /// Whether a change to one target can change the other. Each side is a
-/// target with its old and new value.
+/// target with its old and new value. The scene order (`scenes`) holds
+/// which scenes there are and their order, not their slots: it overlaps
+/// itself and every `scenes.<s>`, not the slot leaves under them.
 fn overlap(a: (&Target, &Value, &Value), b: (&Target, &Value, &Value)) -> bool {
+    let order_and_slot = |x: &Target, y: &Target| {
+        matches!(
+            (x, y),
+            (
+                Target::SceneOrder,
+                Target::Value(SongPath::SceneSlot { .. })
+            )
+        )
+    };
+    if order_and_slot(a.0, b.0) || order_and_slot(b.0, a.0) {
+        return false;
+    }
     let (x, y) = (a.0.to_string(), b.0.to_string());
     x == y || under(&x, &y) || under(&y, &x) || holds(a, b.0) || holds(b, a.0)
 }
@@ -908,11 +963,15 @@ fn under(part: &str, whole: &str) -> bool {
     part.strip_prefix(whole).is_some_and(|r| r.starts_with('.'))
 }
 
-/// The holdings the target strings do not show: a track holds its lanes,
-/// an instrument or chain the params of its devices (in either value).
+/// The holdings the target strings do not show: a track holds its lanes
+/// and its slot in every scene, an instrument or chain the params of its
+/// devices (in either value).
 fn holds((whole, old, new): (&Target, &Value, &Value), part: &Target) -> bool {
     match (whole, part) {
-        (Target::Track(t), Target::Lanes { track, .. }) => t == track,
+        (
+            Target::Track(t),
+            Target::Lanes { track, .. } | Target::Value(SongPath::SceneSlot { track, .. }),
+        ) => t == track,
         (
             Target::Instrument(t) | Target::Fx(t),
             Target::Value(SongPath::TrackParam { track, param }),
@@ -925,7 +984,8 @@ fn holds((whole, old, new): (&Target, &Value, &Value), part: &Target) -> bool {
 
 /// The plan of the item the run created that `target` is a part of: a
 /// track (anything under `tracks.<t>`), an effect (its params and
-/// settings), a new instrument (the same) or a clip (its leaves).
+/// settings), a new instrument (the same), a clip (its leaves) or a scene
+/// (its slots).
 fn owner(plans: &[Plan], target: &Target) -> Option<usize> {
     let find = |item: Target, created: &dyn Fn(&Plan) -> bool| {
         plans.iter().position(|p| p.target == item && created(p))
@@ -966,6 +1026,9 @@ fn owner(plans: &[Plan], target: &Target) -> Option<usize> {
     {
         return find(Target::Clip(clip.clone()), &new);
     }
+    if let Target::Value(SongPath::SceneSlot { scene, .. }) = target {
+        return find(Target::Scene(scene.clone()), &new);
+    }
     None
 }
 
@@ -974,6 +1037,17 @@ fn owner(plans: &[Plan], target: &Target) -> Option<usize> {
 /// and is kept.
 fn fold(item: &Target, after: &mut Value, c: &TargetChange) {
     let new = c.new.clone();
+    // A slot is a key of the scene's `slots`: an emptied one has none.
+    if let (Target::Scene(_), Target::Value(SongPath::SceneSlot { track, .. })) = (item, &c.target)
+    {
+        if let Some(slots) = after.get_mut("slots").and_then(Value::as_object_mut) {
+            match new {
+                Value::Null => slots.remove(track),
+                clip => slots.insert(track.clone(), clip),
+            };
+        }
+        return;
+    }
     let slot = match (item, &c.target) {
         (Target::Track(_), Target::Instrument(_)) => after.get_mut("instrument"),
         (Target::Track(_), Target::Fx(_)) => after.get_mut("fx"),
