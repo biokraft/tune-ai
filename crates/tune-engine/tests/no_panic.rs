@@ -10,8 +10,8 @@ use tune_dsp::acid303::AcidPattern;
 use tune_dsp::{DrumPattern, STRIP_PARAMS};
 use tune_engine::{CompiledSong, RenderOptions, render};
 use tune_song::{
-    Clip, ClipKind, Device, Lane, MIX_TRACK_ID, Mix, MixUnit, ModuleDescriptor, Placement,
-    Registry, Section, Song, Track, parse_song,
+    Clip, ClipKind, Device, Lane, MIX_TRACK_ID, Mix, MixUnit, ModuleDescriptor, Note, NoteClip,
+    Placement, Registry, Section, Song, TICKS_PER_STEP, Track, parse_song,
 };
 
 const SONGS: usize = 300;
@@ -62,7 +62,47 @@ fn some_params(rng: &mut Rng, device: &mut Device) {
     }
 }
 
+/// A notes clip of 1 to 4 bars with 0 to 12 notes: starts and lengths in
+/// random ticks (overlaps and chords included), random pitches and
+/// velocities. Now and then a note runs past the clip's end and is refused.
+fn notes_clip(rng: &mut Rng) -> Clip {
+    let bars = rng.int(1, 4);
+    let end = bars * 16 * TICKS_PER_STEP;
+    let mut starts: Vec<u32> = (0..rng.int(0, 12))
+        .map(|_| {
+            if rng.chance(30) {
+                // On the grid, where chords and loop ends meet.
+                TICKS_PER_STEP * rng.int(0, 16 * bars - 1)
+            } else {
+                rng.int(0, end - 1)
+            }
+        })
+        .collect();
+    starts.sort_unstable();
+    let notes = starts
+        .into_iter()
+        .map(|start| {
+            let room = end - start;
+            let len = if rng.chance(3) {
+                room + 1
+            } else {
+                rng.int(1, room.min(8 * TICKS_PER_STEP))
+            };
+            Note {
+                start,
+                len,
+                pitch: rng.int(0, 127) as u8,
+                velocity: rng.int(1, 127) as u8,
+            }
+        })
+        .collect();
+    Clip::Notes(NoteClip { bars, notes })
+}
+
 fn clip(rng: &mut Rng) -> Clip {
+    if rng.chance(30) {
+        return notes_clip(rng);
+    }
     let steps = rng.int(1, 64) as usize;
     if rng.chance(50) {
         const TOKENS: [&str; 7] = ["C2", "C2!", "C3~", ".", "D#2", "A#1!~", "G2"];
@@ -223,7 +263,7 @@ fn compile_never_panics_on_valid_songs() {
     let registry = Registry::builtin();
     let mut rng = Rng(1);
     let mut accepted = 0;
-    let mut kinds = [0usize; 2];
+    let mut kinds = [0usize; 3];
     for _ in 0..SONGS {
         let text = song(&mut rng, registry).to_toml();
         let Ok(song) = parse_song(&text) else {
@@ -231,7 +271,12 @@ fn compile_never_panics_on_valid_songs() {
         };
         accepted += 1;
         for c in song.clips.values() {
-            kinds[usize::from(c.kind() == ClipKind::Drum)] += 1;
+            let kind = match c.kind() {
+                ClipKind::Acid => 0,
+                ClipKind::Drum => 1,
+                ClipKind::Notes => 2,
+            };
+            kinds[kind] += 1;
         }
         let compiled = Arc::new(CompiledSong::new(&song, song.sample_rate.unwrap()));
         render_bars(&compiled, 0);

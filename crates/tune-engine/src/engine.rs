@@ -11,11 +11,12 @@ use std::sync::Arc;
 use tune_dsp::acid303::AcidStep;
 use tune_dsp::{ParamSpec, STRIP_PARAMS};
 use tune_modules::{DRUM_PITCH, Effect, EventCtx, Instrument, NoteEvent, NoteId};
-use tune_song::lane_value;
+use tune_song::{TICKS_PER_STEP, lane_value};
 
 use crate::clock::hit_seed;
 use crate::compile::{
-    Cell, CompiledClip, CompiledDevice, CompiledSong, CompiledTrack, MIX_TRACK, ParamTarget,
+    Cell, CellSource, CompiledClip, CompiledDevice, CompiledSong, CompiledTrack, MIX_TRACK,
+    ParamTarget,
 };
 use crate::live::SongUpdate;
 use crate::mixer::{Meter, MixRuntime, Strip};
@@ -38,13 +39,40 @@ pub struct TrackRuntime {
     seq: Sequencer,
 }
 
-/// The step notes a track's instrument is sounding.
+/// The notes a track's instrument is sounding, from step clips and from
+/// note clips.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct Sequencer {
-    /// A note that slides into the next step: its Off follows that step's On.
+    /// A step note that slides into the next step: its Off follows that
+    /// step's On.
     held: Option<(NoteId, u8)>,
-    /// A note that does not slide: its Off and the sample it lands on.
+    /// A step note that does not slide: its Off and the sample it lands on.
+    /// Only step notes use this slot (see [`deliver_off`](Self::deliver_off)).
     off: Option<(u64, NoteId, u8)>,
+    /// The placement and song step of the last step boundary, `None` when no
+    /// placement played there (or none has been played since a reset).
+    last: Option<(CellSource, u64)>,
+    /// A note-clip On went out since the last `AllOff`: a cut (a placement
+    /// end, a loop wrap, a source change) must end it.
+    notes_live: bool,
+    /// The note-clip events of the current step not yet delivered.
+    cursor: Option<NoteCursor>,
+}
+
+/// The rest of one step's note-clip events: `events[next..end]` of clip
+/// `clip`, in clip order.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct NoteCursor {
+    /// Index into `CompiledSong::clips`.
+    clip: usize,
+    next: usize,
+    end: usize,
+    /// The song step the events fall in.
+    step: u64,
+    /// The clip's tick at the step's start (`24 * clip step`).
+    clip_tick: u32,
+    /// `hit_seed(track seed, step)`.
+    seed: u64,
 }
 
 impl Sequencer {
@@ -57,6 +85,11 @@ impl Sequencer {
     /// track with noise seed `seed`. At a step start (`boundary`, before the
     /// step's events) it goes whatever its sample, so no step note outlasts
     /// the next step's start; with a gate of half a step, one never does.
+    ///
+    /// The forced delivery applies only to step notes: note-clip Offs never
+    /// enter this slot. They wait in the `cursor` at their own samples, so a
+    /// note-clip note may run for many steps; one only ends early through
+    /// `AllOff` (see [`cut`](Self::cut)).
     fn deliver_off(
         &mut self,
         instrument: &mut dyn Instrument,
@@ -142,6 +175,101 @@ impl Sequencer {
         if let Some((id, pitch)) = self.held.take() {
             instrument.note(&NoteEvent::Off { id, pitch }, ctx);
         }
+    }
+
+    /// At the start of step `ctx.step`, before its events: sends `AllOff`
+    /// when a note-clip note may still sound and the track does not play
+    /// on from step `ctx.step - 1` of the same placement `src` (after a
+    /// seek, a loop wrap, a placement's end or a change of placement), then
+    /// remembers `src` at this step. Events of the step before still in the
+    /// cursor (none: every tick of a step starts before the next step) go
+    /// first when due; the rest are dropped.
+    fn cut(
+        &mut self,
+        instrument: &mut dyn Instrument,
+        song: &CompiledSong,
+        src: Option<CellSource>,
+        ctx: &EventCtx,
+    ) {
+        self.deliver_notes(instrument, song, ctx.pos);
+        self.cursor = None;
+        let continuous = self.last == src.map(|s| (s, ctx.step.wrapping_sub(1)));
+        if !continuous && self.notes_live {
+            instrument.note(&NoteEvent::AllOff, ctx);
+            self.notes_live = false;
+        }
+        self.last = src.map(|s| (s, ctx.step));
+    }
+
+    /// When placement `src` plays a notes clip: queues the events of song
+    /// step `step` (of a track with noise seed `seed`) and delivers those
+    /// landing on `pos`, the step's first sample. Returns whether an On was
+    /// delivered.
+    fn notes_step(
+        &mut self,
+        instrument: &mut dyn Instrument,
+        song: &CompiledSong,
+        src: CellSource,
+        step: u64,
+        seed: u64,
+        pos: u64,
+    ) -> bool {
+        let CompiledClip::Notes(clip) = &song.clips[src.clip] else {
+            return false;
+        };
+        let cs = (step - src.start_step + src.offset_steps) % clip.steps;
+        let cs_index = cs as usize;
+        self.cursor = Some(NoteCursor {
+            clip: src.clip,
+            next: clip.step_starts[cs_index],
+            end: clip.step_starts[cs_index + 1],
+            step,
+            clip_tick: (cs as u32) * TICKS_PER_STEP,
+            seed: hit_seed(seed, step),
+        });
+        self.deliver_notes(instrument, song, pos)
+    }
+
+    /// Delivers, in order, every cursor event whose sample is `pos` (or
+    /// earlier): event tick `t` of step `k` lands on
+    /// `tick_start(24 * k + t - clip_tick)` with seed `hit_seed ^ (t -
+    /// clip_tick)`. Returns whether an On was delivered; an On marks the
+    /// notes live.
+    fn deliver_notes(
+        &mut self,
+        instrument: &mut dyn Instrument,
+        song: &CompiledSong,
+        pos: u64,
+    ) -> bool {
+        let Some(mut cur) = self.cursor else {
+            return false;
+        };
+        let Some(CompiledClip::Notes(clip)) = song.clips.get(cur.clip) else {
+            self.cursor = None;
+            return false;
+        };
+        let mut on = false;
+        while cur.next < cur.end {
+            let Some(ev) = clip.events.get(cur.next) else {
+                break;
+            };
+            let in_step = ev.tick.saturating_sub(cur.clip_tick);
+            let tick = u64::from(TICKS_PER_STEP) * cur.step + u64::from(in_step);
+            if song.clock.tick_start(tick) > pos {
+                break;
+            }
+            let ctx = EventCtx {
+                pos,
+                step: cur.step,
+                seed: cur.seed ^ u64::from(in_step),
+            };
+            instrument.note(&ev.event, &ctx);
+            on |= matches!(ev.event, NoteEvent::On { .. });
+            cur.next += 1;
+        }
+        self.cursor = (cur.next < cur.end && cur.next < clip.events.len()).then_some(cur);
+        self.notes_live |= on;
+        on
     }
 }
 
@@ -606,16 +734,24 @@ impl Engine {
     ///    at the song end; re-apply static params (tracks, strips and mix) on
     ///    a region change (or the first step after `new`/`seek`); apply the
     ///    region's lanes for this sample; apply the knob overrides; deliver
-    ///    note events on every track in order (a scheduled Off still
-    ///    pending, then the step's: an On for a note or a hit, the Off of a
-    ///    note that slid into this step); if the duck source got an On
-    ///    (muted or not), trigger every track's ducker; advance the step.
+    ///    note events on every track in order (a step note's scheduled Off
+    ///    still pending; `AllOff` when a note-clip note may sound and the
+    ///    track does not play on from the previous step of the same
+    ///    placement, as after a seek, a loop wrap or a placement's end;
+    ///    then the step's: an On for a note or a hit, the Off of a note that
+    ///    slid into this step, or the note-clip events of the step that
+    ///    land on this sample, the rest waiting in the track's cursor); if
+    ///    the duck source got an On (muted or not), trigger every track's
+    ///    ducker; advance the step.
     ///    Elsewhere: apply the region's lanes, then the overrides, for this
-    ///    sample, then deliver every track's scheduled Off that lands on it
-    ///    (a step note that does not slide ends `gate_samples` after its
-    ///    On). Lanes and overrides run exactly once per sample (overrides
-    ///    only when one is set), always before the note events, so a hit
-    ///    reads the overridden value.
+    ///    sample, then deliver every track's scheduled step Off that lands
+    ///    on it (a step note that does not slide ends `gate_samples` after
+    ///    its On), then the cursor's note-clip events that land on it, in
+    ///    order (event tick `t` of step `k` lands on
+    ///    `clock.tick_start(24 * k + t)`); if the duck source got an On,
+    ///    trigger every track's ducker. Lanes and overrides run exactly once
+    ///    per sample (overrides only when one is set), always before the
+    ///    note events, so a hit reads the overridden value.
     /// 3. For every track in song order: instrument, then fx in order, then
     ///    the ducker (`y`); `l, r = y·gain·pan`; write its stem; when audible
     ///    (mute and solo), add `l, r` to the master and `y·gain·send` to the
@@ -705,11 +841,21 @@ impl Engine {
                     seed: hit_seed(track.seed, step),
                 };
                 let instrument = rt.instrument.as_mut();
+                // Forces only a step note's Off (see `deliver_off`).
                 rt.seq
                     .deliver_off(instrument, self.pos, step, track.seed, true);
+                let src = song.regions[region].cells[t];
+                rt.seq.cut(instrument, song, src, &ctx);
+                // A notes clip's cell is `Rest`, so a step note before it
+                // does not slide into it.
                 let cell = cell_at(song, region, t, step);
                 let next = cell_at(song, next_region, t, next_step);
-                let on = rt.seq.step(instrument, cell, next, &ctx, self.gate_samples);
+                let mut on = rt.seq.step(instrument, cell, next, &ctx, self.gate_samples);
+                if let Some(src) = src {
+                    on |= rt
+                        .seq
+                        .notes_step(instrument, song, src, step, track.seed, self.pos);
+                }
                 duck |= on && song.mix.duck_source == Some(t);
             }
             if duck {
@@ -726,9 +872,18 @@ impl Engine {
             // The step being played; the first sample after `new`, `seek`
             // or a swap is always a step start.
             let step = self.step.saturating_sub(1);
-            for (rt, track) in self.tracks.iter_mut().zip(&song.tracks) {
+            let mut duck = false;
+            for (t, (rt, track)) in self.tracks.iter_mut().zip(&song.tracks).enumerate() {
+                let instrument = rt.instrument.as_mut();
                 rt.seq
-                    .deliver_off(rt.instrument.as_mut(), self.pos, step, track.seed, false);
+                    .deliver_off(instrument, self.pos, step, track.seed, false);
+                let on = rt.seq.deliver_notes(instrument, song, self.pos);
+                duck |= on && song.mix.duck_source == Some(t);
+            }
+            if duck {
+                for rt in &mut self.tracks {
+                    rt.strip.trigger_duck();
+                }
             }
         }
 
@@ -913,7 +1068,8 @@ fn cell_at(song: &CompiledSong, region: usize, t: usize, step: u64) -> &Cell {
                     let offset = step - source.start_step + source.offset_steps;
                     &clip[(offset % clip.len() as u64) as usize]
                 }
-                // The engine plays no events from a notes clip yet.
+                // A notes clip plays events, not cells (see
+                // `Sequencer::notes_step`).
                 CompiledClip::Notes(_) => &REST,
             }
         }
