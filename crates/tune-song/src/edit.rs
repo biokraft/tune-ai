@@ -1,6 +1,7 @@
 //! Structural edits of a song's tracks, devices and clips: add, remove or
 //! rename a track, add, remove, move or rename an effect, rename a device,
-//! swap an instrument, add, remove, rename or duplicate a clip.
+//! swap an instrument, add, remove, rename or duplicate a clip, add, move,
+//! resize or remove a placement.
 //!
 //! Like the section operations, these do not validate their result (the
 //! caller re-parses it, and so gets the validator's positioned messages for
@@ -77,6 +78,10 @@ pub enum EditOpError {
     UnknownClipKind { name: String, expected: String },
     #[error("`send` and `duck` are reserved for the strip params")]
     StripReserved,
+    /// `bar` is 0-based, as the placement edits take it; the message counts
+    /// from 1.
+    #[error("track `{track}` has no placement at bar {}", .bar + 1)]
+    NoSuchPlacement { track: String, bar: u32 },
     #[error("index {index} is out of bounds (the chain has {len})")]
     IndexOutOfBounds { index: usize, len: usize },
 }
@@ -370,6 +375,100 @@ pub fn duplicate_clip(song: &Song, id: &str, to: &str) -> Result<Edited, EditOpE
     let copy = song.clips[at].clone();
     song.clips.shift_insert(at + 1, to.to_owned(), copy);
     Ok(untouched_lanes(song, Removed::default()))
+}
+
+/// Adds `placement` to `track`'s `play`, before the first one that starts
+/// later, so the list stays in time order. Whether it overlaps another, runs
+/// past the song's end or names a clip the track cannot play is for the
+/// validator.
+pub fn add_placement(
+    song: &Song,
+    track: &str,
+    placement: Placement,
+) -> Result<Edited, EditOpError> {
+    track_of(song, track)?;
+    let mut song = song.clone();
+    insert_placement(&mut song.tracks[track].play, placement);
+    Ok(untouched_lanes(song, Removed::default()))
+}
+
+/// Moves the placement of `track` that starts at 0-based bar `start_bar` to
+/// start at `to`, keeping its length and clip phase. The list is put back in
+/// time order.
+pub fn move_placement(
+    song: &Song,
+    track: &str,
+    start_bar: u32,
+    to: u32,
+) -> Result<Edited, EditOpError> {
+    let mut song = song.clone();
+    let play = &mut song
+        .tracks
+        .get_mut(track)
+        .ok_or_else(|| no_track(track))?
+        .play;
+    let at = placement_at(play, track, start_bar)?;
+    let mut moved = play.remove(at);
+    moved.start_bar = to;
+    insert_placement(play, moved);
+    Ok(untouched_lanes(song, Removed::default()))
+}
+
+/// Makes the placement of `track` that starts at 0-based bar `start_bar`
+/// `bars` long. Whether `bars` is valid is for the validator.
+pub fn resize_placement(
+    song: &Song,
+    track: &str,
+    start_bar: u32,
+    bars: u32,
+) -> Result<Edited, EditOpError> {
+    let mut song = song.clone();
+    let play = &mut song
+        .tracks
+        .get_mut(track)
+        .ok_or_else(|| no_track(track))?
+        .play;
+    let at = placement_at(play, track, start_bar)?;
+    play[at].bars = bars;
+    Ok(untouched_lanes(song, Removed::default()))
+}
+
+/// Removes the placement of `track` that starts at 0-based bar `start_bar`,
+/// and lists it in `removed.placements`.
+pub fn remove_placement(song: &Song, track: &str, start_bar: u32) -> Result<Edited, EditOpError> {
+    let mut song = song.clone();
+    let play = &mut song
+        .tracks
+        .get_mut(track)
+        .ok_or_else(|| no_track(track))?
+        .play;
+    let at = placement_at(play, track, start_bar)?;
+    let gone = play.remove(at);
+    let removed = Removed {
+        placements: vec![(track.to_owned(), gone)],
+        ..Removed::default()
+    };
+    Ok(untouched_lanes(song, removed))
+}
+
+fn no_track(id: &str) -> EditOpError {
+    EditOpError::NoSuchTrack(id.to_owned())
+}
+
+/// Puts `placement` before the first one that starts later.
+fn insert_placement(play: &mut Vec<Placement>, placement: Placement) {
+    let at = play.partition_point(|p| p.start_bar <= placement.start_bar);
+    play.insert(at, placement);
+}
+
+/// The index of the placement that starts at 0-based bar `start_bar`.
+fn placement_at(play: &[Placement], track: &str, start_bar: u32) -> Result<usize, EditOpError> {
+    play.iter()
+        .position(|p| p.start_bar == start_bar)
+        .ok_or_else(|| EditOpError::NoSuchPlacement {
+            track: track.to_owned(),
+            bar: start_bar,
+        })
 }
 
 fn clip_of<'s>(song: &'s Song, id: &str) -> Result<&'s Clip, EditOpError> {
