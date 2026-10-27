@@ -305,7 +305,8 @@ The producer may have the studio (app or browser) open on the same song.
   | `sections[<i>].name` | string; `<i>` is 0-based |
   | `sections[<i>].bars` | integer, 1 to 1024; resizes the section: placements and stretches that ran to its end run to the new end (grow) or are cut at it (shrink), later ones move |
   | `sections[<i>].play.<t>` | clip id: replaces what the track plays inside the section with one placement covering it; empty removes them |
-  | `tracks.<t>`, `sections`, `sections[<i>].lanes`, `song.version` | read-only (appear in `tune changes`) |
+  | `scenes.<s>.slots.<t>` | clip id: puts the clip in the scene's slot for track `t` (a clip the track's instrument can play); empty clears the slot |
+  | `tracks.<t>`, `sections`, `sections[<i>].lanes`, `scenes`, `scenes.<s>`, `song.version` | read-only (appear in `tune changes`) |
 
   Section operations (`play`, `bars`) rewrite a track's `play` list and drop
   the comments inside it.

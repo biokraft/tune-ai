@@ -1039,3 +1039,22 @@ fn apply_now_writes_pending_edits_first_as_their_own_step() {
     core.undo(Source::Human).unwrap();
     assert_eq!(disk(&s), FIXTURE);
 }
+
+#[test]
+fn a_song_with_scenes_opens_and_edits() {
+    const SESSION: &str = include_str!("../../tune-song/tests/fixtures/session.toml");
+    let s = song_with(SESSION);
+    let mut core = open(&s);
+    core.view();
+    core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
+    core.flush().unwrap();
+    let text = disk(&s);
+    assert_eq!(
+        text,
+        SESSION.replace("\"acid303.cutoff\" = 500", "\"acid303.cutoff\" = 820")
+    );
+    assert!(
+        text.contains("# jam rows\n[scenes.groove]\nslots = { kick = \"k4\", acid = \"a1\" }\n")
+    );
+    assert!(text.contains("# hats alone\n[scenes.break]\nslots = { hat = \"h\" }\n"));
+}

@@ -54,6 +54,14 @@ pub enum SongPath {
     SectionLanes(usize),
     /// `sections` (read-only: the arrangement; edited by the section ops)
     Sections,
+    /// `scenes` (read-only: the scene ids in row order; edited by the scene
+    /// ops)
+    Scenes,
+    /// `scenes.<s>` (read-only: the scene as a whole)
+    Scene { scene: String },
+    /// `scenes.<s>.slots.<t>`: the clip track `t` holds in scene `s`, or
+    /// `null` for an empty slot.
+    SceneSlot { scene: String, track: String },
 }
 
 /// A track's mixer fields.
@@ -112,7 +120,12 @@ impl SongPath {
     pub fn is_read_only(&self) -> bool {
         matches!(
             self,
-            Self::Version | Self::Track { .. } | Self::SectionLanes(_) | Self::Sections
+            Self::Version
+                | Self::Track { .. }
+                | Self::SectionLanes(_)
+                | Self::Sections
+                | Self::Scenes
+                | Self::Scene { .. }
         )
     }
 }
@@ -136,6 +149,9 @@ impl fmt::Display for SongPath {
             Self::SectionPlay { section, track } => write!(f, "sections[{section}].play.{track}"),
             Self::SectionLanes(i) => write!(f, "sections[{i}].lanes"),
             Self::Sections => f.write_str("sections"),
+            Self::Scenes => f.write_str("scenes"),
+            Self::Scene { scene } => write!(f, "scenes.{scene}"),
+            Self::SceneSlot { scene, track } => write!(f, "scenes.{scene}.slots.{track}"),
         }
     }
 }
@@ -148,7 +164,7 @@ impl FromStr for SongPath {
             format!(
                 "unknown path `{s}` (expected e.g. song.bpm, tracks.<track>.gain_db, \
                  tracks.<track>.<param id>, mix.<param id>, clips.<clip>.steps|notes|bars, \
-                 sections[<i>].bars)"
+                 sections[<i>].bars, scenes.<scene>.slots.<track>)"
             )
         })
     }
@@ -163,6 +179,12 @@ fn parse(s: &str) -> Option<SongPath> {
     }
     if s == "sections" {
         return Some(SongPath::Sections);
+    }
+    if s == "scenes" {
+        return Some(SongPath::Scenes);
+    }
+    if let Some(rest) = s.strip_prefix("scenes.") {
+        return parse_scene(rest);
     }
     if let Some(rest) = s.strip_prefix("tracks.") {
         return parse_track(rest);
@@ -208,6 +230,20 @@ fn parse(s: &str) -> Option<SongPath> {
         };
     }
     None
+}
+
+/// Everything after `scenes.`.
+fn parse_scene(rest: &str) -> Option<SongPath> {
+    let Some((scene, slot)) = rest.split_once('.') else {
+        return is_id(rest).then(|| SongPath::Scene {
+            scene: rest.to_owned(),
+        });
+    };
+    let track = slot.strip_prefix("slots.")?;
+    (is_id(scene) && is_id(track)).then(|| SongPath::SceneSlot {
+        scene: scene.to_owned(),
+        track: track.to_owned(),
+    })
 }
 
 /// Everything after `tracks.`.
@@ -312,6 +348,12 @@ mod tests {
             "sections[0].play.",
             "sections[01].bars",
             "sections.0.bars",
+            "scenes.",
+            "scenes.Groove",
+            "scenes.groove.",
+            "scenes.groove.slots",
+            "scenes.groove.slots.",
+            "scenes.groove.acid",
         ] {
             assert!(bad.parse::<SongPath>().is_err(), "{bad:?} should not parse");
         }

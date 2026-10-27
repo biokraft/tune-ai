@@ -503,3 +503,57 @@ fn note_edits_are_clip_note_changes() {
     );
     assert!(diff_songs(&song(NOTE_SONG), &song(NOTE_SONG)).is_empty());
 }
+
+const SESSION: &str = include_str!("../../tune-song/tests/fixtures/session.toml");
+
+#[test]
+fn diff_finds_scene_changes() {
+    let old = song(SESSION);
+
+    let mut added = old.clone();
+    added
+        .scenes
+        .insert("jam".into(), tune_song::Scene::default());
+    assert_eq!(
+        diff_songs(&old, &added),
+        vec![change("scenes.jam", Value::Null, json!({ "slots": {} }))]
+    );
+    assert_eq!(
+        diff_songs(&added, &old),
+        vec![change("scenes.jam", json!({ "slots": {} }), Value::Null)]
+    );
+
+    let mut moved = old.clone();
+    moved.scenes.move_index(1, 0);
+    assert_eq!(
+        diff_songs(&old, &moved),
+        vec![change(
+            "scenes",
+            json!(["groove", "break"]),
+            json!(["break", "groove"])
+        )]
+    );
+
+    let mut cleared = old.clone();
+    cleared.scenes["groove"].slots.shift_remove("acid");
+    assert_eq!(
+        diff_songs(&old, &cleared),
+        vec![change("scenes.groove.slots.acid", json!("a1"), Value::Null)]
+    );
+
+    // Slots appear in old's key order, then new's.
+    let mut swapped = old.clone();
+    swapped.scenes["groove"]
+        .slots
+        .insert("hat".into(), "h".into());
+    swapped.scenes["groove"]
+        .slots
+        .insert("kick".into(), "h".into());
+    assert_eq!(
+        diff_songs(&old, &swapped),
+        vec![
+            change("scenes.groove.slots.kick", json!("k4"), json!("h")),
+            change("scenes.groove.slots.hat", Value::Null, json!("h")),
+        ]
+    );
+}
