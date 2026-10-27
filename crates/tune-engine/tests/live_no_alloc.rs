@@ -2,9 +2,10 @@
 //! nor free memory, even across blocks that apply a swap (one that keeps the
 //! mix, one that rebuilds the delay for a new bpm, master-mode switches that
 //! crossfade between the clipper and the limiter, and swaps that add,
-//! reorder, replace or remove devices or move a placement, and swaps that
-//! edit a note clip while its notes are held), a seek, a loop
-//! wrap, the song end and knob overrides on tracks, strips and the mix.
+//! reorder, replace or remove devices or move a placement, swaps that edit
+//! a note clip while its notes are held, and structural swaps that
+//! crossfade a track's old and new paths), a seek, a loop wrap, the song
+//! end and knob overrides on tracks, strips and the mix.
 //!
 //! A counting global allocator counts every allocation, reallocation and
 //! deallocation made while the thread-local "audio" flag is set. The flag is
@@ -494,6 +495,71 @@ fn note_clip_swaps_never_allocate() {
         audio(&mut p, &mut out, STEP, 512);
         assert_eq!(ctl.swaps_applied(), 1 + i as u64);
         assert_eq!(ctl.collect_garbage(), 1);
+    }
+    assert_no_alloc();
+}
+
+#[test]
+fn structural_swaps_fade_without_alloc() {
+    const STEP: u64 = 6000;
+    let eq2 = Device {
+        id: "eq2".into(),
+        ..Device::new("eq", &EQ)
+    };
+    let with = |edit: &dyn Fn(&mut tune_song::Song)| compile_song(&variant_of(MIXED, edit));
+    let songs = [
+        // An eq added after the acid's two devices (they copy their state).
+        with(&|s| {
+            s.tracks.get_mut("acid").unwrap().fx.push(eq2.clone());
+        }),
+        // Its two eqs the other way round.
+        with(&|s| {
+            let fx = &mut s.tracks.get_mut("acid").unwrap().fx;
+            fx.push(eq2.clone());
+            fx.swap(1, 2);
+        }),
+        // The distortion's mode changed.
+        with(&|s| {
+            let fx = &mut s.tracks.get_mut("acid").unwrap().fx;
+            fx.push(eq2.clone());
+            fx.swap(1, 2);
+            fx[0].settings[0] = "hard";
+        }),
+        // A track added: it fades in.
+        with(&|s| {
+            let fx = &mut s.tracks.get_mut("acid").unwrap().fx;
+            fx.push(eq2.clone());
+            fx.swap(1, 2);
+            fx[0].settings[0] = "hard";
+            s.tracks.insert(
+                "clap".into(),
+                Track {
+                    instrument: Device::new("clap", &CLAP),
+                    ..s.tracks["kick"].clone()
+                },
+            );
+        }),
+        // The hat (into the reverb) removed: it fades out.
+        with(&|s| {
+            let fx = &mut s.tracks.get_mut("acid").unwrap().fx;
+            fx.push(eq2.clone());
+            fx.swap(1, 2);
+            fx[0].settings[0] = "hard";
+            s.tracks.shift_remove("hat");
+            s.clips.shift_remove("h");
+        }),
+    ];
+    let (mut ctl, mut p) = live(compiled(MIXED), 0, None);
+    let mut out = vec![0.0f32; 2 * 4096];
+    // Section `b`: the acid sounds, into both buses.
+    ctl.seek(2).unwrap();
+    audio(&mut p, &mut out, 1000, 512);
+    for (i, next) in songs.into_iter().enumerate() {
+        ctl.swap(next).unwrap();
+        // The swap lands 5000 frames in; its fade ends 480 frames later.
+        audio(&mut p, &mut out, STEP, if i % 2 == 0 { 512 } else { 4096 });
+        assert_eq!(ctl.swaps_applied(), 1 + i as u64);
+        assert_eq!(ctl.collect_garbage(), 1, "swap {i}");
     }
     assert_no_alloc();
 }
