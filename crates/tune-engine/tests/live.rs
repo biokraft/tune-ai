@@ -201,7 +201,8 @@ fn swap_removing_track() {
     out.extend(play(&mut p, END - 1000, 333));
     assert_eq!(ctl.swaps_applied(), 1);
     assert_bits(frames(&out, 0..STEP), frames(&ra, 0..STEP));
-    // The hat fades out over the first 480 frames.
+    // The hat fades out over the first 480 frames. It is silent there (its
+    // first hit is at step 2); `crossfade.rs` checks a sounding fade-out.
     assert_bits(frames(&out, STEP + 480..END), frames(&rb, STEP + 480..END));
 }
 
