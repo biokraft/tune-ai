@@ -267,6 +267,15 @@ fn failed(message: impl fmt::Display) -> Value {
     json!({ "ok": false, "error": message.to_string() })
 }
 
+/// The studio's error as a reply. A studio busy past the call's 5 s did
+/// not answer, which the client must hear as such, not as `timed out`.
+fn studio_failed(e: StudioError) -> Value {
+    match e {
+        StudioError::Timeout => failed(StudioError::NoAnswer),
+        other => failed(other),
+    }
+}
+
 /// Checks the secret before anything else, then runs the request.
 fn answer(line: &[u8], handle: &StudioHandle, secret: &Secret) -> Value {
     let Ok(mut request) = serde_json::from_slice::<Value>(line) else {
@@ -292,7 +301,7 @@ fn answer(line: &[u8], handle: &StudioHandle, secret: &Secret) -> Value {
                 let song = path.and_then(|p| fs::canonicalize(p).ok());
                 json!({ "ok": true, "song": song })
             }
-            Err(e) => failed(e),
+            Err(e) => studio_failed(e),
         },
         Request::Do {
             song,
@@ -315,7 +324,7 @@ fn answer(line: &[u8], handle: &StudioHandle, secret: &Secret) -> Value {
             };
             match handle.run_actions_on(Some(song), actions, Origin { source, run }) {
                 Ok(outcome) => json!({ "ok": true, "outcome": outcome }),
-                Err(e) => failed(e),
+                Err(e) => studio_failed(e),
             }
         }
     }
@@ -477,6 +486,18 @@ impl StudioLink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_studio_timeout_is_no_answer() {
+        assert_eq!(
+            studio_failed(StudioError::Timeout),
+            json!({ "ok": false, "error": "the studio did not answer; check it before retrying" })
+        );
+        assert_eq!(
+            studio_failed(StudioError::NoSong),
+            json!({ "ok": false, "error": "no song is open" })
+        );
+    }
 
     #[test]
     fn secrets_compare_whole() {
