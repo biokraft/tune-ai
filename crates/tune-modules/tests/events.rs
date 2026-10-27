@@ -5,8 +5,8 @@
 use tune_dsp::acid303::math::round_to_int;
 use tune_dsp::acid303::{Acid303, AcidGate, AcidStep};
 use tune_modules::{
-    ACID303, CLAP, DRUM_PITCH, EventCtx, HAT_CLOSED, HAT_OPEN, Instrument, KICK, NoteEvent, NoteId,
-    RIDE,
+    ACID303, CLAP, DISTORTION, DRUM_PITCH, EQ, Effect, EventCtx, HAT_CLOSED, HAT_OPEN, Instrument,
+    KICK, NoteEvent, NoteId, RIDE,
 };
 
 const RATE: f64 = 48_000.0;
@@ -226,4 +226,51 @@ fn drums_hit_on_note_on_and_ignore_offs() {
         let bits = |x: &[f64]| x.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(&only_on), bits(&with_offs), "{}", m.name);
     }
+}
+
+#[test]
+fn effects_copy_their_state() {
+    let mut rng = 7u64;
+    let mut noise = || (splitmix64(&mut rng) >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0;
+    let input: Vec<f64> = (0..2000).map(|_| noise()).collect();
+    let make = |hard: bool| -> Box<dyn Effect> {
+        if hard {
+            let mut d = DISTORTION.make_effect(RATE, &["hard"]).unwrap();
+            d.set_param("dist.drive", 18.0).unwrap();
+            d
+        } else {
+            let mut eq = EQ.make_effect(RATE, &[]).unwrap();
+            eq.set_param("eq.low_cut", 200.0).unwrap();
+            eq.set_param("eq.mid_gain", 6.0).unwrap();
+            eq.set_param("eq.high_cut", 5000.0).unwrap();
+            eq
+        }
+    };
+    let bits = |x: &[f64]| x.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+    for hard in [false, true] {
+        let mut a = make(hard);
+        for &x in &input[..1000] {
+            a.process(x);
+        }
+        // A fresh device at its defaults: only the copy makes it `a`.
+        let mut b = if hard {
+            DISTORTION.make_effect(RATE, &["hard"]).unwrap()
+        } else {
+            EQ.make_effect(RATE, &[]).unwrap()
+        };
+        assert!(a.copy_state_to(b.as_mut()), "hard = {hard}");
+        let next_a: Vec<f64> = input[1000..].iter().map(|&x| a.process(x)).collect();
+        let next_b: Vec<f64> = input[1000..].iter().map(|&x| b.process(x)).collect();
+        assert_eq!(bits(&next_a), bits(&next_b), "hard = {hard}");
+        let mut fresh = make(hard);
+        let unc: Vec<f64> = input[1000..].iter().map(|&x| fresh.process(x)).collect();
+        assert_ne!(
+            bits(&next_a),
+            bits(&unc),
+            "the state matters (hard = {hard})"
+        );
+    }
+    let eq = EQ.make_effect(RATE, &[]).unwrap();
+    let mut distortion = DISTORTION.make_effect(RATE, &["hard"]).unwrap();
+    assert!(!eq.copy_state_to(distortion.as_mut()));
 }

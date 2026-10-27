@@ -1,5 +1,7 @@
 //! The traits every instrument and effect implements.
 
+use std::any::Any;
+
 use tune_dsp::{ParamError, ParamSpec, find_spec};
 
 /// One note from its On to its Off; unique among the notes sounding on a track.
@@ -66,7 +68,7 @@ pub trait Instrument: Send {
 }
 
 /// A mono effect.
-pub trait Effect: Send {
+pub trait Effect: Send + Any {
     fn params(&self) -> &'static [ParamSpec];
     fn set_param_at(&mut self, index: usize, plain: f64);
 
@@ -79,4 +81,28 @@ pub trait Effect: Send {
 
     fn process(&mut self, x: f64) -> f64;
     fn reset(&mut self);
+
+    /// Copies this effect's whole DSP state into `to`, a device of the same module, without
+    /// allocating. False (the default) when `to` is another module or this one cannot.
+    ///
+    /// A hot reload that changes a track's signal path crossfades it: a device the swap keeps
+    /// copies itself into a stand-in that plays the old path out, so both paths start from the
+    /// same state. A device that cannot copy switches at once instead.
+    fn copy_state_to(&self, _to: &mut dyn Effect) -> bool {
+        false
+    }
+}
+
+/// `copy_state_to` for a module whose state is plain data: `to.clone_from(from)` after a
+/// downcast of `to` (via `&mut dyn Any`) to `T`. False when `to` is not a `T`. Allocates
+/// nothing as long as `T`'s clone does not (no heap fields).
+pub fn copy_state<T: Effect + Clone>(from: &T, to: &mut dyn Effect) -> bool {
+    let to: &mut dyn Any = to;
+    match to.downcast_mut::<T>() {
+        Some(to) => {
+            to.clone_from(from);
+            true
+        }
+        None => false,
+    }
 }
