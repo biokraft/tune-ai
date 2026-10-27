@@ -3,8 +3,8 @@
 //! edited section plays as before.
 
 use tune_song::{
-    ArrangeError, Arranged, LaneOrigin, Song, delete_section, duplicate_section, lane_value,
-    move_section, parse_song, resize_section, set_section_play,
+    ArrangeError, Arranged, LaneOrigin, Song, delete_section, duplicate_section, insert_section,
+    lane_value, move_section, parse_song, resize_section, set_section_play,
 };
 
 use LaneOrigin::{Copy, Kept, Split};
@@ -715,5 +715,77 @@ fn bars_out_of_range_reads_like_the_validator() {
             .iter()
             .any(|e| e.message == tune_song::section_bars_error(0)),
         "{errors:?}"
+    );
+}
+
+#[test]
+fn insert_section_splits_a_crossing_placement() {
+    let s = song(&[2, 2], &kick_hat(&[(0, 4, "c", 0)], &[]), "");
+    let a = insert_section(&s, 1, "break", 2).unwrap();
+    assert_eq!(
+        plays(&a.song, "kick"),
+        ps(&[(0, 2, "c", 0), (4, 2, "c", 2)])
+    );
+    assert_eq!(bars(&a.song), names(&[("s0", 2), ("break", 2), ("s1", 2)]));
+    assert_eq!(a.song.sections.iter().map(|s| s.bars).sum::<u32>(), 6);
+}
+
+#[test]
+fn insert_section_splits_and_shifts_stretches() {
+    let s = song(
+        &[2, 2],
+        &kick_hat(&[], &[]),
+        &(lane("kick.kick.tune", 0, 4, &[(0.0, 0.0), (4.0, 1.0)])
+            + &lane("kick.kick.decay", 2, 2, &[(0.0, 0.1), (2.0, 0.9)])),
+    );
+    let a = insert_section(&s, 1, "break", 3).unwrap();
+    assert_eq!(
+        lanes(&a.song),
+        [
+            l("kick.tune", 0, 2, &[(0.0, 0.0), (2.0, 0.5)]),
+            l("kick.tune", 5, 2, &[(0.0, 0.5), (2.0, 1.0)]),
+            l("kick.decay", 5, 2, &[(0.0, 0.1), (2.0, 0.9)]),
+        ]
+    );
+    // Sorted by the section each starts in: the split piece first, the
+    // inserted section holds none.
+    assert_eq!(a.lanes, [Kept(0), Split(0), Kept(1)]);
+}
+
+#[test]
+fn insert_section_at_the_ends() {
+    let s = song(
+        &[2, 2],
+        &kick_hat(&[(0, 2, "c", 0), (2, 2, "d", 0)], &[]),
+        "",
+    );
+    // Before the first section everything moves.
+    let a = insert_section(&s, 0, "intro", 1).unwrap();
+    assert_eq!(
+        plays(&a.song, "kick"),
+        ps(&[(1, 2, "c", 0), (3, 2, "d", 0)])
+    );
+    assert_eq!(a.song.sections[0].name, "intro");
+    // `index == len` appends and moves nothing.
+    let a = insert_section(&s, 2, "outro", 4).unwrap();
+    assert_eq!(a.song.tracks, s.tracks);
+    assert_eq!(a.lanes, []);
+    assert_eq!(bars(&a.song), names(&[("s0", 2), ("s1", 2), ("outro", 4)]));
+}
+
+#[test]
+fn insert_section_refusals() {
+    let s = song(&[2, 2], &kick_hat(&[], &[]), "");
+    assert_eq!(
+        insert_section(&s, 3, "x", 1),
+        Err(ArrangeError::OutOfBounds { index: 3, len: 2 })
+    );
+    assert_eq!(
+        insert_section(&s, 1, "x", 0),
+        Err(ArrangeError::Bars { bars: 0 })
+    );
+    assert_eq!(
+        insert_section(&s, 1, "x", 1025),
+        Err(ArrangeError::Bars { bars: 1025 })
     );
 }

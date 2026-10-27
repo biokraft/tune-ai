@@ -26,8 +26,8 @@ mod write;
 use std::path::Path;
 
 pub use arrange::{
-    ArrangeError, Arranged, LaneOrigin, delete_section, duplicate_section, move_section,
-    resize_section, set_section_play,
+    ArrangeError, Arranged, LaneOrigin, delete_section, duplicate_section, insert_section,
+    move_section, resize_section, set_section_play,
 };
 pub use edit::{
     EditOpError, Edited, Removed, add_clip, add_effect, add_placement, add_track, check_new_clip,

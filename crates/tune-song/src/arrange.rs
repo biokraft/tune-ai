@@ -1,5 +1,5 @@
-//! Section operations: move, duplicate, delete or resize a section, or set
-//! what one track plays in it, carrying the placements and lane stretches
+//! Section operations: move, duplicate, delete, resize or insert a section, or
+//! set what one track plays in it, carrying the placements and lane stretches
 //! along.
 //!
 //! Every operation first splits the placements and stretches that cross the
@@ -13,7 +13,7 @@
 use std::ops::Range;
 
 use crate::model::{
-    Lane, Placement, SECTION_BARS, Song, lane_value, round_split_value, section_bars_error,
+    Lane, Placement, SECTION_BARS, Section, Song, lane_value, round_split_value, section_bars_error,
 };
 
 /// Where each stretch of the edited song came from, index-aligned with the
@@ -184,6 +184,47 @@ pub fn resize_section(song: &Song, index: usize, bars: u32) -> Result<Arranged, 
         }
     });
     edit.song.sections[index].bars = bars;
+    Ok(edit.finish())
+}
+
+/// Inserts an empty section `name` of `bars` bars before section `index`
+/// (`index == len` appends). A placement or stretch crossing the insert
+/// point is split there first, with its clip phase and values kept;
+/// everything from it on moves `bars` later. `bars` must be in
+/// [`SECTION_BARS`], as the validator wants.
+pub fn insert_section(
+    song: &Song,
+    index: usize,
+    name: &str,
+    bars: u32,
+) -> Result<Arranged, ArrangeError> {
+    let len = song.sections.len();
+    if index > len {
+        return Err(ArrangeError::OutOfBounds { index, len });
+    }
+    if !SECTION_BARS.contains(&bars) {
+        return Err(ArrangeError::Bars { bars });
+    }
+    // The bound `check` keeps arithmetic safe for; a song has a section.
+    let near = index.min(len.saturating_sub(1));
+    check(song, near, bars)?;
+    let at: u32 = song.sections[..index].iter().map(|s| s.bars).sum();
+    let mut edit = Edit::new(song);
+    edit.split(at);
+    edit.remap(|span| {
+        if span.start >= at {
+            Fate::shifted(span, i64::from(bars))
+        } else {
+            Fate::keep(span)
+        }
+    });
+    edit.song.sections.insert(
+        index,
+        Section {
+            name: name.to_owned(),
+            bars,
+        },
+    );
     Ok(edit.finish())
 }
 
