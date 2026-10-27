@@ -357,10 +357,6 @@ impl SongDoc {
         self.write_edited(edited, |doc| write_plays(doc, &old, &new))
     }
 
-    /// Writes an edit's result into a copy of the text with `write`, and
-    /// the lane stretches it kept, and commits the copy only when it
-    /// describes exactly the edited song. An edit that changes nothing
-    /// writes nothing.
     /// Refuses a file whose `tracks` is a root inline table (`tracks = {
     /// … }`): a valid form the writer cannot add a track to yet.
     fn check_tracks_form(&self) -> Result<(), EditError> {
@@ -390,6 +386,10 @@ impl SongDoc {
         Ok(())
     }
 
+    /// Writes an edit's result into a copy of the text with `write`, and
+    /// the lane stretches it kept, and commits the copy only when it
+    /// describes exactly the edited song. An edit that changes nothing
+    /// writes nothing.
     fn write_edited(
         &mut self,
         edited: Edited,
