@@ -1149,3 +1149,54 @@ fn a_section_edit_reverts_once_its_clip_is_back() {
     assert_eq!(u.kept, vec![]);
     assert_eq!(target_changes(&fixture_song(), s.core.song()), vec![]);
 }
+
+// ----- review round 2: a section edit is kept whole -----
+
+/// Every kept entry names the producer, and nothing went back.
+fn all_kept_by_human(u: &RunUndo) {
+    assert_eq!(u.reverted, vec![]);
+    assert!(!u.kept.is_empty());
+    assert!(
+        u.kept
+            .iter()
+            .all(|k| k.reason == KeptReason::ChangedLater && k.by == Some(Source::Human)),
+        "{:?}",
+        u.kept
+    );
+}
+
+/// q5: the section edit moved a placement of a track the run created, and
+/// the producer changed that track: the track is kept, so the section edit
+/// that moved its placement is kept with it.
+#[test]
+fn a_section_edit_is_kept_with_a_track_it_moved_that_was_kept() {
+    let mut s = open();
+    s.human(Action::AddSection {
+        name: "c".into(),
+        bars: 4,
+        index: None,
+    });
+    s.agent(
+        "r1",
+        &[Action::AddTrack {
+            track: "bass".into(),
+            instrument: "acid303".into(),
+        }],
+    );
+    s.agent("r1", &[place("bass", "a1", 5, 1)]);
+    s.agent(
+        "r1",
+        &[Action::AddSection {
+            name: "break".into(),
+            bars: 2,
+            index: Some(1),
+        }],
+    );
+    s.human(set("tracks.bass.gain_db", json!(-3)));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    all_kept_by_human(&u);
+    assert!(u.kept.iter().any(|k| k.target == target("tracks.bass")));
+    assert!(u.kept.iter().any(|k| k.target == Target::Sections));
+    assert_eq!(s.text(), text);
+}
