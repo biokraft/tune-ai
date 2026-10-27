@@ -57,6 +57,7 @@ impl<'de> Deserialize<'de> for Command {
 /// the answer to the conflict prompt.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", content = "args", rename_all = "snake_case")]
+#[derive(ts_rs::TS)]
 pub enum StudioCommand {
     /// The songs under the studio's songs root.
     ListSongs,

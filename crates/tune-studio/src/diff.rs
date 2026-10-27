@@ -17,8 +17,9 @@ use crate::doc::effective_value;
 use crate::path::{SongPath, TrackField};
 
 /// One value that differs between two songs.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Change {
+    #[ts(type = "string")]
     pub path: SongPath,
     pub old: Value,
     pub new: Value,

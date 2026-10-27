@@ -25,6 +25,7 @@ pub use cli::{action_from_cli, parse_value};
 /// One action. Optional arguments may be left out and serialize as `null`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", content = "args", rename_all = "snake_case")]
+#[derive(ts_rs::TS)]
 pub enum Action {
     // ----- live -----
     /// Starts playback at `from_bar` (0-based), else at the cursor.
@@ -49,6 +50,7 @@ pub enum Action {
     // ----- song edits -----
     /// Sets the value at `path`, as `tune set` does.
     SetValue {
+        #[ts(type = "string")]
         path: SongPath,
         value: Value,
     },
@@ -291,6 +293,7 @@ impl Action {
 /// One drum step on the wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(ts_rs::TS)]
 pub enum DrumHitDto {
     Rest,
     Hit,

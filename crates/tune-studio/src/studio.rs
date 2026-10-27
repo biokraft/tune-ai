@@ -59,6 +59,7 @@ const RELEASE_GUARD: Duration = Duration::from_millis(200);
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
+#[derive(ts_rs::TS)]
 pub enum Event {
     /// The whole studio state, after anything in it changed.
     State(StudioState),
@@ -66,6 +67,7 @@ pub enum Event {
     /// `step` counts 16ths from the song start, `bar = step / 16` and
     /// `beat = step % 16 / 4`.
     Playhead {
+        #[ts(type = "number")]
         step: u64,
         bar: u32,
         beat: u32,

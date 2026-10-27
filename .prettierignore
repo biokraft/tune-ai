@@ -9,3 +9,4 @@ scratch
 third_party
 .superpowers
 *.md
+apps/desktop/src/client/generated.ts

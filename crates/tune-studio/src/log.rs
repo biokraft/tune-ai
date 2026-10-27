@@ -18,6 +18,7 @@ use crate::diff::Change;
 /// Who made an edit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(ts_rs::TS)]
 pub enum Source {
     Human,
     Claude,

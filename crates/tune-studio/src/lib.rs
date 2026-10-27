@@ -20,6 +20,7 @@ mod path;
 mod set;
 mod studio;
 mod view;
+mod wire;
 
 pub use action::{
     ACTIONS, Action, ActionKind, ActionSpec, ArgSpec, ArgType, DrumHitDto, action_from_cli,
@@ -42,3 +43,4 @@ pub use view::{
     AcidStepView, FxView, LaneView, MixView, NoteView, ParamView, PatternView, SectionView,
     SongView, StudioState, TrackView,
 };
+pub use wire::wire_types_ts;
