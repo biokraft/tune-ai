@@ -101,7 +101,7 @@ Notation:
   a placement) plays on, held notes included; so does a hot reload that
   keeps the clip and the clip step. The studio shows no editor for them
   yet. `tune info` lists every clip
-  (`clips: k4 drum 16 steps, lead notes 2 bars 5 notes`; `--json` has
+  (`clips: k4 drum 16 steps, lead notes 1 bar 5 notes`; `--json` has
   `clips`), and `tune params` says what each instrument plays (`plays`).
 - Placements: the track's `play = [{ at, clip, bars, offset }]`. `at` is the
   1-based start bar, `offset` the bars into the clip (default 0); `at`,

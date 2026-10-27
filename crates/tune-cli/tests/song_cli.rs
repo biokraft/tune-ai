@@ -695,6 +695,11 @@ notes = [
   { start = 24, pitch = "F2", len = 4 },
 ]
 
+[clips.stab]
+kind = "notes"
+bars = 1
+notes = [{ start = 0, pitch = "C3", len = 1 }]
+
 [[sections]]
 name = "a"
 bars = 2
@@ -715,12 +720,13 @@ bars = 2
         json!([
             { "id": "k4", "kind": "drum", "steps": 16 },
             { "id": "lead", "kind": "notes", "steps": 32, "bars": 2, "notes": 5 },
+            { "id": "stab", "kind": "notes", "steps": 16, "bars": 1, "notes": 1 },
         ])
     );
     let out = tune().arg("info").arg(&path).assert().success();
     let s = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     assert!(
-        s.contains("clips: k4 drum 16 steps, lead notes 2 bars 5 notes"),
+        s.contains("clips: k4 drum 16 steps, lead notes 2 bars 5 notes, stab notes 1 bar 1 note"),
         "{s}"
     );
 
