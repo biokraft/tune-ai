@@ -7,7 +7,8 @@
 //! and 2; [`Song::to_toml`] writes version 2, and [`migrate`] rewrites a
 //! version 1 file as version 2, keeping its comments. [`move_section`] and its
 //! siblings edit the arrangement one section at a time, [`add_track`] and its
-//! siblings the tracks and their devices.
+//! siblings the tracks and their devices, [`add_clip`] and its siblings the
+//! clip pool.
 
 #![forbid(unsafe_code)]
 
@@ -29,8 +30,9 @@ pub use arrange::{
     resize_section, set_section_play,
 };
 pub use edit::{
-    EditOpError, Edited, Removed, add_effect, add_track, move_effect, remove_effect, remove_track,
-    rename_device, rename_track, set_instrument,
+    EditOpError, Edited, Removed, add_clip, add_effect, add_track, check_new_clip, duplicate_clip,
+    move_effect, remove_clip, remove_effect, remove_track, rename_clip, rename_device,
+    rename_track, set_instrument,
 };
 pub use error::{LoadError, SongError};
 pub use migrate::{Migration, migrate};
@@ -41,7 +43,7 @@ pub use model::{
 };
 pub use tune_modules::{ClipKind, ModuleDescriptor, Registry, SettingSpec};
 pub use watch::{RawReload, Reload, SongWatcher};
-pub use write::{fx_entry_toml, notes_toml, placements_toml, track_table_toml};
+pub use write::{clip_table_toml, fx_entry_toml, notes_toml, placements_toml, track_table_toml};
 
 /// The newest song format version, the one [`Song::to_toml`] writes.
 pub const FORMAT_VERSION: u32 = 2;
