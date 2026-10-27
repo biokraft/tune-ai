@@ -133,7 +133,7 @@ type Points = &'static [(f64, f64)];
 #[test]
 fn split_keeps_lane_values() {
     // (sections, stretch bars, points, left piece, right piece)
-    let cases: [(&[u32], u32, Points, Points, Points); 3] = [
+    let cases: [(&[u32], u32, Points, Points, Points); 4] = [
         (
             &[1, 3],
             4,
@@ -154,6 +154,14 @@ fn split_keeps_lane_values() {
             &[(3.0, 0.7)],
             &[(1.0, 0.7)],
             &[(0.0, 0.7), (2.0, 0.7)],
+        ),
+        // Interpolated as 0.30000000000000004, stored rounded.
+        (
+            &[2, 2],
+            4,
+            &[(0.0, 0.1), (4.0, 0.5)],
+            &[(0.0, 0.1), (2.0, 0.3)],
+            &[(0.0, 0.3), (2.0, 0.5)],
         ),
     ];
     for (sections, n, points, left, right) in cases {
