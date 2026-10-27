@@ -442,8 +442,9 @@ The producer may have the studio (app or browser) open on the same song.
   scene comes back without its comments (so do the lanes `rename_device`
   moved, and a section `rename_section` renamed loses the comment above
   it), a restored clip goes to the end of the clip pool, a removed scene
-  comes back at the row it had (above any row the producer has put there
-  since), and an explicit `send.* = -60` (a silent bus) is not restored.
+  goes back to its old row number, so it can land above rows the producer
+  added since (theirs keep their order), and an explicit `send.* = -60` (a
+  silent bus) is not restored.
 - To see the UI: `tune serve <song> --device null --port 4580` (in the
   background; `task ui:build` first), then drive Chrome with the
   `agent-browser` skill: start the agent Chrome, pick a session
