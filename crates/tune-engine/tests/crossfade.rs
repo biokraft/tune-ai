@@ -594,6 +594,34 @@ fn a_removed_track_fades_out() {
 }
 
 #[test]
+fn an_added_track_fades_in() {
+    // The removal pair the other way round: `u` comes in at the swap.
+    let (b, a) = removal("", "");
+    let ra = offline(&a);
+    let stem_u = &stems(&b)[1];
+    let (mix, s) = swap_at(&a, &b);
+    // The fade-in is audible and lopsided (the pan applies from the start).
+    assert!(stem_u[2 * s as usize + 1].abs() > 0.05);
+    for n in 0..FADE {
+        // The new track's weight in frame `S + n`: a fade of exactly 480
+        // frames, so a shorter one fails here.
+        let w = (n + 1) as f64 / FADE as f64;
+        for c in 0..2 {
+            let i = 2 * (s + n) as usize + c;
+            // `u` starts at the swap (its first On), offline at bar 1; `S`
+            // is a whole number of its cycles in, so the two agree to
+            // rounding.
+            let want = f64::from(ra[i]) + w * f64::from(stem_u[i]);
+            assert!(
+                (f64::from(mix[i]) - want).abs() <= 1e-7,
+                "frame S + {n}, channel {c}: {} vs {want}",
+                mix[i]
+            );
+        }
+    }
+}
+
+#[test]
 fn a_removed_track_fades_out_of_the_bus() {
     // `u` sends into the reverb; `t` keeps the bus built with a send that
     // is off (exactly 0), so after the swap only `u`'s fading send feeds it.
