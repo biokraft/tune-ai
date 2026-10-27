@@ -84,7 +84,8 @@ pub(crate) fn run_actions(
     actions: &[Action],
     origin: &Origin,
 ) -> Result<ActionsOutcome, StudioError> {
-    match find_studio(&studio_dir(), song) {
+    // No endpoint directory: no studio can have written one there.
+    match studio_dir().ok().and_then(|dir| find_studio(&dir, song)) {
         Some(link) => link.run(actions, origin),
         None => apply_to_file(song, actions, origin),
     }
