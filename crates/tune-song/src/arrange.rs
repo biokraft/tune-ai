@@ -12,7 +12,9 @@
 
 use std::ops::Range;
 
-use crate::model::{Lane, Placement, SECTION_BARS, Song, lane_value, section_bars_error};
+use crate::model::{
+    Lane, Placement, SECTION_BARS, Song, lane_value, round_split_value, section_bars_error,
+};
 
 /// Where each stretch of the edited song came from, index-aligned with the
 /// new `song.automation`. Each holds an index into the old `automation`.
@@ -393,14 +395,15 @@ fn split_placements(play: &mut Vec<Placement>, bar: u32) {
 }
 
 /// Splits `lane` at 0-based bar `bar` (strictly inside it) into two stretches
-/// whose values match the lane's, the jump at `bar` (two points there)
-/// falling between them.
+/// whose values match the lane's (the one computed at `bar` rounded by
+/// [`round_split_value`]), the jump at `bar` (two points there) falling
+/// between them.
 fn split_lane(lane: &Lane, bar: u32) -> (Lane, Lane) {
     let k = bar - lane.start_bar;
     let at = f64::from(k);
     let points = &lane.points;
     // The engine's rule: the later point wins where two share a bar.
-    let v_at = lane_value(points, at);
+    let v_at = round_split_value(lane_value(points, at));
     let v_left = points
         .iter()
         .find(|&&(b, _)| b == at)

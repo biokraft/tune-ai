@@ -11,7 +11,7 @@ use std::ops::Range;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tune_dsp::STRIP_PARAMS;
-use tune_song::{Device, MixUnit, Song, Track, lane_value};
+use tune_song::{Device, MixUnit, Song, Track, lane_value, round_split_value};
 
 use crate::doc::effective_value;
 use crate::path::{SongPath, TrackField};
@@ -267,8 +267,8 @@ fn relative_lanes(song: &Song, i: usize) -> Option<Vec<LanePart<'_>>> {
             let end = points
                 .iter()
                 .find(|&&(bar, _)| bar == to)
-                .map_or_else(|| lane_value(points, to), |&(_, v)| v);
-            let mut cut = vec![(0.0, lane_value(points, from))];
+                .map_or_else(|| round_split_value(lane_value(points, to)), |&(_, v)| v);
+            let mut cut = vec![(0.0, round_split_value(lane_value(points, from)))];
             cut.extend(
                 points
                     .iter()

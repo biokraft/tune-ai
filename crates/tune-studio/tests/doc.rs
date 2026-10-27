@@ -1273,3 +1273,18 @@ fn lane_views_carry_their_extent() {
         (json!(0.0), json!(2.0))
     );
 }
+
+/// A stretch split at a section edge writes the value there as a short
+/// decimal, not with float noise (`0.1 + 0.4 * 4 / 8` is
+/// `0.30000000000000004`), and the doc's song equals its text.
+#[test]
+fn a_split_lane_value_is_written_rounded() {
+    let text = four_bar_sections(1, 8).replacen("[[0, 0.1], [2, 0.8]]", "[[0, 0.1], [8, 0.5]]", 1);
+    let mut d = SongDoc::parse(&text).unwrap();
+    d.set(&path("sections[0].bars"), &json!(5)).unwrap();
+    let out = d.text();
+    assert!(out.contains("points = [[0, 0.1], [4, 0.3]]"), "{out}");
+    assert!(out.contains("points = [[0, 0.3], [4, 0.5]]"), "{out}");
+    assert!(!out.contains("0.30000000000000004"), "{out}");
+    assert_eq!(SongDoc::parse(&out).unwrap().song(), d.song());
+}

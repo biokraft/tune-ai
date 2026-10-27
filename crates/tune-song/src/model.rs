@@ -410,6 +410,21 @@ impl Lane {
     }
 }
 
+/// Decimal places a lane value computed by a split keeps (see
+/// [`round_split_value`]).
+const SPLIT_VALUE_DECIMALS: i32 = 12;
+
+/// A lane value computed where a stretch is split, rounded to 12 decimal
+/// places: a value interpolated between two points carries float noise
+/// (`0.1 + 0.4 * 0.5` is `0.30000000000000004`), which the file would show.
+/// Rounding moves it by under 1e-12. The section operations store it this
+/// way, so the song and the text written from it agree exactly, and the
+/// diff rounds its own split values the same way.
+pub fn round_split_value(v: f64) -> f64 {
+    let scale = 10f64.powi(SPLIT_VALUE_DECIMALS);
+    (v * scale).round() / scale
+}
+
 /// The normalized lane value at bar offset `x` of breakpoints `points`
 /// (bars never decreasing, at least one point): the first point's value
 /// before it, linear between points, the last point's value after it, and
