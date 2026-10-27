@@ -68,12 +68,17 @@ struct Fixture {
 }
 
 fn fixture(text: &str) -> Fixture {
+    fixture_on(text, |slot| Box::new(CaptureOut { slot }))
+}
+
+/// [`fixture`] on the device `audio` makes from the fixture's slot.
+fn fixture_on(text: &str, audio: impl FnOnce(Slot) -> Box<dyn AudioOut>) -> Fixture {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("song.toml");
     fs::write(&path, text).expect("write song");
     let slot = Slot::default();
     let config = StudioConfig {
-        audio: Box::new(CaptureOut { slot: slot.clone() }),
+        audio: audio(slot.clone()),
         songs_root: dir.path().to_owned(),
     };
     let studio = tune_studio::Studio::spawn(config, Some(path.clone())).expect("spawns");
@@ -1373,4 +1378,57 @@ fn a_renamed_track_follows_the_arrangement_again() {
         f.call(knob("acid303.cutoff", 900.0, true)),
         json!({ "automated": true })
     );
+}
+
+/// A device that plays its first block the moment it starts, as `NullOut`
+/// and a real device may, before `start` even returns, then parks the
+/// processor for the test to pull.
+struct EagerOut {
+    slot: Slot,
+    first: Arc<Mutex<Vec<f32>>>,
+}
+
+impl AudioOut for EagerOut {
+    fn sample_rate(&mut self, wanted: u32) -> Result<u32, String> {
+        Ok(wanted)
+    }
+
+    fn start(&mut self, mut processor: LiveProcessor) -> Result<Box<dyn Send>, String> {
+        let mut block = vec![0.0_f32; 2 * BLOCK];
+        processor.process(&mut block);
+        *self.first.lock().unwrap_or_else(PoisonError::into_inner) = block;
+        *lock(&self.slot) = Some(processor);
+        Ok(Box::new(Parked(self.slot.clone())))
+    }
+}
+
+/// Review I1: a launch that starts playback is cued before the device
+/// runs, so it lands at the cursor's bar line even when the first block
+/// plays at once.
+#[test]
+fn a_launch_that_starts_playback_lands_at_the_cursor_on_an_eager_device() {
+    let first = Arc::new(Mutex::new(Vec::new()));
+    let f = fixture_on(SESSION, |slot| {
+        Box::new(EagerOut {
+            slot,
+            first: first.clone(),
+        })
+    });
+    f.call(Command::Action(Action::SeekBar { bar: 1 }));
+    assert_eq!(f.call(live(launch_scene("groove"))), Value::Null);
+    let mut frames = first.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    assert_eq!(frames.len(), 2 * BLOCK, "the device played its first block");
+    frames.extend(f.pull(3 * 96_000 - BLOCK));
+    let kick = swapped(
+        SESSION,
+        KICK_PLAY,
+        "play = [{ at = 2, clip = \"k4\", bars = 3 }]",
+    );
+    let hat = swapped(
+        &kick,
+        HAT_PLAY,
+        "play = [{ at = 1, clip = \"h\", bars = 1 }]",
+    );
+    let want = render_bars(&acid_launched_at_bar_1(&hat), 1, 4);
+    assert_same(&frames, &want, "groove from the first block");
 }

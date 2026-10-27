@@ -521,7 +521,7 @@ impl Actor {
     /// without an arm here does not compile.
     fn handle_action(&mut self, action: Action) -> Result<Value, StudioError> {
         match action {
-            Action::Play { from_bar } => self.play(from_bar),
+            Action::Play { from_bar } => self.play(from_bar, None),
             Action::Stop => {
                 self.stop();
                 self.emit_state();
@@ -779,7 +779,11 @@ impl Actor {
         }
     }
 
-    fn play(&mut self, from_bar: Option<u32>) -> Result<Value, StudioError> {
+    /// Starts playback at `from_bar`, else at the cursor. A session action
+    /// `first` (the launch that starts playback) is cued against the first
+    /// song before the device starts, so it lands at that bar line even
+    /// when the device plays its first block at once.
+    fn play(&mut self, from_bar: Option<u32>, first: Option<Action>) -> Result<Value, StudioError> {
         let song = self.core()?.song().clone();
         let bar = from_bar
             .unwrap_or(self.cursor_bar)
@@ -789,16 +793,27 @@ impl Actor {
         let rate = self.audio.sample_rate(wanted).map_err(StudioError::Audio)?;
         let compiled = Arc::new(CompiledSong::new(&song, rate));
         let (controller, processor) = live(compiled.clone(), bar, self.loop_range());
-        let stream = self.audio.start(processor).map_err(StudioError::Audio)?;
         self.player = Some(Player {
-            _stream: stream,
+            // Until the device starts.
+            _stream: Box::new(()),
             controller,
             rate,
             songs: VecDeque::from([(0, compiled)]),
             retry: None,
             loop_unsent: false,
-            cues: VecDeque::new(),
+            cues: first.into_iter().collect(),
         });
+        self.send_cues();
+        let stream = match self.audio.start(processor) {
+            Ok(stream) => stream,
+            Err(e) => {
+                self.stop();
+                return Err(StudioError::Audio(e));
+            }
+        };
+        if let Some(player) = &mut self.player {
+            player._stream = stream;
+        }
         self.cursor_bar = bar;
         self.send_drag();
         self.emit_state();
@@ -904,15 +919,14 @@ impl Actor {
             ) {
                 return Ok(Value::Null);
             }
-            self.play(None)?;
+            self.play(None, Some(action.clone()))?;
+        } else if let Some(player) = &mut self.player {
+            player.cues.push_back(action.clone());
+            self.send_cues();
         }
         if let Some(song) = &self.song {
             self.off_arrangement.apply(&action, song.core.song());
         }
-        if let Some(player) = &mut self.player {
-            player.cues.push_back(action);
-        }
-        self.send_cues();
         Ok(Value::Null)
     }
 
