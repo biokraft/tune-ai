@@ -57,6 +57,13 @@ fn do_actions(a: &Args) -> Result<Success, Vec<Failure>> {
         run_actions(a.song, &actions, &Origin::claude(run)).map_err(|e| failures(a.song, e))?;
     let mut lines = Vec::new();
     match actions.as_slice() {
+        // A session action says nothing: it lands at the next bar line.
+        [
+            Action::LaunchClip { .. }
+            | Action::LaunchScene { .. }
+            | Action::StopClip { .. }
+            | Action::BackToArrangement { .. },
+        ] => {}
         // Undo and redo print what they changed, like an edit.
         [one] if one.kind() == ActionKind::Live => lines.push(format!("ran {}", one.name())),
         // A run undo says what it reverted and kept.
