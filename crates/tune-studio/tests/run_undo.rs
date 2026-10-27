@@ -1489,3 +1489,132 @@ fn a_value_changed_by_hand_between_the_runs_writes_is_kept() {
     assert_eq!(f.text(), text);
     assert_eq!(f.value("tracks.acid.acid303.cutoff"), json!(900));
 }
+
+/// Every kept entry's targets, sorted, and that each is kept by `by`.
+fn kept_targets(u: &RunUndo, by: Option<Source>) -> Vec<String> {
+    for k in &u.kept {
+        assert_eq!((k.reason, k.by), (KeptReason::ChangedLater, by), "{k:?}");
+    }
+    let mut names: Vec<String> = u.kept.iter().map(|k| k.target.to_string()).collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// I1: a renamed track the producer edited later is kept, and so is the
+/// rest of the rename: the old name does not come back beside it.
+#[test]
+fn a_renamed_track_edited_later_keeps_the_whole_rename() {
+    let mut s = open();
+    s.agent(
+        "r1",
+        &[Action::RenameTrack {
+            track: "acid".into(),
+            to: "lead".into(),
+        }],
+    );
+    s.human(set("tracks.lead.gain_db", json!(-3)));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let names = kept_targets(&u, Some(Source::Human));
+    assert!(names.contains(&"tracks.acid".to_owned()), "{names:?}");
+    assert!(names.contains(&"tracks.lead".to_owned()), "{names:?}");
+    assert_eq!(s.text(), text);
+    let tracks: Vec<&String> = s.core.song().tracks.keys().collect();
+    assert_eq!(tracks, ["kick", "lead", "hat"]);
+    assert_eq!(s.value("tracks.lead.gain_db"), json!(-3));
+    assert_eq!(
+        s.value("automation.lead.acid303.cutoff"),
+        json!([lane_stretch(3, 2, json!([[0, 0.1], [2, 0.8]]))])
+    );
+}
+
+/// I1: a renamed clip the producer edited later: the old clip does not
+/// come back, and the placement still plays the edited one.
+#[test]
+fn a_renamed_clip_edited_later_keeps_the_whole_rename() {
+    let mut s = open();
+    s.agent(
+        "r1",
+        &[Action::RenameClip {
+            clip: "a1".into(),
+            to: "bass1".into(),
+        }],
+    );
+    s.human(set("clips.bass1.steps", json!("C2 . C3 .")));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let names = kept_targets(&u, Some(Source::Human));
+    assert!(names.contains(&"clips.a1".to_owned()), "{names:?}");
+    assert!(names.contains(&"clips.bass1".to_owned()), "{names:?}");
+    assert_eq!(s.text(), text);
+    assert_eq!(s.value("clips.a1"), Value::Null);
+    assert_eq!(
+        s.value("tracks.acid.play"),
+        json!([placement(3, "bass1", 2)])
+    );
+}
+
+/// I1: a renamed device the producer edited later: its lane stays with
+/// it, not taken out as the run's while the old one is refused.
+#[test]
+fn a_renamed_device_edited_later_keeps_the_whole_rename() {
+    let mut s = open();
+    s.agent(
+        "r1",
+        &[Action::RenameDevice {
+            track: "acid".into(),
+            device: "acid303".into(),
+            to: "bass303".into(),
+        }],
+    );
+    s.human(set("tracks.acid.bass303.cutoff", json!(700)));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let names = kept_targets(&u, Some(Source::Human));
+    assert!(
+        names.contains(&"tracks.acid.instrument".to_owned()),
+        "{names:?}"
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.value("tracks.acid.bass303.cutoff"), json!(700));
+    assert_eq!(
+        s.value("automation.acid.bass303.cutoff"),
+        json!([lane_stretch(3, 2, json!([[0, 0.1], [2, 0.8]]))])
+    );
+}
+
+/// I1: a rename and a section edit in one write are one group: the
+/// producer's later edit to the renamed track keeps both.
+#[test]
+fn a_rename_and_a_section_edit_in_one_write_go_back_together() {
+    let mut s = open();
+    s.agent(
+        "r1",
+        &[
+            Action::RenameTrack {
+                track: "acid".into(),
+                to: "lead".into(),
+            },
+            Action::AddSection {
+                name: "break".into(),
+                bars: 2,
+                index: Some(1),
+            },
+        ],
+    );
+    s.human(set("tracks.lead.gain_db", json!(-3)));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let names = kept_targets(&u, Some(Source::Human));
+    for t in ["sections", "tracks.acid", "tracks.lead"] {
+        assert!(names.contains(&t.to_owned()), "{t}: {names:?}");
+    }
+    assert_eq!(s.text(), text);
+    let tracks: Vec<&String> = s.core.song().tracks.keys().collect();
+    assert_eq!(tracks, ["kick", "lead", "hat"]);
+}
