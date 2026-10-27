@@ -124,7 +124,8 @@ struct Waiting {
 /// A section edit's changes (the sections, and the placements and lane
 /// stretches of the records that changed them) go back together or not
 /// at all: kept whole when any part of it would be kept, written in one
-/// go otherwise.
+/// go otherwise. So does each rename (of a track, clip or device) with
+/// everything its record changed.
 pub fn undo_run(
     doc: &mut SongDoc,
     records: &[ActionRecord],
@@ -143,22 +144,26 @@ pub fn undo_run(
     let plans = plan(records, &mine);
     let key = |k: usize| (plans[k].last, plans[k].pos);
 
-    // Each unit is one target, or the section edit's group; newest first
-    // (a group by its newest member), within one record last change first.
-    let group = section_group(&plans, records, &mine);
+    // Each unit is one target, or a group that goes back whole (the
+    // section edit's, a rename's, merged where they share a target);
+    // newest first (a group by its newest member), within one record last
+    // change first.
+    let section = section_group(&plans, records, &mine);
     let rearranged = rearranged_since(records, &mine, run);
-    let in_group = |unit: &[usize]| unit.iter().any(|k| group.contains(k));
-    let mut units: Vec<Vec<usize>> = (0..plans.len())
-        .filter(|k| !group.contains(k))
-        .map(|k| vec![k])
-        .collect();
-    if !group.is_empty() {
-        units.push(group.clone());
+    let mut groups = rename_groups(&plans, records, &mine);
+    if !section.is_empty() {
+        groups.insert(0, section.clone());
     }
-    for unit in &mut units {
+    let groups = merged(groups);
+    let mut units: Vec<(Vec<usize>, bool)> = (0..plans.len())
+        .filter(|k| !groups.iter().any(|g| g.contains(k)))
+        .map(|k| (vec![k], false))
+        .collect();
+    units.extend(groups.into_iter().map(|g| (g, true)));
+    for (unit, _) in &mut units {
         unit.sort_by_key(|&k| std::cmp::Reverse(key(k)));
     }
-    units.sort_by_key(|unit| std::cmp::Reverse(key(unit[0])));
+    units.sort_by_key(|(unit, _)| std::cmp::Reverse(key(unit[0])));
 
     let mut out = RunUndo {
         run: run.to_owned(),
@@ -168,7 +173,7 @@ pub fn undo_run(
         already: Vec::new(),
     };
     let mut waiting = Vec::new();
-    for unit in units {
+    for (unit, grouped) in units {
         let decided: Vec<(&Plan, Decision)> = unit
             .iter()
             .map(|&k| {
@@ -189,8 +194,7 @@ pub fn undo_run(
         });
         // A section edit is also kept when anyone has changed the
         // arrangement since: what they placed sits where the section put it.
-        let grouped = in_group(&unit);
-        let forced = rearranged.filter(|_| grouped);
+        let forced = rearranged.filter(|_| unit.iter().any(|k| section.contains(k)));
         let whole = cause.is_none() && forced.is_none();
         let cause_by = cause.map_or(forced, |k| k.by);
         let mut puts = Vec::new();
@@ -202,8 +206,8 @@ pub fn undo_run(
                     out.kept.extend(kept);
                     puts.push((p.target.clone(), value, items));
                 }
-                // A part of a section edit is kept: so is the rest of it,
-                // naming who changed that part.
+                // A part of a group is kept: so is the rest of it, naming
+                // who changed that part.
                 Decision::Revert { items, kept, .. } => {
                     out.kept.extend(kept);
                     out.kept.extend(items.into_iter().map(|item| KeptTarget {
@@ -321,6 +325,57 @@ fn section_group(plans: &[Plan], records: &[ActionRecord], mine: &[usize]) -> Ve
         }
     }
     group
+}
+
+/// One group per record of the run that renamed a track, clip or device:
+/// every plan its changes belong to (the target, or the item the run
+/// created that it folded into). A rename is a removal and an addition
+/// (`tracks.<old>` gone, `tracks.<new>` made, the lanes moved over):
+/// reverting one half without the other doubles the item or orphans it.
+fn rename_groups(plans: &[Plan], records: &[ActionRecord], mine: &[usize]) -> Vec<Vec<usize>> {
+    const RENAMES: [&str; 3] = ["rename_track", "rename_clip", "rename_device"];
+    let renames = mine.iter().map(|&i| &records[i]).filter(|r| {
+        let mut actions = r.actions.iter();
+        actions.any(|a| RENAMES.contains(&a.as_str()))
+    });
+    renames
+        .map(|r| {
+            let mut group = Vec::new();
+            for c in &r.targets {
+                let k = owner(plans, &c.target)
+                    .or_else(|| plans.iter().position(|p| p.target == c.target));
+                if let Some(k) = k
+                    && !group.contains(&k)
+                {
+                    group.push(k);
+                }
+            }
+            group
+        })
+        .filter(|g| !g.is_empty())
+        .collect()
+}
+
+/// `groups` with every two that share a plan joined into one.
+fn merged(groups: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
+    let mut out: Vec<Vec<usize>> = Vec::new();
+    for mut g in groups {
+        // Fold in every group already there that shares a plan with it.
+        let mut i = 0;
+        while i < out.len() {
+            if out[i].iter().any(|k| g.contains(k)) {
+                for k in out.remove(i) {
+                    if !g.contains(&k) {
+                        g.push(k);
+                    }
+                }
+            } else {
+                i += 1;
+            }
+        }
+        out.push(g);
+    }
+    out
 }
 
 /// The run's targets, in the order the run first changed them. A change
@@ -627,7 +682,9 @@ type Put = (Target, Value, Vec<Option<Value>>);
 /// Puts each value at its target on one copy of `doc`, keeping the copy
 /// when the song takes all of them. Each put must leave a valid song, so
 /// a section edit's sections go last (the placements move back inside the
-/// longer song first), else first (the song grows back before they move).
+/// longer song first), else first (the song grows back before they move);
+/// failing both, a put the song refuses waits for the others (a renamed
+/// track's lane goes back once the track is there).
 fn put_all(doc: &mut SongDoc, puts: &[Put]) -> Result<(), EditError> {
     let in_order = |order: Vec<&Put>| -> Result<SongDoc, EditError> {
         let mut copy = doc.clone();
@@ -640,11 +697,40 @@ fn put_all(doc: &mut SongDoc, puts: &[Put]) -> Result<(), EditError> {
         puts.iter().partition(|p| p.0 == Target::Sections);
     let copy = match in_order(puts.iter().collect()) {
         Ok(copy) => copy,
-        Err(e) if sections.is_empty() => return Err(e),
-        Err(e) => in_order(sections.into_iter().chain(rest).collect()).map_err(|_| e)?,
+        Err(e) => {
+            let sections_first = (!sections.is_empty())
+                .then(|| in_order(sections.into_iter().chain(rest).collect()).ok())
+                .flatten();
+            match sections_first.or_else(|| waiting_for_others(doc, puts)) {
+                Some(copy) => copy,
+                None => return Err(e),
+            }
+        }
     };
     *doc = copy;
     Ok(())
+}
+
+/// Puts each value on one copy of `doc`, a refused one again after the
+/// others, until all are in (`Some`) or none of the rest goes in.
+fn waiting_for_others(doc: &SongDoc, puts: &[Put]) -> Option<SongDoc> {
+    let mut copy = doc.clone();
+    let mut rest: Vec<&Put> = puts.iter().collect();
+    while !rest.is_empty() {
+        let before = rest.len();
+        rest.retain(|(target, value, _)| {
+            let mut next = copy.clone();
+            let refused = next.put(target, value).is_err();
+            if !refused {
+                copy = next;
+            }
+            refused
+        });
+        if rest.len() == before {
+            return None;
+        }
+    }
+    Some(copy)
 }
 
 fn reverted_items(puts: Vec<Put>) -> Vec<TargetItem> {
