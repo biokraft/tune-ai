@@ -2365,3 +2365,61 @@ fn a_scene_move_through_the_studio_between_the_runs_writes_is_kept() {
     assert_eq!(s.text(), text);
     assert_eq!(s.scenes(), ["jam", "groove", "break"]);
 }
+
+// ----- review round 2: scenes -----
+
+fn rename_scene(scene: &str, to: &str) -> Action {
+    Action::RenameScene {
+        scene: scene.into(),
+        to: to.into(),
+    }
+}
+
+/// C1 (p04): the producer renamed the run's renamed scene again. The old
+/// name does not come back beside theirs.
+#[test]
+fn a_scene_rename_the_producer_renamed_again_is_kept_whole() {
+    let mut s = session();
+    s.agent("r1", &[rename_scene("groove", "drop")]);
+    s.human(rename_scene("drop", "drop2"));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!((&u.reverted, &u.already), (&vec![], &vec![]));
+    assert_eq!(
+        kept_targets(&u, Some(Source::Human)),
+        ["scenes.drop", "scenes.groove"]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["drop2", "break"]);
+}
+
+/// C1 (p05): the producer removed the run's renamed scene. It does not
+/// come back under its old name, with the studio open or closed.
+#[test]
+fn a_scene_rename_the_producer_removed_is_kept_whole() {
+    let mut s = session();
+    s.agent("r1", &[rename_scene("groove", "drop")]);
+    s.human(remove_scene("drop"));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!((&u.reverted, &u.already), (&vec![], &vec![]));
+    assert_eq!(
+        kept_targets(&u, Some(Source::Human)),
+        ["scenes.drop", "scenes.groove"]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["break"]);
+
+    // Studio closed, the scene's table deleted by hand: nothing logged.
+    let f = closed_on(SESSION);
+    f.agent("r1", &[rename_scene("groove", "drop")]);
+    f.hand(
+        "# jam rows\n[scenes.drop]\nslots = { kick = \"k4\", acid = \"a1\" }\n\n",
+        "",
+    );
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!((&u.reverted, &u.already), (&vec![], &vec![]));
+    assert_eq!(kept_targets(&u, None), ["scenes.drop", "scenes.groove"]);
+    assert_eq!(f.text(), text);
+}
