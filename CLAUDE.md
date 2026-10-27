@@ -410,8 +410,8 @@ The producer may have the studio (app or browser) open on the same song.
   everything its write changed (the lanes, placements, scene slots and
   duck source that followed it), or is kept whole when any part of it
   changed later (the new name renamed again or removed included), so the
-  old name never comes back beside the new one.
-  Scenes go back one at a time too: a slot (`scenes.<s>.slots.<t>`) is
+  old name never comes back beside the new one; a renamed scene is renamed
+  back where it sits now, its comments kept. Scenes go back one at a time too: a slot (`scenes.<s>.slots.<t>`) is
   kept when someone since changed it or its scene, or made, removed or
   rebuilt its track or a clip it named (a scene the producer removed does
   not come back for it, and a track or clip they made again gets no old
@@ -435,9 +435,8 @@ The producer may have the studio (app or browser) open on the same song.
   line each. A damaged record line in the log refuses it ("the edit log
   has a damaged record at line N; nothing was changed"). Costs: a removed
   lane, track, clip or scene comes back without its comments (so do the
-  lanes `rename_device` moved, a section `rename_section` renamed loses
-  the comment above it, and so does a scene `rename_scene` renamed when
-  the run also changed its slots), a restored clip goes to the end of the
+  lanes `rename_device` moved, and a section `rename_section` renamed
+  loses the comment above it), a restored clip goes to the end of the
   clip pool, and an explicit `send.* = -60` (a silent bus) is not
   restored.
 - To see the UI: `tune serve <song> --device null --port 4580` (in the

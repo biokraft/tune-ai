@@ -142,6 +142,7 @@ pub fn undo_run(
         .rev()
         .find_map(|&i| records[i].run_title.clone());
     let plans = plan(records, &mine);
+    let renames = scene_renames(records, &mine);
     let key = |k: usize| (plans[k].last, plans[k].pos);
 
     // Each unit is one target, or a group that goes back whole (the
@@ -264,7 +265,7 @@ pub fn undo_run(
         if puts.is_empty() {
             continue;
         }
-        match put_all(doc, &puts) {
+        match put_all(doc, &puts, &renames) {
             Ok(()) => out.reverted.extend(reverted_items(puts)),
             Err(error) => waiting.push(Waiting { puts, error }),
         }
@@ -274,7 +275,7 @@ pub fn undo_run(
         let before = waiting.len();
         let mut still = Vec::new();
         for w in waiting {
-            match put_all(doc, &w.puts) {
+            match put_all(doc, &w.puts, &renames) {
                 Ok(()) => out.reverted.extend(reverted_items(w.puts)),
                 Err(error) => still.push(Waiting { error, ..w }),
             }
@@ -942,14 +943,14 @@ type Put = (Target, Value, Vec<Option<Value>>);
 /// failing both, a put the song refuses waits for the others (a renamed
 /// track's lane goes back once the track is there). The scene order goes
 /// last in each: it can only place the scenes that are there.
-fn put_all(doc: &mut SongDoc, puts: &[Put]) -> Result<(), EditError> {
+fn put_all(doc: &mut SongDoc, puts: &[Put], renames: &[(String, String)]) -> Result<(), EditError> {
     let in_order = |order: Vec<&Put>| -> Result<SongDoc, EditError> {
         let mut copy = doc.clone();
-        rename_scenes_back(&mut copy, &order);
+        let renamed = rename_scenes_back(&mut copy, &order, renames);
         let (orders, rest): (Vec<&Put>, Vec<&Put>) =
             order.into_iter().partition(|p| p.0 == Target::SceneOrder);
         for (target, value, _) in rest.into_iter().chain(orders) {
-            copy.put(target, value)?;
+            copy.put(target, &with_old_names(target, value, &renamed))?;
         }
         Ok(copy)
     };
@@ -961,7 +962,7 @@ fn put_all(doc: &mut SongDoc, puts: &[Put]) -> Result<(), EditError> {
             let sections_first = (!sections.is_empty())
                 .then(|| in_order(sections.into_iter().chain(rest).collect()).ok())
                 .flatten();
-            match sections_first.or_else(|| waiting_for_others(doc, puts)) {
+            match sections_first.or_else(|| waiting_for_others(doc, puts, renames)) {
                 Some(copy) => copy,
                 None => return Err(e),
             }
@@ -973,9 +974,13 @@ fn put_all(doc: &mut SongDoc, puts: &[Put]) -> Result<(), EditError> {
 
 /// Puts each value on one copy of `doc`, a refused one again after the
 /// others, until all are in (`Some`) or none of the rest goes in.
-fn waiting_for_others(doc: &SongDoc, puts: &[Put]) -> Option<SongDoc> {
+fn waiting_for_others(
+    doc: &SongDoc,
+    puts: &[Put],
+    renames: &[(String, String)],
+) -> Option<SongDoc> {
     let mut copy = doc.clone();
-    rename_scenes_back(&mut copy, &puts.iter().collect::<Vec<_>>());
+    let renamed = rename_scenes_back(&mut copy, &puts.iter().collect::<Vec<_>>(), renames);
     // The scene order once all the others are in.
     let (orders, others): (Vec<&Put>, Vec<&Put>) =
         puts.iter().partition(|p| p.0 == Target::SceneOrder);
@@ -984,7 +989,8 @@ fn waiting_for_others(doc: &SongDoc, puts: &[Put]) -> Option<SongDoc> {
             let before = rest.len();
             rest.retain(|(target, value, _)| {
                 let mut next = copy.clone();
-                let refused = next.put(target, value).is_err();
+                let value = with_old_names(target, value, &renamed);
+                let refused = next.put(target, &value).is_err();
                 if !refused {
                     copy = next;
                 }
@@ -998,35 +1004,122 @@ fn waiting_for_others(doc: &SongDoc, puts: &[Put]) -> Option<SongDoc> {
     Some(copy)
 }
 
-/// Renames back each scene `puts` take away whose place and slots one they
-/// bring back has: a scene rename the run made, undone in place so its
-/// table keeps its comments (a put writes a fresh table). The song is the
-/// one the two puts would give; they then change nothing.
-fn rename_scenes_back(doc: &mut SongDoc, puts: &[&Put]) {
-    for (target, value, _) in puts {
-        let Target::Scene(to) = target else {
+/// Undoes in place each scene rename of the run (`renames`, old name to
+/// new) that `puts` take back: the new name to go, the old one to come
+/// back, the scene under its new name there and none under the old. The
+/// scene is renamed where it sits now, so its table keeps its comments
+/// and the producer's rows keep their order; then its slots are set to the
+/// old value's. The song is the one the puts give, but for the scene's
+/// place, which is the scene order's to put back; the two puts then change
+/// nothing. A rename the song refuses is left to the puts.
+fn rename_scenes_back<'r>(
+    doc: &mut SongDoc,
+    puts: &[&Put],
+    renames: &'r [(String, String)],
+) -> Vec<&'r (String, String)> {
+    let mut renamed = Vec::new();
+    let put = |id: &str| {
+        puts.iter()
+            .find(|(t, _, _)| matches!(t, Target::Scene(s) if s == id))
+            .map(|(_, v, _)| v)
+    };
+    for rename in renames {
+        let (old, new) = rename;
+        let (Some(value), Some(gone)) = (put(old), put(new)) else {
             continue;
         };
-        if value.is_null() || doc.song().scenes.contains_key(to) {
+        let scenes = &doc.song().scenes;
+        if value.is_null()
+            || !gone.is_null()
+            || scenes.contains_key(old)
+            || !scenes.contains_key(new)
+        {
             continue;
         }
-        let from = puts.iter().find_map(|(other, gone, _)| match other {
-            Target::Scene(from) if gone.is_null() => {
-                let index = doc.song().scenes.get_index_of(from)?;
-                let now = target_value(doc.song(), other);
-                let same = value["index"].as_u64() == u64::try_from(index).ok()
-                    && without_index(&now) == without_index(value);
-                same.then(|| from.clone())
+        let mut next = doc.clone();
+        if next.rename_scene(new, old).is_err() {
+            continue;
+        }
+        let want = value["slots"].as_object();
+        let now: Vec<String> = next.song().scenes[old.as_str()]
+            .slots
+            .keys()
+            .cloned()
+            .collect();
+        let tracks = now
+            .into_iter()
+            .chain(want.into_iter().flat_map(|m| m.keys().cloned()));
+        let mut ok = true;
+        for track in tracks {
+            let path = SongPath::SceneSlot {
+                scene: old.clone(),
+                track: track.clone(),
+            };
+            let clip = want
+                .and_then(|m| m.get(&track))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let current = target_value(next.song(), &Target::Value(path.clone()));
+            if current != clip && next.set(&path, &clip).is_err() {
+                ok = false;
+                break;
             }
+        }
+        if ok {
+            *doc = next;
+            renamed.push(rename);
+        }
+    }
+    renamed
+}
+
+/// `value` for `target`, a scene order naming a scene renamed back
+/// (`renamed`, old name to new) by its old name.
+fn with_old_names(target: &Target, value: &Value, renamed: &[&(String, String)]) -> Value {
+    if *target != Target::SceneOrder || renamed.is_empty() {
+        return value.clone();
+    }
+    let old = |id: &Value| {
+        let back = renamed
+            .iter()
+            .find(|(_, new)| id.as_str() == Some(new.as_str()));
+        back.map_or_else(|| id.clone(), |(old, _)| Value::from(old.as_str()))
+    };
+    Value::Array(elements(value).iter().map(old).collect())
+}
+
+/// The run's scene renames, old name to new, a chain of them (`a` to `b`,
+/// then `b` to `c`) as one: in each record that renamed a scene, a scene
+/// gone and one come with the same place and slots.
+fn scene_renames(records: &[ActionRecord], mine: &[usize]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for r in mine.iter().map(|&i| &records[i]) {
+        if !r.actions.iter().any(|a| a == "rename_scene") {
+            continue;
+        }
+        let scene = |c: &TargetChange| match &c.target {
+            Target::Scene(s) => Some(s.clone()),
             _ => None,
-        });
-        if let Some(from) = from {
-            let mut next = doc.clone();
-            if next.rename_scene(&from, to).is_ok() {
-                *doc = next;
+        };
+        for gone in r
+            .targets
+            .iter()
+            .filter(|c| c.new.is_null() && !c.old.is_null())
+        {
+            let Some(old) = scene(gone) else { continue };
+            let came = r.targets.iter().find(|c| {
+                c.old.is_null() && !c.new.is_null() && c.new == gone.old && scene(c).is_some()
+            });
+            let Some(new) = came.and_then(scene) else {
+                continue;
+            };
+            match out.iter_mut().find(|(_, to)| *to == old) {
+                Some(chain) => chain.1 = new,
+                None => out.push((old, new)),
             }
         }
     }
+    out
 }
 
 fn reverted_items(puts: Vec<Put>) -> Vec<TargetItem> {

@@ -2423,3 +2423,26 @@ fn a_scene_rename_the_producer_removed_is_kept_whole() {
     assert_eq!(kept_targets(&u, None), ["scenes.drop", "scenes.groove"]);
     assert_eq!(f.text(), text);
 }
+
+/// I1: a scene rename goes back by renaming in place, wherever the scene
+/// sits now and whatever the run did to its slots, so its table keeps the
+/// comment above it.
+#[test]
+fn a_scene_rename_goes_back_in_place() {
+    // The run moved the renamed scene down a row.
+    let mut s = session();
+    s.agent("r1", &[rename_scene("groove", "drop")]);
+    s.agent("r1", &[move_scene("drop", 1)]);
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(s.scenes(), ["groove", "break"]);
+    assert_eq!(s.text(), SESSION);
+
+    // The run filled a slot of the renamed scene.
+    let mut s = session();
+    s.agent("r1", &[rename_scene("groove", "drop")]);
+    s.agent("r1", &[set_slot("drop", "hat", Some("h"))]);
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(s.text(), SESSION);
+}
