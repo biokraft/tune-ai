@@ -157,6 +157,14 @@ impl ControlServer {
         })
     }
 
+    /// [`start`](Self::start) in [`studio_dir`], as a host runs it: on
+    /// failure, the warning to print (`warning: CLI edits will write the
+    /// file directly: <why>`); the host goes on without the endpoint.
+    pub fn start_or_warn(handle: StudioHandle) -> Result<Self, String> {
+        Self::start(handle, &studio_dir())
+            .map_err(|e| format!("warning: CLI edits will write the file directly: {e}"))
+    }
+
     /// The port the endpoint listens on.
     pub fn port(&self) -> u16 {
         self.port

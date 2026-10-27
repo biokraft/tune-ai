@@ -6,24 +6,12 @@ use std::sync::{Mutex, PoisonError};
 
 use tauri::{Emitter, Manager, State};
 use tune_audio::CpalOut;
-use tune_studio::{Command, ControlServer, Studio, StudioConfig, StudioHandle, studio_dir};
+use tune_studio::{Command, ControlServer, Studio, StudioConfig, StudioHandle};
 
 /// The studio's control endpoint, so `tune do` and `tune set` on the open
 /// song go through the app. Taken at exit: Tauri does not drop managed
 /// state, and dropping the server removes its endpoint file.
 struct Control(Mutex<Option<ControlServer>>);
-
-/// Starts the control endpoint for `handle`; on failure the CLI edits the
-/// file instead, so the app logs it and goes on.
-fn start_control(handle: &StudioHandle) -> Option<ControlServer> {
-    match ControlServer::start(handle.clone(), &studio_dir()) {
-        Ok(control) => Some(control),
-        Err(e) => {
-            eprintln!("warning: CLI edits will write the file directly: {e}");
-            None
-        }
-    }
-}
 
 /// The song to open at start: `--song <path>` first, then the `TUNE_SONG`
 /// value. An empty value counts as unset.
@@ -95,7 +83,10 @@ pub fn run() {
                         }
                     }
                 })?;
-            let control = start_control(&handle);
+            // Without it the CLI edits the file instead: log it, go on.
+            let control = ControlServer::start_or_warn(handle.clone())
+                .map_err(|warning| eprintln!("{warning}"))
+                .ok();
             app.manage(Control(Mutex::new(control)));
             app.manage(handle);
             Ok(())
