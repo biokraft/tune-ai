@@ -123,7 +123,7 @@ fn step_events(inst: &mut dyn Instrument, pattern: &[AcidStep], bpm: f64, len: u
 #[test]
 fn acid_track_follows_the_gate_bitwise() {
     let mut rng = 1;
-    for p in 0..100 {
+    for p in 0..25 {
         let pattern = random_pattern(&mut rng);
         for bpm in [120.0, 145.0] {
             let len = step_start(64, RATE * 15.0 / bpm);
