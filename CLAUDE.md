@@ -320,21 +320,21 @@ The producer may have the studio (app or browser) open on the same song.
   | Action | Example |
   | --- | --- |
   | `add_track` | `tune do <song> add_track track=bass instrument=acid303` appends a default track (gain and pan 0, no effects or placements) |
-  | `remove_track` | `tune do <song> remove_track track=bass` removes the track, its placements and its lanes (the result lists the lanes) |
-  | `rename_track` | `tune do <song> rename_track track=bass to=lead`; lanes and `mix.duck_source` follow, but its noise changes (seeded from the track id) |
+  | `remove_track` | `tune do <song> remove_track track=bass` removes the track, its placements, its lanes and its scene slots (the result lists the lanes and the slots) |
+  | `rename_track` | `tune do <song> rename_track track=bass to=lead`; lanes, scene slots and `mix.duck_source` follow, but its noise changes (seeded from the track id) |
   | `add_effect` | `tune do <song> add_effect track=acid module=eq index=0` returns the new device's id (`eq`, then `eq2`); `id=` names it |
   | `remove_effect` | `tune do <song> remove_effect track=acid device=eq2` removes the effect and its lanes |
   | `move_effect` | `tune do <song> move_effect track=acid device=dist index=0` |
   | `rename_device` | `tune do <song> rename_device track=acid device=acid303 to=bass303` renames the instrument or an effect, its param keys and lanes |
-  | `set_instrument` | `tune do <song> set_instrument track=acid module=kick` swaps the instrument; the new device is `kick` with default settings, so the old instrument's params, lane stretches and placements of clips the new module cannot play go (the result lists them; the clips stay) and so does a `mix.duck_source` naming the track when the new module plays no drum clips; strip params stay. Dropping placements rewrites the `play` list, which drops the comments inside it, and a swap the song would not take (the only kick, while a track ducks to it) is refused with the validator's message |
+  | `set_instrument` | `tune do <song> set_instrument track=acid module=kick` swaps the instrument; the new device is `kick` with default settings, so the old instrument's params, lane stretches and placements and scene slots of clips the new module cannot play go (the result lists them; the clips stay; a notes clip's stay) and so does a `mix.duck_source` naming the track when the new module plays no drum clips; strip params stay. Dropping placements rewrites the `play` list, which drops the comments inside it, and a swap the song would not take (the only kick, while a track ducks to it) is refused with the validator's message |
 
   The clip ones, refused the same way:
 
   | Action | Example |
   | --- | --- |
   | `add_clip` | `tune do <song> add_clip clip=lead kind=notes bars=2 notes='[{ start = 0, pitch = "C3", len = 2 }]'`; `kind` is `acid`, `drum` or `notes`, `steps` only for acid and drum (16 rests by default), `bars` and `notes` only for notes; goes after the last clip |
-  | `remove_clip` | `tune do <song> remove_clip clip=k4` removes the clip and its placements (the result lists them) |
-  | `rename_clip` | `tune do <song> rename_clip clip=a1 to=bass1`; keeps its place, placements follow |
+  | `remove_clip` | `tune do <song> remove_clip clip=k4` removes the clip, its placements and the scene slots holding it (the result lists them) |
+  | `rename_clip` | `tune do <song> rename_clip clip=a1 to=bass1`; keeps its place, placements and scene slots follow |
   | `duplicate_clip` | `tune do <song> duplicate_clip clip=h to=h2` copies it right after the original, without its comments |
 
   The placement and section ones, refused the same way (`at` and `to` are 1-based

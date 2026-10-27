@@ -2489,3 +2489,129 @@ fn a_scene_move_is_one_undo_step() {
     core.undo(tune_studio::Source::Human).expect("undoes");
     assert_eq!(s.text(), SESSION);
 }
+
+#[test]
+fn remove_track_removes_its_slots() {
+    let s = session();
+    let out = s.ok(Action::RemoveTrack {
+        track: "acid".into(),
+    });
+    assert_eq!(
+        out.results[0]["removed"]["slots"],
+        json!([{"scene": "groove", "track": "acid", "clip": "a1"}])
+    );
+    let text = s.text();
+    assert!(text.contains("slots = { kick = \"k4\" }"), "{text}");
+    assert!(text.contains("# jam rows\n[scenes.groove]"), "{text}");
+    assert_eq!(scene_ids(&s.song()), ["groove", "break"]);
+    assert_eq!(s.song().scenes["groove"].slots.len(), 1);
+}
+
+#[test]
+fn rename_track_renames_its_slots() {
+    let s = session();
+    s.ok(Action::RenameTrack {
+        track: "acid".into(),
+        to: "bass".into(),
+    });
+    let text = s.text();
+    assert!(
+        text.contains("slots = { kick = \"k4\", bass = \"a1\" }"),
+        "{text}"
+    );
+    let song = s.song();
+    let keys: Vec<_> = song.scenes["groove"].slots.keys().collect();
+    assert_eq!(keys, ["kick", "bass"], "the key keeps its place");
+    assert_eq!(scene_ids(&song), ["groove", "break"]);
+    comments_kept(SESSION, &text, &[]);
+}
+
+#[test]
+fn remove_clip_removes_its_slots() {
+    let s = session();
+    let out = s.ok(Action::RemoveClip { clip: "h".into() });
+    assert_eq!(
+        out.results[0]["removed"]["slots"],
+        json!([{"scene": "break", "track": "hat", "clip": "h"}])
+    );
+    assert_eq!(
+        out.results[0]["removed"]["placements"],
+        json!([
+            {"track": "hat", "at": 1, "clip": "h", "bars": 2, "offset": 0},
+            {"track": "hat", "at": 3, "clip": "h", "bars": 2, "offset": 0},
+        ])
+    );
+    let text = s.text();
+    assert!(text.contains("# hats alone\n[scenes.break]\n"), "{text}");
+    assert!(!text.contains("hat = \"h\""), "{text}");
+    assert_eq!(
+        text.matches("slots =").count(),
+        1,
+        "only groove keeps a slots line:\n{text}"
+    );
+    assert!(s.song().scenes["break"].slots.is_empty());
+}
+
+#[test]
+fn rename_clip_rewrites_slots() {
+    let s = session();
+    s.ok(Action::RenameClip {
+        clip: "a1".into(),
+        to: "bass1".into(),
+    });
+    let text = s.text();
+    assert!(
+        text.contains("slots = { kick = \"k4\", acid = \"bass1\" }"),
+        "{text}"
+    );
+    assert_eq!(s.song().scenes["groove"].slots["acid"], "bass1");
+}
+
+#[test]
+fn set_instrument_removes_the_slots_it_cannot_play() {
+    let s = session();
+    let out = s.ok(set_instrument("acid", "kick"));
+    assert_eq!(
+        out.results[0]["removed"]["slots"],
+        json!([{"scene": "groove", "track": "acid", "clip": "a1"}])
+    );
+    let text = s.text();
+    assert!(text.contains("slots = { kick = \"k4\" }"), "{text}");
+}
+
+#[test]
+fn slot_clean_ups_keep_comments_in_slots_tables_and_scene_less_songs() {
+    // A `[scenes.x.slots]` table keeps its header when its last slot goes.
+    let text = SESSION.replace(
+        "slots = { hat = \"h\" }",
+        "[scenes.break.slots]\nhat = \"h\" # the hats",
+    );
+    let s = song_with(&text);
+    s.ok(Action::RenameTrack {
+        track: "hat".into(),
+        to: "hh".into(),
+    });
+    assert!(s.text().contains("hh = \"h\" # the hats"), "{}", s.text());
+    s.ok(Action::RenameClip {
+        clip: "h".into(),
+        to: "hh1".into(),
+    });
+    assert!(s.text().contains("hh = \"hh1\" # the hats"), "{}", s.text());
+    s.ok(Action::RemoveTrack { track: "hh".into() });
+    let after = s.text();
+    assert!(
+        after.contains("# hats alone\n[scenes.break]\n[scenes.break.slots]"),
+        "{after}"
+    );
+    assert!(!after.contains("the hats"), "{after}");
+    assert!(s.song().scenes["break"].slots.is_empty());
+
+    // A song with no scenes has nothing to clean up.
+    let s = fixture();
+    s.ok(Action::RenameTrack {
+        track: "acid".into(),
+        to: "bass".into(),
+    });
+    s.ok(Action::RemoveClip { clip: "k4".into() });
+    assert!(!s.text().contains("scenes"), "{}", s.text());
+}

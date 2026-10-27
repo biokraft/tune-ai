@@ -7,8 +7,8 @@
 //! table with it, a moved one carries them, and every other byte stays.
 
 use toml_edit::{DocumentMut, Item};
-use tune_song::toml_doc::{normalize_positions, root_child, walk, walk_mut};
-use tune_song::{Removed, scene_table_toml};
+use tune_song::toml_doc::{Slot, normalize_positions, root_child, walk, walk_mut};
+use tune_song::{Removed, RemovedSlot, Song, scene_table_toml};
 
 use super::items::{Place, insert_table, rename_keys};
 use super::{EditError, SongDoc, put_slot};
@@ -125,6 +125,54 @@ impl SongDoc {
             _ => Ok(()),
         }
     }
+}
+
+/// The `slots` table of scene `scene`, when the file has one.
+fn slots_of<'a>(doc: &'a mut DocumentMut, scene: &str) -> Option<Slot<'a>> {
+    root_child(doc, "scenes")?.child(scene)?.child("slots")
+}
+
+/// Takes the listed slots out of their scenes' tables, as emptying them with
+/// [`SongDoc::set_slot`] does.
+pub(super) fn clear_slots(doc: &mut DocumentMut, slots: &[RemovedSlot]) -> Option<()> {
+    for slot in slots {
+        let scene = root_child(doc, "scenes")?.child(&slot.scene)?;
+        put_slot(scene, &slot.track, None)?;
+    }
+    Some(())
+}
+
+/// Renames the slot key `track` to `to` in every scene of `song` that has
+/// it, in place: the key keeps its position, spacing and value.
+pub(super) fn rename_slot_track(
+    doc: &mut DocumentMut,
+    song: &Song,
+    track: &str,
+    to: &str,
+) -> Option<()> {
+    for (id, scene) in &song.scenes {
+        if scene.slots.contains_key(track) {
+            let slots = slots_of(doc, id)?;
+            rename_keys(slots, |k| (k == track).then(|| to.to_owned()))?;
+        }
+    }
+    Some(())
+}
+
+/// Rewrites every slot value `clip` in the scenes of `song` to `to`, keeping
+/// the spacing and comments around it.
+pub(super) fn rename_slot_clip(
+    doc: &mut DocumentMut,
+    song: &Song,
+    clip: &str,
+    to: &str,
+) -> Option<()> {
+    for (id, scene) in &song.scenes {
+        for (track, _) in scene.slots.iter().filter(|(_, c)| *c == clip) {
+            slots_of(doc, id)?.put(track, toml_edit::Value::from(to));
+        }
+    }
+    Some(())
 }
 
 /// Gives the tables of scene `scene` (its own and those under it) the place

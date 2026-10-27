@@ -803,3 +803,23 @@ fn scenes_from_the_cli() {
         json!([{"scene": "break", "track": "hat", "clip": "h"}])
     );
 }
+
+#[test]
+fn removed_slots_are_printed() {
+    let e = fixture();
+    let session =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/session.toml");
+    fs::copy(session, &e.song).unwrap();
+    let song = e.song.to_str().unwrap();
+    let out = e
+        .tune()
+        .args(["do", song, "remove_track", "track=acid"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("removed slot a1 on acid in scene groove"),
+        "{text}"
+    );
+}
