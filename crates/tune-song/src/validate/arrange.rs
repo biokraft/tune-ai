@@ -413,8 +413,9 @@ fn placements(
                         errors.at(
                             &clip.span,
                             format!(
-                                "clip `{}` is an {} clip; track `{track}` ({}) plays {} clips",
+                                "clip `{}` is {} {} clip; track `{track}` ({}) plays {} clips",
                                 clip.value,
+                                article(kind.name()),
                                 kind.name(),
                                 module.name,
                                 or_list(&plays)
@@ -658,4 +659,12 @@ fn resolve(
         return None;
     }
     Some((track_id.to_owned(), param_id.to_owned()))
+}
+
+/// The indefinite article before `word`: "an" before a vowel, else "a".
+fn article(word: &str) -> &'static str {
+    match word.chars().next() {
+        Some('a' | 'e' | 'i' | 'o' | 'u') => "an",
+        _ => "a",
+    }
 }

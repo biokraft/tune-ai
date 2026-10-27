@@ -348,6 +348,15 @@ fn placement_rules() {
         "clip `a1` is an acid clip; track `kick` (kick) plays drum clips",
     );
     fails_at(
+        &swap(
+            r#"play = [{ at = 3, clip = "a1", bars = 2 }]"#,
+            r#"play = [{ at = 3, clip = "k4", bars = 2 }]"#,
+        ),
+        "\"k4\", bars = 2 }]",
+        0,
+        "clip `k4` is a drum clip; track `acid` (acid303) plays acid clips",
+    );
+    fails_at(
         &kick(r#"play = [{ at = 1, clip = "x", bars = 2 }]"#),
         "\"x\"",
         0,
