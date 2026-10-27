@@ -65,6 +65,12 @@ pub enum EditError {
     /// A track or device edit the song model refused.
     #[error("{0}")]
     Op(#[from] EditOpError),
+    /// The file writes `key` in a valid form the writer cannot edit yet
+    /// (`form` describes it).
+    #[error(
+        "this file writes `{key}` as {form}; the studio can't edit that form yet, so change it by hand"
+    )]
+    UnsupportedForm { key: String, form: String },
     #[error("the edit would make the song invalid:\n{}", summary(.0))]
     Invalid(Vec<SongError>),
     /// The studio could not carry out an edit it accepted: a bug, never a

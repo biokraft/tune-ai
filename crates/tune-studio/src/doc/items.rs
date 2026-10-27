@@ -24,6 +24,7 @@ impl SongDoc {
     /// [`tune_song::add_track`]). Its table is written right after the last
     /// track table.
     pub fn add_track(&mut self, track: &str, module: &str) -> Result<(), EditError> {
+        self.check_tracks_form()?;
         let edited = tune_song::add_track(&self.song, Registry::builtin(), track, module)?;
         let table = edited.arranged.song.tracks[track].clone();
         self.write_edited(edited, |doc| insert_track(doc, track, &table))?;
@@ -73,6 +74,7 @@ impl SongDoc {
         id: Option<&str>,
         index: Option<usize>,
     ) -> Result<String, EditError> {
+        self.check_fx_form(track)?;
         let edited =
             tune_song::add_effect(&self.song, Registry::builtin(), track, module, id, index)?;
         let at = index.unwrap_or(self.song.tracks[track].fx.len());
@@ -84,6 +86,7 @@ impl SongDoc {
     /// Removes effect `device` of `track` and its lane stretches (see
     /// [`tune_song::remove_effect`]). Returns what went with it.
     pub fn remove_effect(&mut self, track: &str, device: &str) -> Result<Removed, EditError> {
+        self.check_fx_form(track)?;
         let edited = tune_song::remove_effect(&self.song, track, device)?;
         let at = self.song.tracks[track]
             .fx
@@ -101,6 +104,7 @@ impl SongDoc {
         device: &str,
         index: usize,
     ) -> Result<(), EditError> {
+        self.check_fx_form(track)?;
         let edited = tune_song::move_effect(&self.song, track, device, index)?;
         let at = self.song.tracks[track]
             .fx
@@ -357,6 +361,35 @@ impl SongDoc {
     /// the lane stretches it kept, and commits the copy only when it
     /// describes exactly the edited song. An edit that changes nothing
     /// writes nothing.
+    /// Refuses a file whose `tracks` is a root inline table (`tracks = {
+    /// … }`): a valid form the writer cannot add a track to yet.
+    fn check_tracks_form(&self) -> Result<(), EditError> {
+        match self.doc.as_table().get("tracks") {
+            Some(Item::Value(_)) => Err(EditError::UnsupportedForm {
+                key: "tracks".to_owned(),
+                form: "an inline table (`tracks = { ... }`)".to_owned(),
+            }),
+            _ => Ok(()),
+        }
+    }
+
+    /// Refuses a track whose effect chain is written as `[[tracks.<t>.fx]]`
+    /// tables: a valid form the writer edits only as an inline array yet.
+    fn check_fx_form(&self, track: &str) -> Result<(), EditError> {
+        let fx = self.doc.as_table().get("tracks").and_then(|t| t.get(track));
+        if fx
+            .and_then(|t| t.get("fx"))
+            .is_some_and(Item::is_array_of_tables)
+        {
+            let key = format!("tracks.{track}.fx");
+            return Err(EditError::UnsupportedForm {
+                form: format!("[[{key}]] tables"),
+                key,
+            });
+        }
+        Ok(())
+    }
+
     fn write_edited(
         &mut self,
         edited: Edited,

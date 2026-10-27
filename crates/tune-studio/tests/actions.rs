@@ -832,6 +832,65 @@ fn edits_work_on_a_file_in_inline_and_one_line_forms() {
     SongDoc::parse(&s.text()).expect("parses as a doc");
 }
 
+// ----- forms the writer cannot edit yet -----
+
+/// m14: an effect chain written as `[[tracks.<t>.fx]]` tables is a valid
+/// song, but the writer edits inline `fx` arrays only: adding, removing or
+/// moving an effect is refused with a plain message, not an internal error.
+#[test]
+fn an_fx_array_of_tables_is_refused_plainly() {
+    let text = FIXTURE.replace(
+        "fx = [{ type = \"distortion\", mode = \"soft\", params = { \"dist.drive\" = 12 } }]\n\
+         play = [{ at = 3, clip = \"a1\", bars = 2 }]\n",
+        "play = [{ at = 3, clip = \"a1\", bars = 2 }]\n\n\
+         [[tracks.acid.fx]]\ntype = \"distortion\"\nmode = \"soft\"\n\
+         params = { \"dist.drive\" = 12 }\n\n\
+         [[tracks.acid.fx]]\ntype = \"eq\"\n",
+    );
+    let s = song_with(&text);
+    assert_eq!(s.song().tracks["acid"].fx.len(), 2, "{text}");
+    let want = "this file writes `tracks.acid.fx` as [[tracks.acid.fx]] tables; \
+                the studio can't edit that form yet, so change it by hand";
+    let actions = [
+        Action::AddEffect {
+            track: "acid".into(),
+            module: "eq".into(),
+            id: Some("eq2".into()),
+            index: None,
+        },
+        Action::RemoveEffect {
+            track: "acid".into(),
+            device: "eq".into(),
+        },
+        Action::MoveEffect {
+            track: "acid".into(),
+            device: "eq".into(),
+            index: 0,
+        },
+    ];
+    for action in actions {
+        assert_eq!(s.refused(action.clone()), want, "{action:?}");
+    }
+}
+
+/// m14: a root inline `tracks = { … }` table (a key of the root table,
+/// so before `[song]`) is a valid song, but a new track cannot be written
+/// into it: refused plainly.
+#[test]
+fn a_root_inline_tracks_table_is_refused_plainly() {
+    let text = "tracks = { kick = { instrument = \"kick\", play = [{ at = 1, clip = \"k\", bars = 1 }] } }\n\n\
+                [song]\nversion = 2\nname = \"x\"\nbpm = 120\n\n\
+                [clips.k]\nkind = \"drum\"\nsteps = \"x...\"\n\n\
+                [[sections]]\nname = \"a\"\nbars = 1\n";
+    let s = song_with(text);
+    assert_eq!(s.song().tracks.len(), 1);
+    assert_eq!(
+        s.refused(add_track("bass", "acid303")),
+        "this file writes `tracks` as an inline table (`tracks = { ... }`); \
+         the studio can't edit that form yet, so change it by hand"
+    );
+}
+
 // ----- set_instrument -----
 
 fn set_instrument(track: &str, module: &str) -> Action {

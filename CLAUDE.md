@@ -300,7 +300,9 @@ The producer may have the studio (app or browser) open on the same song.
 
 - Actions (`tune actions` lists them all; each is `tune do <song> <name> name=value...`).
   The track and device ones, each refused with a plain message when the id is
-  taken, malformed or unknown, and the file left as it was:
+  taken, malformed or unknown, and the file left as it was (so are the
+  effect ones on a chain written as `[[tracks.<t>.fx]]` tables, and
+  `add_track` on a root `tracks = { … }` table: edit those forms by hand):
 
   | Action | Example |
   | --- | --- |
