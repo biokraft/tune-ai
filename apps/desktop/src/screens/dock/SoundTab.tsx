@@ -138,7 +138,10 @@ export const SoundTab = memo(function SoundTab({
                   value={fx.mode}
                   highlight={highlight(`${fx.id}.mode`)}
                   onChange={(mode) =>
-                    fire({ cmd: "set_fx_mode", args: { track: track.id, device: fx.id, mode } })
+                    fire({
+                      cmd: "set_device_setting",
+                      args: { track: track.id, device: fx.id, setting: "mode", value: mode },
+                    })
                   }
                 />
               ) : undefined

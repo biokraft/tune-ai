@@ -85,6 +85,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tune_studio::Action;
 
     const MINI: &str = include_str!("../../../../crates/tune-song/tests/fixtures/mini.toml");
 
@@ -106,12 +107,12 @@ mod tests {
         )
         .expect("spawns");
         handle
-            .call(Command::SetParam {
+            .call(Command::Action(Action::SetParam {
                 track: "acid".into(),
                 param: "acid303.cutoff".into(),
                 value: 823.456,
                 commit: true,
-            })
+            }))
             .expect("commit");
         // The 150 ms debounce has not fired yet.
         assert!(!std::fs::read_to_string(&path).unwrap().contains("823.5"));

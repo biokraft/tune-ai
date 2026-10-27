@@ -1,0 +1,318 @@
+//! The action layer: every song edit, transport control and undo as one
+//! named, typed [`Action`].
+//!
+//! The studio UI, `tune do` and `tune set` all call the same actions. Each
+//! has one serde form, `{"cmd": "<snake_case name>", "args": {…}}` (`args`
+//! left out for an action without arguments), and one entry in the
+//! [`ACTIONS`] catalog that names its kind, its arguments and their help, so
+//! `tune actions` can list them and [`action_from_cli`] can read them from
+//! `name=value` arguments.
+
+mod apply;
+mod catalog;
+mod cli;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tune_dsp::DrumHit;
+
+use crate::path::{SongPath, TrackField};
+
+pub(crate) use apply::{ApplyCtx, apply_action};
+pub use catalog::{ACTIONS, find_action};
+pub use cli::{action_from_cli, parse_value};
+
+/// One action. Optional arguments may be left out and serialize as `null`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "cmd", content = "args", rename_all = "snake_case")]
+pub enum Action {
+    // ----- live -----
+    /// Starts playback at `from_bar` (0-based), else at the cursor.
+    Play {
+        #[serde(default)]
+        from_bar: Option<u32>,
+    },
+    Stop,
+    /// Moves the cursor to `bar` (0-based).
+    SeekBar {
+        bar: u32,
+    },
+    /// Loops the half-open bar range `[start, end)` (0-based), or stops
+    /// looping.
+    SetLoop {
+        #[serde(default)]
+        bars: Option<[u32; 2]>,
+    },
+    // ----- history -----
+    Undo,
+    Redo,
+    // ----- song edits -----
+    /// Sets the value at `path`, as `tune set` does.
+    SetValue {
+        path: SongPath,
+        value: Value,
+    },
+    /// A knob. `commit: false` is a live drag that is heard but not written;
+    /// `commit: true` (the release, and the default) writes the value,
+    /// rounded to 4 significant digits.
+    SetParam {
+        track: String,
+        param: String,
+        value: f64,
+        #[serde(default = "yes")]
+        commit: bool,
+    },
+    /// Sets the setting `setting` of the track's device `device` (its id,
+    /// e.g. `dist`): `tracks.<t>.<device>.<setting>`.
+    SetDeviceSetting {
+        track: String,
+        device: String,
+        setting: String,
+        value: String,
+    },
+    /// Sets one step of an acid clip. A rest (`note: None`) carries no
+    /// accent or slide.
+    SetAcidStep {
+        clip: String,
+        index: usize,
+        #[serde(default)]
+        note: Option<u8>,
+        accent: bool,
+        slide: bool,
+    },
+    SetDrumStep {
+        clip: String,
+        index: usize,
+        hit: DrumHitDto,
+    },
+    /// Moves section `from` to index `to` (remove, then insert).
+    MoveSection {
+        from: usize,
+        to: usize,
+    },
+    ResizeSection {
+        index: usize,
+        bars: u32,
+    },
+    DuplicateSection {
+        index: usize,
+    },
+    DeleteSection {
+        index: usize,
+    },
+    /// Which clip a track plays in a section; `None` silences it there.
+    SetSectionPlay {
+        section: usize,
+        track: String,
+        #[serde(default)]
+        clip: Option<String>,
+    },
+    /// Sets each given mixer field; numbers are rounded to 4 significant
+    /// digits.
+    SetTrackMix {
+        track: String,
+        #[serde(default)]
+        gain_db: Option<f64>,
+        #[serde(default)]
+        pan: Option<f64>,
+        #[serde(default)]
+        mute: Option<bool>,
+        #[serde(default)]
+        solo: Option<bool>,
+    },
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// What an action does: change the song, drive the transport, or walk the
+/// undo history.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionKind {
+    Edit,
+    Live,
+    History,
+}
+
+impl ActionKind {
+    /// The kind as `tune actions` prints it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Edit => "edit",
+            Self::Live => "live",
+            Self::History => "history",
+        }
+    }
+}
+
+/// The type of an action's argument, which says how `tune do` reads it.
+/// `Id`, `ParamId`, `Path` and `Text` take the text as given (a TOML string
+/// literal is unquoted); the others are TOML values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArgType {
+    /// A track, clip, device or setting id.
+    Id,
+    /// A param id such as `acid303.cutoff`.
+    ParamId,
+    /// An edit path such as `tracks.acid.acid303.cutoff`.
+    Path,
+    Text,
+    Int,
+    Number,
+    Bool,
+    /// Any TOML value.
+    Json,
+}
+
+impl ArgType {
+    /// The type as `tune actions` prints it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Id => "id",
+            Self::ParamId => "param_id",
+            Self::Path => "path",
+            Self::Text => "text",
+            Self::Int => "int",
+            Self::Number => "number",
+            Self::Bool => "bool",
+            Self::Json => "json",
+        }
+    }
+
+    /// Whether `tune do` takes the argument's text as given.
+    pub fn is_text(self) -> bool {
+        matches!(self, Self::Id | Self::ParamId | Self::Path | Self::Text)
+    }
+}
+
+/// One argument of an action.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArgSpec {
+    pub name: &'static str,
+    pub ty: ArgType,
+    pub required: bool,
+    pub help: &'static str,
+}
+
+/// One action in the catalog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ActionSpec {
+    pub name: &'static str,
+    pub kind: ActionKind,
+    pub help: &'static str,
+    pub args: &'static [ArgSpec],
+}
+
+impl Action {
+    /// The action's wire name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Play { .. } => "play",
+            Self::Stop => "stop",
+            Self::SeekBar { .. } => "seek_bar",
+            Self::SetLoop { .. } => "set_loop",
+            Self::Undo => "undo",
+            Self::Redo => "redo",
+            Self::SetValue { .. } => "set_value",
+            Self::SetParam { .. } => "set_param",
+            Self::SetDeviceSetting { .. } => "set_device_setting",
+            Self::SetAcidStep { .. } => "set_acid_step",
+            Self::SetDrumStep { .. } => "set_drum_step",
+            Self::MoveSection { .. } => "move_section",
+            Self::ResizeSection { .. } => "resize_section",
+            Self::DuplicateSection { .. } => "duplicate_section",
+            Self::DeleteSection { .. } => "delete_section",
+            Self::SetSectionPlay { .. } => "set_section_play",
+            Self::SetTrackMix { .. } => "set_track_mix",
+        }
+    }
+
+    /// The action's catalog entry.
+    pub fn spec(&self) -> &'static ActionSpec {
+        find_action(self.name()).expect("every action is in the catalog")
+    }
+
+    pub fn kind(&self) -> ActionKind {
+        self.spec().kind
+    }
+
+    /// Edit paths this action changes, in the UI's highlight-key form.
+    pub fn targets(&self) -> Vec<String> {
+        match self {
+            Self::SetValue { path, .. } => vec![path.to_string()],
+            Self::SetParam { track, param, .. } => vec![SongPath::param(track, param).to_string()],
+            Self::SetDeviceSetting {
+                track,
+                device,
+                setting,
+                ..
+            } => vec![format!("tracks.{track}.{device}.{setting}")],
+            Self::SetAcidStep { clip, index, .. } | Self::SetDrumStep { clip, index, .. } => {
+                vec![format!("clips.{clip}.steps[{index}]")]
+            }
+            Self::ResizeSection { index, .. } => vec![format!("sections[{index}].bars")],
+            Self::SetSectionPlay { section, track, .. } => {
+                vec![format!("sections[{section}].play.{track}")]
+            }
+            Self::SetTrackMix {
+                track,
+                gain_db,
+                pan,
+                mute,
+                solo,
+            } => [
+                (TrackField::GainDb, gain_db.is_some()),
+                (TrackField::Pan, pan.is_some()),
+                (TrackField::Mute, mute.is_some()),
+                (TrackField::Solo, solo.is_some()),
+            ]
+            .into_iter()
+            .filter(|(_, given)| *given)
+            .map(|(field, _)| format!("tracks.{track}.{field}"))
+            .collect(),
+            Self::MoveSection { .. }
+            | Self::DuplicateSection { .. }
+            | Self::DeleteSection { .. } => {
+                vec!["sections".to_owned()]
+            }
+            Self::Play { .. }
+            | Self::Stop
+            | Self::SeekBar { .. }
+            | Self::SetLoop { .. }
+            | Self::Undo
+            | Self::Redo => Vec::new(),
+        }
+    }
+}
+
+/// One drum step on the wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DrumHitDto {
+    Rest,
+    Hit,
+    Accent,
+}
+
+impl From<DrumHit> for DrumHitDto {
+    fn from(h: DrumHit) -> Self {
+        match h {
+            DrumHit::Rest => Self::Rest,
+            DrumHit::Hit => Self::Hit,
+            DrumHit::Accent => Self::Accent,
+        }
+    }
+}
+
+impl From<DrumHitDto> for DrumHit {
+    fn from(h: DrumHitDto) -> Self {
+        match h {
+            DrumHitDto::Rest => Self::Rest,
+            DrumHitDto::Hit => Self::Hit,
+            DrumHitDto::Accent => Self::Accent,
+        }
+    }
+}

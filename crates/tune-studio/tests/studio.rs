@@ -13,8 +13,8 @@ use serde_json::{Value, json};
 use tune_engine::{AudioOut, CompiledSong, LiveProcessor, RenderOptions, render};
 use tune_song::parse_song;
 use tune_studio::{
-    Command, EditLog, Event, SongPath, Source, StudioConfig, StudioError, StudioHandle,
-    StudioState, set_paths,
+    Action, Command, EditLog, Event, SongPath, Source, StudioCommand, StudioConfig, StudioError,
+    StudioHandle, StudioState, set_paths,
 };
 
 const MINI: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
@@ -167,16 +167,16 @@ impl Fixture {
 }
 
 fn play(from_bar: Option<u32>) -> Command {
-    Command::Play { from_bar }
+    Command::Action(Action::Play { from_bar })
 }
 
 fn knob(param: &str, value: f64, commit: bool) -> Command {
-    Command::SetParam {
+    Command::Action(Action::SetParam {
         track: "acid".into(),
         param: param.into(),
         value,
         commit,
-    }
+    })
 }
 
 fn acid_param(param: &str) -> SongPath {
@@ -294,18 +294,20 @@ fn get_state_repeats_a_migration_that_could_not_be_saved() {
         other => panic!("expected the migration error, got {other:?}"),
     };
     unsaved(next());
-    studio.call(Command::GetState).expect("get_state");
+    studio
+        .call(Command::Studio(StudioCommand::GetState))
+        .expect("get_state");
     unsaved(next());
 }
 
 #[test]
 fn get_state_returns_current_state_and_changes_nothing() {
     let f = fixture(MINI);
-    f.call(Command::SeekBar { bar: 1 });
-    f.call(Command::SetLoop { bars: Some([0, 2]) });
+    f.call(Command::Action(Action::SeekBar { bar: 1 }));
+    f.call(Command::Action(Action::SetLoop { bars: Some([0, 2]) }));
     let shown = f.state("loop state", |s| s.loop_bars == Some([0, 2]));
     let before = f.disk();
-    let got = f.call(Command::GetState);
+    let got = f.call(Command::Studio(StudioCommand::GetState));
     assert_eq!(got, serde_json::to_value(&shown).expect("state to JSON"));
     assert_eq!(got["cursor_bar"], json!(1));
     assert_eq!(got["song"]["name"], json!("mini"));
@@ -313,7 +315,9 @@ fn get_state_returns_current_state_and_changes_nothing() {
     f.quiet(Duration::from_millis(300), "event", |_| true);
     assert_eq!(f.disk(), before);
     assert!(
-        !f.studio.call(Command::GetState).unwrap()["can_undo"]
+        !f.studio
+            .call(Command::Studio(StudioCommand::GetState))
+            .unwrap()["can_undo"]
             .as_bool()
             .unwrap()
     );
@@ -444,7 +448,7 @@ fn own_write_is_quiet() {
 fn automated_release_writes_nothing() {
     let f = fixture(MINI);
     // Section `b` has a cutoff lane.
-    f.call(Command::SeekBar { bar: 2 });
+    f.call(Command::Action(Action::SeekBar { bar: 2 }));
     assert_eq!(
         f.call(knob("acid303.cutoff", 900.0, true)),
         json!({ "automated": true })
@@ -487,7 +491,7 @@ fn external_edit_during_drag_keeps_gesture() {
     // fresh on both sides: only the knob can make them differ.
     f.pull(12_000);
     sleep(Duration::from_millis(100));
-    f.call(Command::SeekBar { bar: 0 });
+    f.call(Command::Action(Action::SeekBar { bar: 0 }));
     let at_file_value = render_bars(&claude_text, 0, 1);
     assert!(
         f.pull(9600) != at_file_value[..19_200],
@@ -504,7 +508,7 @@ fn external_edit_during_drag_keeps_gesture() {
     // Control: with the knob in the file and the override cleared, the
     // capture is the render of the file again, so the checks above compare
     // like with like.
-    f.call(Command::SeekBar { bar: 0 });
+    f.call(Command::Action(Action::SeekBar { bar: 0 }));
     assert!(
         f.pull(9600) == render_bars(&text, 0, 1)[..19_200],
         "after the release the file is what plays"
@@ -531,7 +535,7 @@ fn live_value_after_release_is_dropped() {
     // Let the release's swap land, then compare a fresh bar with the file.
     f.pull(12_000);
     sleep(Duration::from_millis(150));
-    f.call(Command::SeekBar { bar: 0 });
+    f.call(Command::Action(Action::SeekBar { bar: 0 }));
     assert!(
         f.pull(9600) == render_bars(&text, 0, 1)[..19_200],
         "the file plays, not the stale live value"
@@ -542,7 +546,7 @@ fn live_value_after_release_is_dropped() {
     f.call(knob("acid303.cutoff", 300.0, false));
     f.pull(4800);
     sleep(Duration::from_millis(100));
-    f.call(Command::SeekBar { bar: 0 });
+    f.call(Command::Action(Action::SeekBar { bar: 0 }));
     assert!(
         f.pull(9600) != render_bars(&text, 0, 1)[..19_200],
         "a later drag is heard"
@@ -572,7 +576,7 @@ fn drag_during_reload_is_resent() {
     // The swap lands at the next step; the drag sent before it was dropped.
     f.pull(12_000);
     sleep(Duration::from_millis(150));
-    f.call(Command::SeekBar { bar: 0 });
+    f.call(Command::Action(Action::SeekBar { bar: 0 }));
     assert!(
         f.pull(9600) != render_bars(&reloaded, 0, 1)[..19_200],
         "the drag is heard after the reload"
@@ -587,7 +591,7 @@ fn unreported_external_change_is_emitted() {
     f.call(knob("acid303.cutoff", 820.0, true));
     fs::write(&f.path, with_bpm_121(MINI)).unwrap();
     // Undo flushes at once, long before the watcher's debounce ends.
-    f.call(Command::Undo);
+    f.call(Command::Action(Action::Undo));
     match f.wait("external change", |e| matches!(e, Event::ExternalChange(_))) {
         Event::ExternalChange(ext) => {
             assert_eq!(ext.source, Source::External);
@@ -609,10 +613,10 @@ fn unreported_external_change_is_emitted() {
 #[test]
 fn delete_section_under_playhead() {
     let f = fixture(MINI);
-    f.call(Command::SetLoop { bars: Some([2, 4]) });
+    f.call(Command::Action(Action::SetLoop { bars: Some([2, 4]) }));
     f.call(play(Some(3)));
     f.pull(4800);
-    f.call(Command::DeleteSection { index: 1 });
+    f.call(Command::Action(Action::DeleteSection { index: 1 }));
     let s = f.state("state of the 2-bar song", |s| {
         s.song.as_ref().is_some_and(|v| v.total_bars == 2)
     });
@@ -630,7 +634,7 @@ fn stop_keeps_cursor() {
     f.call(play(Some(0)));
     f.state("playing state", |s| s.playing);
     f.pull(96_000);
-    f.call(Command::Stop);
+    f.call(Command::Action(Action::Stop));
     let s = f.state("stopped state", |s| !s.playing);
     assert_eq!(s.cursor_bar, 1);
     f.call(play(None));
@@ -673,12 +677,14 @@ fn list_and_open() {
     }
     assert!(matches!(studio.call(play(None)), Err(StudioError::NoSong)));
     assert_eq!(
-        studio.call(Command::ListSongs).unwrap(),
+        studio
+            .call(Command::Studio(StudioCommand::ListSongs))
+            .unwrap(),
         json!(["songs/a/song.toml", "songs/b/song.toml"])
     );
-    let open = Command::OpenSong {
+    let open = Command::Studio(StudioCommand::OpenSong {
         path: "songs/b/song.toml".into(),
-    };
+    });
     assert_eq!(studio.call(open).unwrap(), Value::Null);
     let deadline = Instant::now() + WAIT;
     loop {
@@ -703,7 +709,7 @@ fn shutdown_writes_pending_edits() {
     f.studio.shutdown();
     assert!(f.disk().contains("\"acid303.cutoff\" = 820"));
     assert!(matches!(
-        f.studio.call(Command::Stop),
+        f.studio.call(Command::Action(Action::Stop)),
         Err(StudioError::Closed)
     ));
 }
@@ -771,7 +777,7 @@ fn comment_only_undo_publishes_state() {
         _ => unreachable!(),
     }
     f.state("undoable state", |s| s.can_undo && !s.can_redo);
-    assert_eq!(f.call(Command::Undo), json!([]));
+    assert_eq!(f.call(Command::Action(Action::Undo)), json!([]));
     f.state("redoable state", |s| s.can_redo);
     assert_eq!(f.disk(), MINI);
 }
@@ -791,14 +797,17 @@ fn loop_survives_a_full_queue() {
     let f = fixture(MINI);
     f.call(play(Some(0)));
     flood_queue(&f);
-    f.call(Command::SetTrackMix {
+    f.call(Command::Action(Action::SetTrackMix {
         track: "hat".into(),
         gain_db: Some(-12.0),
         pan: None,
         mute: None,
         solo: None,
-    });
-    assert_eq!(f.call(Command::SetLoop { bars: Some([0, 1]) }), Value::Null);
+    }));
+    assert_eq!(
+        f.call(Command::Action(Action::SetLoop { bars: Some([0, 1]) })),
+        Value::Null
+    );
     f.pull(BLOCK);
     // Ticks send the swap, then the loop.
     sleep(Duration::from_millis(150));
@@ -839,15 +848,17 @@ fn open_song_stays_under_root() {
         "../nope/song.toml".to_owned(),
         outside.to_str().unwrap().to_owned(),
     ] {
-        match studio.call(Command::OpenSong { path: path.clone() }) {
+        match studio.call(Command::Studio(StudioCommand::OpenSong {
+            path: path.clone(),
+        })) {
             Err(StudioError::OutsideRoot(p)) => assert_eq!(p, path),
             other => panic!("{path}: expected OutsideRoot, got {other:?}"),
         }
     }
     assert!(matches!(
-        studio.call(Command::OpenSong {
+        studio.call(Command::Studio(StudioCommand::OpenSong {
             path: "songs/nope/song.toml".into()
-        }),
+        })),
         Err(StudioError::Io(_))
     ));
     // Inside the root, relative or absolute, is fine.
@@ -857,7 +868,7 @@ fn open_song_stays_under_root() {
         "songs/../songs/a/song.toml",
         inside.to_str().unwrap(),
     ] {
-        let open = Command::OpenSong { path: path.into() };
+        let open = Command::Studio(StudioCommand::OpenSong { path: path.into() });
         assert_eq!(studio.call(open).unwrap(), Value::Null, "{path}");
     }
 }
@@ -890,12 +901,12 @@ fn test_binary_directory_stays_small() {
 }
 
 fn mix_knob(param: &str, value: f64, commit: bool) -> Command {
-    Command::SetParam {
+    Command::Action(Action::SetParam {
         track: "mix".into(),
         param: param.into(),
         value,
         commit,
-    }
+    })
 }
 
 /// A mix knob is a live override like a track knob: heard while held,
@@ -935,7 +946,7 @@ fn drag_mix_knob_overrides_live() {
     // Let the release's swap land, then compare a fresh bar with the file.
     f.pull(12_000);
     sleep(Duration::from_millis(150));
-    f.call(Command::SeekBar { bar: 0 });
+    f.call(Command::Action(Action::SeekBar { bar: 0 }));
     assert!(
         f.pull(9600) == render_bars(&text, 0, 1)[..19_200],
         "the file plays, not the dragged value"

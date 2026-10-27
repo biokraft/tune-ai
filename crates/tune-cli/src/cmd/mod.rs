@@ -7,6 +7,7 @@ use tune_song::{FORMAT_VERSION, Song};
 
 use crate::report::{Failure, Success, load_failures};
 
+pub mod actions;
 pub mod analyze;
 pub mod changes;
 pub mod compare;

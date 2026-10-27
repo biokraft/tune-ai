@@ -31,17 +31,14 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use serde_json::Value;
-use tune_dsp::DrumPattern;
-use tune_dsp::acid303::{AcidPattern, AcidStep};
-use tune_song::{Clip, FORMAT_VERSION, Song};
+use tune_song::{FORMAT_VERSION, Song};
 
-use crate::command::Command;
+use crate::action::{Action, ApplyCtx, apply_action};
 use crate::diff::{Change, diff_files, diff_songs, is_whole_replace, version_change};
-use crate::doc::{EditError, SongDoc};
+use crate::doc::SongDoc;
 use crate::error::{ErrorView, StudioError};
 use crate::log::{EditLog, Source, text_hash};
-use crate::path::{SongPath, TrackField};
+use crate::path::SongPath;
 use crate::set::write_atomic;
 use crate::view::SongView;
 
@@ -52,8 +49,6 @@ pub const UNDO_DEPTH: usize = 500;
 /// How many of the studio's own recent writes are remembered, so the file
 /// watcher can tell them from external edits.
 pub const OWN_WRITE_RING: usize = 8;
-/// Committed knob and mix values keep this many significant digits.
-const SIGNIFICANT_DIGITS: usize = 4;
 
 /// One undo step: the whole file before and after one write burst (or one
 /// external change).
@@ -66,11 +61,11 @@ pub struct UndoEntry {
 }
 
 /// An edit applied in memory but not yet written, with the changes it made
-/// at the time. The command is kept so it can be applied again onto a
+/// at the time. The action is kept so it can be applied again onto a
 /// different document (when an external change arrives first).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PendingEdit {
-    pub command: Command,
+    pub action: Action,
     pub changes: Vec<Change>,
 }
 
@@ -230,25 +225,29 @@ impl StudioCore {
         self.migration_error.as_deref()
     }
 
-    /// Applies an edit command in memory and returns what it changed. The
+    /// Applies an edit action in memory and returns what it changed. The
     /// file is written later, by [`flush`](Self::flush). An edit that
-    /// changes nothing is not recorded. Commands that are not edits
-    /// (transport, song choice, undo, a live knob drag) give
-    /// [`StudioError::NotAnEdit`]; while the file on disk does not parse,
-    /// every edit gives [`StudioError::FileInvalid`].
-    pub fn apply_edit(&mut self, cmd: &Command, now: Instant) -> Result<Vec<Change>, StudioError> {
+    /// changes nothing is not recorded. Actions that are not edits
+    /// (transport, undo, a live knob drag) give [`StudioError::NotAnEdit`];
+    /// while the file on disk does not parse, every edit gives
+    /// [`StudioError::FileInvalid`].
+    pub fn apply_edit(
+        &mut self,
+        action: &Action,
+        now: Instant,
+    ) -> Result<Vec<Change>, StudioError> {
         if !self.file_errors.is_empty() {
             return Err(StudioError::FileInvalid);
         }
         let mut doc = self.doc.clone();
-        apply_command(&mut doc, cmd)?;
+        self.apply(&mut doc, action)?;
         if doc.text() == self.doc.text() {
             return Ok(Vec::new());
         }
         let changes = diff_songs(self.doc.song(), doc.song());
         self.doc = doc;
         self.pending.push(PendingEdit {
-            command: cmd.clone(),
+            action: action.clone(),
             changes: changes.clone(),
         });
         self.last_edit = Some(now);
@@ -411,12 +410,12 @@ impl StudioCore {
                 .any(|c| touched.iter().any(|p| paths_overlap(p, &c.path)));
             if !conflicts {
                 let mut trial = next.clone();
-                if apply_command(&mut trial, &edit.command).is_ok() {
+                if self.apply(&mut trial, &edit.action).is_ok() {
                     if trial.text() != next.text() {
                         let changes = diff_songs(next.song(), trial.song());
                         ext.merged.extend(changes.iter().cloned());
                         self.pending.push(PendingEdit {
-                            command: edit.command,
+                            action: edit.action,
                             changes,
                         });
                         next = trial;
@@ -489,14 +488,13 @@ impl StudioCore {
         let mut applied = false;
         for edit in offered {
             let mut trial = self.doc.clone();
-            if apply_command(&mut trial, &edit.command).is_err() || trial.text() == self.doc.text()
-            {
+            if self.apply(&mut trial, &edit.action).is_err() || trial.text() == self.doc.text() {
                 continue;
             }
             let changes = diff_songs(self.doc.song(), trial.song());
             self.doc = trial;
             self.pending.push(PendingEdit {
-                command: edit.command,
+                action: edit.action,
                 changes,
             });
             applied = true;
@@ -620,6 +618,15 @@ impl StudioCore {
         self.is_own_write(hash) && !fs::read_to_string(&self.path).is_ok_and(|now| now == text)
     }
 
+    /// Applies `action` to `doc`, a copy of the document (see
+    /// [`apply_action`]).
+    fn apply(&self, doc: &mut SongDoc, action: &Action) -> Result<(), StudioError> {
+        let ctx = ApplyCtx {
+            log: Some(&self.log),
+        };
+        apply_action(doc, action, &ctx).map(drop)
+    }
+
     fn clear_pending(&mut self) {
         self.pending.clear();
         self.last_edit = None;
@@ -687,132 +694,6 @@ fn text_version(doc: &SongDoc) -> u32 {
     doc.migrated_from().unwrap_or(FORMAT_VERSION)
 }
 
-/// Applies one edit command to `doc`, all or nothing. Works on any document,
-/// so a pending command can be applied again onto a newer file.
-fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
-    match cmd {
-        Command::SetParam {
-            track,
-            param,
-            value,
-            commit: true,
-        } => {
-            let path = SongPath::param(track, param);
-            doc.set(&path, &Value::from(round_significant(*value)))?;
-        }
-        Command::SetFxMode {
-            track,
-            device,
-            mode,
-        } => {
-            let path = SongPath::TrackParam {
-                track: track.clone(),
-                param: format!("{device}.mode"),
-            };
-            doc.set(&path, &Value::from(mode.as_str()))?;
-        }
-        Command::SetAcidStep {
-            pattern,
-            index,
-            note,
-            accent,
-            slide,
-        } => {
-            let path = SongPath::Clip {
-                clip: pattern.clone(),
-            };
-            let mut steps = match pattern_steps(doc, &path, pattern)? {
-                Clip::Acid(p) => p.steps().to_vec(),
-                Clip::Drum(_) | Clip::Notes(_) => {
-                    return Err(bad(&path, "not an acid pattern").into());
-                }
-            };
-            let step = step_mut(&mut steps, *index)?;
-            *step = AcidStep {
-                note: *note,
-                accent: note.is_some() && *accent,
-                slide: note.is_some() && *slide,
-            };
-            let p = AcidPattern::new(steps).map_err(|e| bad(&path, &e.to_string()))?;
-            doc.set(&path, &Value::from(p.to_string()))?;
-        }
-        Command::SetDrumStep {
-            pattern,
-            index,
-            hit,
-        } => {
-            let path = SongPath::Clip {
-                clip: pattern.clone(),
-            };
-            let mut hits = match pattern_steps(doc, &path, pattern)? {
-                Clip::Drum(p) => p.hits().to_vec(),
-                Clip::Acid(_) | Clip::Notes(_) => {
-                    return Err(bad(&path, "not a drum pattern").into());
-                }
-            };
-            *step_mut(&mut hits, *index)? = (*hit).into();
-            let p = DrumPattern::new(hits).map_err(|e| bad(&path, &e.to_string()))?;
-            doc.set(&path, &Value::from(p.to_string()))?;
-        }
-        Command::MoveSection { from, to } => doc.move_section(*from, *to)?,
-        Command::ResizeSection { index, bars } => {
-            doc.set(&SongPath::SectionBars(*index), &Value::from(*bars))?;
-        }
-        Command::DuplicateSection { index } => doc.duplicate_section(*index)?,
-        Command::DeleteSection { index } => doc.delete_section(*index)?,
-        Command::SetSectionPlay {
-            section,
-            track,
-            pattern,
-        } => {
-            let path = SongPath::SectionPlay {
-                section: *section,
-                track: track.clone(),
-            };
-            let value = pattern.as_deref().map_or(Value::Null, Value::from);
-            doc.set(&path, &value)?;
-        }
-        Command::SetTrackMix {
-            track,
-            gain_db,
-            pan,
-            mute,
-            solo,
-        } => {
-            // One copy for all fields, so a refused field leaves none set.
-            let mut next = doc.clone();
-            let field = |field| SongPath::TrackField {
-                track: track.clone(),
-                field,
-            };
-            let numbers = [(TrackField::GainDb, gain_db), (TrackField::Pan, pan)];
-            for (f, v) in numbers {
-                if let Some(v) = v {
-                    next.set(&field(f), &Value::from(round_significant(*v)))?;
-                }
-            }
-            for (f, v) in [(TrackField::Mute, mute), (TrackField::Solo, solo)] {
-                if let Some(v) = v {
-                    next.set(&field(f), &Value::Bool(*v))?;
-                }
-            }
-            *doc = next;
-        }
-        Command::SetParam { commit: false, .. }
-        | Command::ListSongs
-        | Command::GetState
-        | Command::OpenSong { .. }
-        | Command::Play { .. }
-        | Command::Stop
-        | Command::SeekBar { .. }
-        | Command::SetLoop { .. }
-        | Command::Undo
-        | Command::Redo
-        | Command::ResolveOffered { .. } => return Err(StudioError::NotAnEdit),
-    }
-    Ok(())
-}
-
 /// Whether an edit of one path can change the value at the other: the
 /// same path, or one holds the other (`sections` holds `sections[1].bars`,
 /// `tracks.acid` holds `tracks.acid.gain_db`).
@@ -836,63 +717,5 @@ fn holds(whole: &SongPath, part: &SongPath) -> bool {
             | SongPath::SectionPlay { track: t, .. },
         ) => t == track,
         _ => false,
-    }
-}
-
-fn pattern_steps<'d>(
-    doc: &'d SongDoc,
-    path: &SongPath,
-    pattern: &str,
-) -> Result<&'d Clip, EditError> {
-    doc.song()
-        .clips
-        .get(pattern)
-        .ok_or_else(|| EditError::NoSuchTarget(path.to_string()))
-}
-
-fn step_mut<T>(steps: &mut [T], index: usize) -> Result<&mut T, EditError> {
-    let len = steps.len();
-    steps
-        .get_mut(index)
-        .ok_or(EditError::OutOfBounds { index, len })
-}
-
-fn bad(path: &SongPath, message: &str) -> EditError {
-    EditError::BadValue {
-        path: path.to_string(),
-        message: message.to_owned(),
-    }
-}
-
-/// `v` rounded to [`SIGNIFICANT_DIGITS`] significant digits, as the nearest
-/// double to the short decimal (`823.456789` gives `823.5`).
-fn round_significant(v: f64) -> f64 {
-    if !v.is_finite() || v == 0.0 {
-        return v;
-    }
-    format!("{v:.prec$e}", prec = SIGNIFICANT_DIGITS - 1)
-        .parse()
-        .unwrap_or(v)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rounds_to_four_significant_digits() {
-        for (v, want) in [
-            (823.456789, 823.5),
-            (2394.0, 2394.0),
-            (12_346.0, 12_350.0),
-            (-6.123456, -6.123),
-            (0.333333, 0.3333),
-            (0.000_123_456, 0.000_123_5),
-            (500.0, 500.0),
-            (0.0, 0.0),
-        ] {
-            assert_eq!(round_significant(v), want, "{v}");
-        }
-        assert!(round_significant(f64::NAN).is_nan());
     }
 }

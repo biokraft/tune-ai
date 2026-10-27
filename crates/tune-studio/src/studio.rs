@@ -29,7 +29,8 @@ use serde_json::{Value, json};
 use tune_engine::{AudioOut, CompiledSong, LiveController, LiveError, ParamTarget, live};
 use tune_song::{RawReload, SongWatcher};
 
-use crate::command::Command;
+use crate::action::Action;
+use crate::command::{Command, StudioCommand};
 use crate::core::{ExternalChange, StudioCore};
 use crate::diff::Change;
 use crate::doc::{EditError, effective_value};
@@ -87,7 +88,7 @@ pub struct StudioConfig {
     /// The device playback goes to.
     pub audio: Box<dyn AudioOut>,
     /// The directory holding `songs/<name>/song.toml`; relative song paths
-    /// in [`Command::OpenSong`] resolve against it.
+    /// in [`StudioCommand::OpenSong`] resolve against it.
     pub songs_root: PathBuf,
 }
 
@@ -352,11 +353,10 @@ impl Actor {
                     // A drag changes nothing shown; skip building the state.
                     let shown = !matches!(
                         cmd,
-                        Command::SetParam { commit: false, .. }
-                            | Command::ListSongs
-                            | Command::GetState
+                        Command::Action(Action::SetParam { commit: false, .. })
+                            | Command::Studio(StudioCommand::ListSongs | StudioCommand::GetState)
                     );
-                    let repeat = matches!(cmd, Command::GetState);
+                    let repeat = matches!(cmd, Command::Studio(StudioCommand::GetState));
                     let result = self.handle(cmd);
                     if shown {
                         self.publish_if_stale();
@@ -401,32 +401,48 @@ impl Actor {
 
     fn handle(&mut self, cmd: Command) -> Result<Value, StudioError> {
         match cmd {
-            Command::ListSongs => self.list_songs(),
-            Command::GetState => Ok(serde_json::to_value(self.state()).unwrap_or(Value::Null)),
-            Command::OpenSong { path } => {
+            Command::Studio(cmd) => self.handle_studio(cmd),
+            Command::Action(action) => self.handle_action(action),
+        }
+    }
+
+    fn handle_studio(&mut self, cmd: StudioCommand) -> Result<Value, StudioError> {
+        match cmd {
+            StudioCommand::ListSongs => self.list_songs(),
+            StudioCommand::GetState => {
+                Ok(serde_json::to_value(self.state()).unwrap_or(Value::Null))
+            }
+            StudioCommand::OpenSong { path } => {
                 let path = self.under_root(&path)?;
                 self.open(&path)?;
                 self.emit_state();
                 Ok(Value::Null)
             }
-            Command::Play { from_bar } => self.play(from_bar),
-            Command::Stop => {
+            StudioCommand::ResolveOffered { reapply } => self.resolve_offered(reapply),
+        }
+    }
+
+    /// Live and history actions drive the player and the undo history; an
+    /// edit goes through [`StudioCore::apply_edit`].
+    fn handle_action(&mut self, action: Action) -> Result<Value, StudioError> {
+        match action {
+            Action::Play { from_bar } => self.play(from_bar),
+            Action::Stop => {
                 self.stop();
                 self.emit_state();
                 Ok(Value::Null)
             }
-            Command::SeekBar { bar } => self.seek(bar),
-            Command::SetLoop { bars } => self.set_loop(bars),
-            Command::SetParam {
+            Action::SeekBar { bar } => self.seek(bar),
+            Action::SetLoop { bars } => self.set_loop(bars),
+            Action::Undo => self.undo_redo(true),
+            Action::Redo => self.undo_redo(false),
+            Action::SetParam {
                 track,
                 param,
                 value,
                 commit: false,
             } => self.drag(track, param, value),
-            cmd @ Command::SetParam { commit: true, .. } => self.release(&cmd),
-            Command::Undo => self.undo_redo(true),
-            Command::Redo => self.undo_redo(false),
-            Command::ResolveOffered { reapply } => self.resolve_offered(reapply),
+            action @ Action::SetParam { commit: true, .. } => self.release(&action),
             edit => self.edit(&edit),
         }
     }
@@ -638,8 +654,8 @@ impl Actor {
 
     /// A knob let go: the value is written, unless a lane drives the param
     /// at the current bar; either way the live override ends.
-    fn release(&mut self, cmd: &Command) -> Result<Value, StudioError> {
-        let Command::SetParam { track, param, .. } = cmd else {
+    fn release(&mut self, action: &Action) -> Result<Value, StudioError> {
+        let Action::SetParam { track, param, .. } = action else {
             unreachable!()
         };
         if self
@@ -656,7 +672,7 @@ impl Actor {
             self.clear_overrides();
             return Ok(json!({ "automated": true }));
         }
-        let result = core.apply_edit(cmd, Instant::now());
+        let result = core.apply_edit(action, Instant::now());
         // The override goes even when the edit fails or changes nothing.
         self.song_changed(true);
         let changes = result?;
@@ -664,8 +680,8 @@ impl Actor {
         Ok(Value::Null)
     }
 
-    fn edit(&mut self, cmd: &Command) -> Result<Value, StudioError> {
-        let changes = self.core_mut()?.apply_edit(cmd, Instant::now())?;
+    fn edit(&mut self, action: &Action) -> Result<Value, StudioError> {
+        let changes = self.core_mut()?.apply_edit(action, Instant::now())?;
         if !changes.is_empty() {
             self.song_changed(false);
             self.announce_applied(changes);

@@ -8,7 +8,7 @@ use tune_song::{
     Clip, ClipKind, Device, Lane, MasterMode, MixUnit, Placement, SectionPlay, Song, TICKS_PER_STEP,
 };
 
-use crate::command::DrumHitDto;
+use crate::action::DrumHitDto;
 use crate::diff::Change;
 use crate::error::ErrorView;
 
