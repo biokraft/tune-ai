@@ -28,6 +28,9 @@ samples/user/
 .vscode/
 /scratch/
 
+# Superpowers workspaces (subagent ledgers, brainstorm sessions): local scratch
+.superpowers/
+
 # Per-song edit log (who changed what, when): local, never committed
 songs/*/edits.jsonl
 
