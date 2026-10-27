@@ -266,7 +266,8 @@ fn other_writes(p: &Plan, records: &[ActionRecord], run: &str) -> (Vec<usize>, V
 }
 
 /// The source of the first other write, after the run's first section
-/// edit, that changed any placements, lane stretches or sections; `None`
+/// edit, that changed any placements, lane stretches, sections or whole
+/// track; `None`
 /// when there is none (or the run changed no section).
 fn rearranged_since(records: &[ActionRecord], mine: &[usize], run: &str) -> Option<Source> {
     let changes_sections = |i: usize| {
@@ -274,7 +275,11 @@ fn rearranged_since(records: &[ActionRecord], mine: &[usize], run: &str) -> Opti
         targets.any(|c| c.target == Target::Sections)
     };
     let first = mine.iter().copied().find(|&i| changes_sections(i))?;
-    let arrangement = |c: &TargetChange| is_list(&c.target) || c.target == Target::Sections;
+    // A whole track coming or going (made, removed, brought back) carries
+    // its placements with it.
+    let arrangement = |c: &TargetChange| {
+        is_list(&c.target) || matches!(c.target, Target::Sections | Target::Track(_))
+    };
     (first + 1..records.len())
         .filter(|&j| records[j].run.as_deref() != Some(run))
         .find(|&j| records[j].targets.iter().any(arrangement))
