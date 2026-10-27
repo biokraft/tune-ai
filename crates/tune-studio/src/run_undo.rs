@@ -403,7 +403,9 @@ fn decide(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionRecord]) 
 }
 
 /// A track's placements or a lane's stretches, element by element, each
-/// rule checked in turn. An element the run added: kept when another write
+/// rule checked in turn. A list another write touched (or whose container
+/// it rebuilt) between the run's first and last change to it is kept
+/// whole. An element the run added: kept when another write
 /// since took it away or put it there again, or rebuilt what it belongs
 /// to (see [`container`]); else it goes if it is still there; else kept.
 /// An element the run removed: kept when an element the run added was
@@ -448,6 +450,26 @@ fn decide_list(
     let after = elements(&p.after);
     let added = minus(&after, &before);
     let removed = minus(&before, &after);
+    // Another write touched the list (or what it belongs to) while the
+    // run was still working on it: the run's later edits started from
+    // their state, which is not known element by element, so it is kept.
+    let between = others.iter().copied().filter(|&j| j < p.last).find(|&j| {
+        foreign.contains(&j)
+            || records[j].targets.iter().any(|c| {
+                let mut elements = added.iter().chain(&removed);
+                elements.any(|e| container(&p.target, e, &c.target))
+            })
+    });
+    if let Some(j) = between {
+        let by = Some(records[j].source);
+        return Decision::Kept(
+            added
+                .iter()
+                .chain(&removed)
+                .map(|e| kept_by(e, by))
+                .collect(),
+        );
+    }
     // The track is gone: nothing to take out or put back into.
     let Some(mut next) = current.as_array().cloned() else {
         return Decision::Kept(added.iter().chain(&removed).map(kept).collect());
