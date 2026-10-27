@@ -429,3 +429,48 @@ fn clips_from_the_cli() {
         "{text}"
     );
 }
+
+#[test]
+fn placements_and_sections_from_the_cli() {
+    let e = fixture();
+    let song = e.song.to_str().unwrap();
+    let v = json_out(e.tune().args([
+        "do",
+        song,
+        "add_section",
+        "break",
+        "bars=2",
+        "index=1",
+        "--json",
+    ]));
+    assert_eq!(v["changes"][0]["path"], "sections");
+    let text = fs::read_to_string(&e.song).unwrap();
+    assert!(text.contains("name = \"break\""), "{text}");
+    assert!(
+        text.contains("{ at = 5, clip = \"k4\", bars = 2 }"),
+        "{text}"
+    );
+
+    // Text mode says which placement went.
+    let out = e
+        .tune()
+        .args(["do", song, "remove_placement", "kick", "at=5"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("removed placement k4 on kick at bar 5"),
+        "{text}"
+    );
+
+    // A refusal names the bar as the producer counts it, and exits 2.
+    let err = fails(
+        e.tune()
+            .args(["do", song, "move_placement", "acid", "at=2", "to=1"]),
+    );
+    assert!(
+        err.contains("track `acid` has no placement at bar 2"),
+        "{err}"
+    );
+}

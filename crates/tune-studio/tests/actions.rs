@@ -74,6 +74,23 @@ fn cli_arguments() {
         cli("add_track", &["track=", "instrument=acid303"]),
         Err("`add_track` needs `track`".to_owned())
     );
+    // The Task 1 carry-over: `rename_section`, whose first argument is a
+    // number and the second a name.
+    assert_eq!(
+        cli("rename_section", &["index=1", "name=drop"]),
+        Ok(Action::RenameSection {
+            index: 1,
+            name: "drop".into(),
+        })
+    );
+    assert_eq!(
+        cli("rename_section", &["1", "name=drop"]),
+        cli("rename_section", &["index=1", "name=drop"])
+    );
+    assert_eq!(
+        cli("rename_section", &["index=1"]),
+        Err("`rename_section` needs `name`".to_owned())
+    );
     assert_eq!(
         cli("add_effect", &["track=acid", "module=eq", "index=0"]),
         Ok(Action::AddEffect {
@@ -1295,6 +1312,373 @@ fn clip_edits_work_on_inline_files_and_are_one_undo_step() {
         &Origin::claude(None),
     )
     .expect("removes");
+    assert_ne!(s.text(), FIXTURE);
+    core.undo(tune_studio::Source::Human).expect("undoes");
+    assert_eq!(s.text(), FIXTURE);
+}
+
+// ----- placements and sections -----
+
+fn add_placement(track: &str, clip: &str, at: u32, bars: u32) -> Action {
+    Action::AddPlacement {
+        track: track.into(),
+        clip: clip.into(),
+        at,
+        bars,
+        offset: None,
+    }
+}
+
+fn move_placement(track: &str, at: u32, to: u32) -> Action {
+    Action::MovePlacement {
+        track: track.into(),
+        at,
+        to,
+    }
+}
+
+fn add_section(name: &str, bars: u32, index: Option<usize>) -> Action {
+    Action::AddSection {
+        name: name.into(),
+        bars,
+        index,
+    }
+}
+
+#[test]
+fn placements_by_start_bar() {
+    let s = fixture();
+    s.ok(add_placement("acid", "a1", 1, 2));
+    let text = s.text();
+    assert!(
+        text.contains(
+            "play = [\n  { at = 1, clip = \"a1\", bars = 2 },\n  { at = 3, clip = \"a1\", bars = 2 },\n]"
+        ),
+        "{text}"
+    );
+    comments_kept(FIXTURE, &text, &[]);
+
+    // Offset is written when it is not 0.
+    let s = fixture();
+    s.ok(Action::AddPlacement {
+        track: "acid".into(),
+        clip: "a1".into(),
+        at: 1,
+        bars: 1,
+        offset: Some(1),
+    });
+    assert!(
+        s.text()
+            .contains("{ at = 1, clip = \"a1\", bars = 1, offset = 1 }"),
+        "{}",
+        s.text()
+    );
+
+    let s = fixture();
+    s.ok(move_placement("acid", 3, 1));
+    assert!(
+        s.text()
+            .contains("play = [{ at = 1, clip = \"a1\", bars = 2 }]"),
+        "{}",
+        s.text()
+    );
+
+    let s = fixture();
+    s.ok(Action::ResizePlacement {
+        track: "acid".into(),
+        at: 3,
+        bars: 1,
+    });
+    assert!(
+        s.text()
+            .contains("play = [{ at = 3, clip = \"a1\", bars = 1 }]"),
+        "{}",
+        s.text()
+    );
+
+    let s = fixture();
+    let out = s.ok(Action::RemovePlacement {
+        track: "kick".into(),
+        at: 3,
+    });
+    assert!(
+        s.text()
+            .contains("play = [{ at = 1, clip = \"k4\", bars = 2 }]"),
+        "{}",
+        s.text()
+    );
+    assert_eq!(
+        out.results,
+        [json!({"removed": {
+            "lanes": [],
+            "placements": [
+                {"track": "kick", "at": 3, "clip": "k4", "bars": 2, "offset": 0},
+            ],
+            "duck_source": null,
+        }})]
+    );
+    comments_kept(FIXTURE, &s.text(), &[]);
+}
+
+#[test]
+fn placement_rules() {
+    let s = fixture();
+    let err = s.refused(add_placement("acid", "a1", 4, 1));
+    assert!(
+        err.contains("placement at bar 4 on track `acid` overlaps the one at bar 3"),
+        "{err}"
+    );
+    let err = s.refused(add_placement("acid", "k4", 1, 1));
+    assert!(
+        err.contains("clip `k4` is a drum clip; track `acid` (acid303) plays acid clips"),
+        "{err}"
+    );
+    let err = s.refused(add_placement("acid", "a1", 5, 2));
+    assert!(err.contains("past the song's end"), "{err}");
+    let err = s.refused(add_placement("acid", "zz", 1, 1));
+    assert!(err.contains("unknown clip `zz`"), "{err}");
+    assert_eq!(
+        s.refused(add_placement("bass", "a1", 1, 1)),
+        "there is no track `bass`"
+    );
+    assert_eq!(
+        s.refused(add_placement("acid", "a1", 0, 1)),
+        "bars are 1-based: `at` must be at least 1"
+    );
+    assert_eq!(
+        s.refused(move_placement("acid", 3, 0)),
+        "bars are 1-based: `to` must be at least 1"
+    );
+    for action in [
+        move_placement("acid", 2, 1),
+        Action::ResizePlacement {
+            track: "acid".into(),
+            at: 2,
+            bars: 1,
+        },
+        Action::RemovePlacement {
+            track: "acid".into(),
+            at: 2,
+        },
+    ] {
+        assert_eq!(s.refused(action), "track `acid` has no placement at bar 2");
+    }
+    assert_eq!(
+        s.refused(Action::RemovePlacement {
+            track: "acid".into(),
+            at: 0
+        }),
+        "bars are 1-based: `at` must be at least 1"
+    );
+    // A move onto another placement is the validator's overlap.
+    let err = s.refused(move_placement("kick", 3, 2));
+    assert!(err.contains("overlaps the one at bar 1"), "{err}");
+}
+
+#[test]
+fn add_section_shifts_what_follows() {
+    let s = fixture();
+    s.ok(add_section("break", 2, Some(1)));
+    let text = s.text();
+    assert!(
+        text.contains(
+            "[[sections]]\nname = \"a\"\nbars = 2\n\n[[sections]]\nname = \"break\"\nbars = 2\n\n\
+             # acid enters\n[[sections]]\nname = \"b\"\nbars = 2\n"
+        ),
+        "{text}"
+    );
+    let song = s.song();
+    let sections: Vec<_> = song
+        .sections
+        .iter()
+        .map(|s| (s.name.as_str(), s.bars))
+        .collect();
+    assert_eq!(sections, [("a", 2), ("break", 2), ("b", 2)]);
+    assert!(
+        text.contains("play = [{ at = 5, clip = \"a1\", bars = 2 }]"),
+        "{text}"
+    );
+    assert!(text.contains("at = 5\nbars = 2\npoints"), "{text}");
+    assert_eq!(
+        text.matches("{ at = 1, clip = \"k4\", bars = 2 }").count(),
+        1
+    );
+    assert!(
+        text.contains("{ at = 5, clip = \"k4\", bars = 2 }"),
+        "{text}"
+    );
+    assert!(
+        text.contains("{ at = 5, clip = \"h\", bars = 2 }"),
+        "{text}"
+    );
+    comments_kept(FIXTURE, &text, &[]);
+
+    // No index appends and moves nothing.
+    let s = fixture();
+    s.ok(add_section("outro", 4, None));
+    let (before, after) = (parse_song(FIXTURE).expect("parses"), s.song());
+    assert_eq!(after.tracks, before.tracks);
+    assert_eq!(after.automation, before.automation);
+    let names: Vec<_> = after.sections.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["a", "b", "outro"]);
+    assert_eq!(after.sections[2].bars, 4);
+    comments_kept(FIXTURE, &s.text(), &[]);
+}
+
+#[test]
+fn add_section_splits_a_crossing_placement_in_the_file() {
+    let text = FIXTURE.replace(
+        "play = [{ at = 3, clip = \"a1\", bars = 2 }]",
+        "play = [{ at = 1, clip = \"a1\", bars = 4 }]",
+    );
+    let s = song_with(&text);
+    s.ok(add_section("break", 1, Some(1)));
+    assert!(
+        s.text().contains(
+            "play = [\n  { at = 1, clip = \"a1\", bars = 2 },\n  { at = 4, clip = \"a1\", bars = 2, offset = 2 },\n]"
+        ),
+        "{}",
+        s.text()
+    );
+}
+
+#[test]
+fn add_section_rules() {
+    let s = fixture();
+    assert_eq!(
+        s.refused(add_section("x", 1, Some(3))),
+        "index 3 is out of bounds (there are 2)"
+    );
+    let err = s.refused(add_section("x", 0, None));
+    assert!(err.contains("bars must be 1 to 1024, got 0"), "{err}");
+    let err = s.refused(add_section("x", 1025, Some(0)));
+    assert!(err.contains("bars must be 1 to 1024, got 1025"), "{err}");
+    // A name is any string; quotes are escaped.
+    s.ok(add_section("the \"drop\"", 1, Some(0)));
+    assert_eq!(s.song().sections[0].name, "the \"drop\"");
+}
+
+#[test]
+fn rename_section() {
+    let s = fixture();
+    s.ok(Action::RenameSection {
+        index: 1,
+        name: "drop".into(),
+    });
+    assert_eq!(
+        s.text(),
+        FIXTURE.replacen("name = \"b\"", "name = \"drop\"", 1)
+    );
+    assert_eq!(
+        s.refused(Action::RenameSection {
+            index: 5,
+            name: "x".into()
+        }),
+        "`sections[5].name` does not exist in this song"
+    );
+}
+
+#[test]
+fn placement_and_section_actions_name_their_targets_and_read_back() {
+    let remove = Action::RemovePlacement {
+        track: "kick".into(),
+        at: 3,
+    };
+    let resize = Action::ResizePlacement {
+        track: "acid".into(),
+        at: 3,
+        bars: 1,
+    };
+    let with_offset = Action::AddPlacement {
+        track: "acid".into(),
+        clip: "a1".into(),
+        at: 1,
+        bars: 1,
+        offset: Some(1),
+    };
+    for action in [
+        add_placement("acid", "a1", 1, 2),
+        move_placement("acid", 3, 1),
+        resize.clone(),
+        remove.clone(),
+    ] {
+        let track = if matches!(action, Action::RemovePlacement { .. }) {
+            "kick"
+        } else {
+            "acid"
+        };
+        assert_eq!(action.targets(), [format!("tracks.{track}.play")]);
+    }
+    assert_eq!(add_section("break", 2, Some(1)).targets(), ["sections"]);
+    assert_eq!(add_section("outro", 4, None).targets(), ["sections"]);
+    let rename = Action::RenameSection {
+        index: 1,
+        name: "drop".into(),
+    };
+    assert_eq!(rename.targets(), ["sections[1].name"]);
+    for name in [
+        "add_placement",
+        "move_placement",
+        "resize_placement",
+        "remove_placement",
+        "add_section",
+        "rename_section",
+    ] {
+        let spec = tune_studio::find_action(name).unwrap_or_else(|| panic!("{name}"));
+        assert_eq!(spec.kind, tune_studio::ActionKind::Edit);
+    }
+    for action in [
+        add_placement("acid", "a1", 1, 2),
+        with_offset,
+        move_placement("acid", 3, 1),
+        resize,
+        remove,
+        add_section("break", 2, Some(1)),
+        add_section("outro", 4, None),
+        rename,
+    ] {
+        let got = action.to_cli_args();
+        assert_eq!(action_from_cli(action.name(), &got), Ok(action));
+    }
+    assert_eq!(
+        cli("add_section", &["outro", "bars=4"]),
+        Ok(add_section("outro", 4, None))
+    );
+}
+
+#[test]
+fn placement_and_section_edits_work_on_inline_files_and_are_one_undo_step() {
+    let text = "sections = [{ name = \"a\", bars = 2 }, { name = \"b\", bars = 2 }]\n\n\
+        [song]\nversion = 2\nname = \"t\"\nbpm = 120\n\n\
+        [tracks]\nkick = { instrument = \"kick\", play = [{ at = 1, clip = \"k4\", bars = 2 }] }\n\n\
+        [clips]\nk4 = { kind = \"drum\", steps = \"x...x...x...X...\" }\n";
+    let s = song_with(text);
+    s.ok(add_section("break", 1, Some(1)));
+    s.ok(add_placement("kick", "k4", 3, 2));
+    s.ok(move_placement("kick", 3, 4));
+    s.ok(Action::ResizePlacement {
+        track: "kick".into(),
+        at: 4,
+        bars: 1,
+    });
+    s.ok(Action::RenameSection {
+        index: 1,
+        name: "gap".into(),
+    });
+    let song = s.song();
+    let names: Vec<_> = song.sections.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["a", "gap", "b"]);
+    let play: Vec<_> = song.tracks["kick"]
+        .play
+        .iter()
+        .map(|p| (p.start_bar, p.bars))
+        .collect();
+    assert_eq!(play, [(0, 2), (3, 1)]);
+
+    let s = fixture();
+    let mut core = tune_studio::StudioCore::open(&s.path).expect("opens");
+    core.apply_now(&[add_section("break", 2, Some(1))], &Origin::claude(None))
+        .expect("adds");
     assert_ne!(s.text(), FIXTURE);
     core.undo(tune_studio::Source::Human).expect("undoes");
     assert_eq!(s.text(), FIXTURE);

@@ -320,6 +320,21 @@ The producer may have the studio (app or browser) open on the same song.
   | `rename_clip` | `tune do <song> rename_clip clip=a1 to=bass1`; keeps its place, placements follow |
   | `duplicate_clip` | `tune do <song> duplicate_clip clip=h to=h2` copies it right after the original, without its comments |
 
+  The placement and section ones, refused the same way (`at` and `to` are 1-based
+  bars, and a placement is named by the bar it starts at):
+
+  | Action | Example |
+  | --- | --- |
+  | `add_placement` | `tune do <song> add_placement track=acid clip=a1 at=1 bars=2` (`offset=` starts it that many bars into the clip); kept in time order, and an overlap, a clip the track cannot play or a run past the song's end is refused with the validator's message |
+  | `move_placement` | `tune do <song> move_placement track=acid at=3 to=1` |
+  | `resize_placement` | `tune do <song> resize_placement track=acid at=3 bars=1` |
+  | `remove_placement` | `tune do <song> remove_placement track=kick at=3` (the result lists it) |
+  | `add_section` | `tune do <song> add_section name=break bars=2 index=1` inserts an empty section before section 1 (0-based; the end by default); a placement or lane stretch crossing the insert point is split there, and everything from it on moves 2 bars later |
+  | `rename_section` | `tune do <song> rename_section index=1 name=drop` |
+
+  These rewrite a track's `play` list (and `add_section` the lane tables), which drops
+  the comments inside a rewritten list.
+
 - To see the UI: `tune serve <song> --device null --port 4580` (in the
   background; `task ui:build` first), then drive Chrome with the
   `agent-browser` skill: start the agent Chrome, pick a session

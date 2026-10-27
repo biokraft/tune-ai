@@ -199,6 +199,45 @@ pub enum Action {
         clip: String,
         to: String,
     },
+    // ----- placements and sections (`at` and `to` are 1-based bars) -----
+    /// Adds a placement of `clip` on `track` from bar `at` for `bars` bars,
+    /// starting `offset` bars into the clip (0 by default).
+    AddPlacement {
+        track: String,
+        clip: String,
+        at: u32,
+        bars: u32,
+        #[serde(default)]
+        offset: Option<u32>,
+    },
+    /// Moves the placement of `track` that starts at bar `at` to bar `to`.
+    MovePlacement {
+        track: String,
+        at: u32,
+        to: u32,
+    },
+    /// Makes the placement of `track` that starts at bar `at` `bars` long.
+    ResizePlacement {
+        track: String,
+        at: u32,
+        bars: u32,
+    },
+    /// Removes the placement of `track` that starts at bar `at`.
+    RemovePlacement {
+        track: String,
+        at: u32,
+    },
+    /// Inserts an empty section before section `index` (the end by default).
+    AddSection {
+        name: String,
+        bars: u32,
+        #[serde(default)]
+        index: Option<usize>,
+    },
+    RenameSection {
+        index: usize,
+        name: String,
+    },
 }
 
 fn yes() -> bool {
@@ -318,6 +357,12 @@ impl Action {
             Self::RemoveClip { .. } => "remove_clip",
             Self::RenameClip { .. } => "rename_clip",
             Self::DuplicateClip { .. } => "duplicate_clip",
+            Self::AddPlacement { .. } => "add_placement",
+            Self::MovePlacement { .. } => "move_placement",
+            Self::ResizePlacement { .. } => "resize_placement",
+            Self::RemovePlacement { .. } => "remove_placement",
+            Self::AddSection { .. } => "add_section",
+            Self::RenameSection { .. } => "rename_section",
         }
     }
 
@@ -386,9 +431,15 @@ impl Action {
             Self::RenameClip { clip, to } | Self::DuplicateClip { clip, to } => {
                 vec![format!("clips.{clip}"), format!("clips.{to}")]
             }
+            Self::AddPlacement { track, .. }
+            | Self::MovePlacement { track, .. }
+            | Self::ResizePlacement { track, .. }
+            | Self::RemovePlacement { track, .. } => vec![format!("tracks.{track}.play")],
+            Self::RenameSection { index, .. } => vec![format!("sections[{index}].name")],
             Self::MoveSection { .. }
             | Self::DuplicateSection { .. }
-            | Self::DeleteSection { .. } => {
+            | Self::DeleteSection { .. }
+            | Self::AddSection { .. } => {
                 vec!["sections".to_owned()]
             }
             Self::Play { .. }

@@ -10,8 +10,8 @@ use serde_json::Value as Json;
 use toml_edit::{Decor, DocumentMut, InlineTable, Item, Key, Table, Value};
 use tune_song::toml_doc::{Slot, normalize_positions, reshape, root_child, walk, walk_mut};
 use tune_song::{
-    Clip, ClipKind, Device, EditOpError, Edited, Registry, Removed, Track, clip_table_toml,
-    fx_entry_toml, parse, track_table_toml,
+    Clip, ClipKind, Device, EditOpError, Edited, Placement, Registry, Removed, Track,
+    clip_table_toml, fx_entry_toml, parse, track_table_toml,
 };
 
 use super::arrange::{write_automation, write_plays};
@@ -234,6 +234,70 @@ impl SongDoc {
             insert_table(doc, "clips", to, &text, Some(clip), CLIP_ANCHORS)
         })?;
         Ok(())
+    }
+
+    /// Adds a placement of `clip` on `track`, `bars` long from 0-based bar
+    /// `start_bar`, starting `offset` bars into the clip (see
+    /// [`tune_song::add_placement`]). The track's `play` list is rewritten,
+    /// comments inside it gone; overlaps and clips the track cannot play are
+    /// the validator's.
+    pub fn add_placement(
+        &mut self,
+        track: &str,
+        clip: &str,
+        start_bar: u32,
+        bars: u32,
+        offset: u32,
+    ) -> Result<(), EditError> {
+        let placement = Placement {
+            start_bar,
+            bars,
+            clip: clip.to_owned(),
+            offset_bars: offset,
+        };
+        let edited = tune_song::add_placement(&self.song, track, placement)?;
+        self.write_plays_of(edited)?;
+        Ok(())
+    }
+
+    /// Moves the placement of `track` that starts at 0-based bar `start_bar`
+    /// to start at `to` (see [`tune_song::move_placement`]).
+    pub fn move_placement(
+        &mut self,
+        track: &str,
+        start_bar: u32,
+        to: u32,
+    ) -> Result<(), EditError> {
+        let edited = tune_song::move_placement(&self.song, track, start_bar, to)?;
+        self.write_plays_of(edited)?;
+        Ok(())
+    }
+
+    /// Makes the placement of `track` that starts at 0-based bar `start_bar`
+    /// `bars` long (see [`tune_song::resize_placement`]).
+    pub fn resize_placement(
+        &mut self,
+        track: &str,
+        start_bar: u32,
+        bars: u32,
+    ) -> Result<(), EditError> {
+        let edited = tune_song::resize_placement(&self.song, track, start_bar, bars)?;
+        self.write_plays_of(edited)?;
+        Ok(())
+    }
+
+    /// Removes the placement of `track` that starts at 0-based bar
+    /// `start_bar` and returns it (see [`tune_song::remove_placement`]).
+    pub fn remove_placement(&mut self, track: &str, start_bar: u32) -> Result<Removed, EditError> {
+        let edited = tune_song::remove_placement(&self.song, track, start_bar)?;
+        self.write_plays_of(edited)
+    }
+
+    /// Writes the `play` lists an edit changed.
+    fn write_plays_of(&mut self, edited: Edited) -> Result<Removed, EditError> {
+        let old = self.song.clone();
+        let new = edited.arranged.song.clone();
+        self.write_edited(edited, |doc| write_plays(doc, &old, &new))
     }
 
     /// Writes an edit's result into a copy of the text with `write`, and

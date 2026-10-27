@@ -53,6 +53,12 @@ fn wire_name(c: &Command) -> &'static str {
             Action::RemoveClip { .. } => "remove_clip",
             Action::RenameClip { .. } => "rename_clip",
             Action::DuplicateClip { .. } => "duplicate_clip",
+            Action::AddPlacement { .. } => "add_placement",
+            Action::MovePlacement { .. } => "move_placement",
+            Action::ResizePlacement { .. } => "resize_placement",
+            Action::RemovePlacement { .. } => "remove_placement",
+            Action::AddSection { .. } => "add_section",
+            Action::RenameSection { .. } => "rename_section",
         },
     }
 }
@@ -195,6 +201,36 @@ fn sample_actions() -> Vec<Action> {
         Action::DuplicateClip {
             clip: "h".into(),
             to: "h2".into(),
+        },
+        Action::AddPlacement {
+            track: "acid".into(),
+            clip: "a1".into(),
+            at: 1,
+            bars: 2,
+            offset: None,
+        },
+        Action::MovePlacement {
+            track: "acid".into(),
+            at: 3,
+            to: 1,
+        },
+        Action::ResizePlacement {
+            track: "acid".into(),
+            at: 3,
+            bars: 1,
+        },
+        Action::RemovePlacement {
+            track: "kick".into(),
+            at: 3,
+        },
+        Action::AddSection {
+            name: "break".into(),
+            bars: 2,
+            index: Some(1),
+        },
+        Action::RenameSection {
+            index: 1,
+            name: "drop".into(),
         },
     ]
 }

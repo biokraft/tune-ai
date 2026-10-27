@@ -53,6 +53,9 @@ pub enum EditError {
     BadValue { path: String, message: String },
     #[error("index {index} is out of bounds (there are {len})")]
     OutOfBounds { index: usize, len: usize },
+    /// A bar argument was 0; bars count from 1.
+    #[error("bars are 1-based: `{arg}` must be at least 1")]
+    BadBar { arg: &'static str },
     #[error("a song needs at least one section")]
     LastSection,
     /// A section operation would put a bar past `u32::MAX` (never for a
@@ -249,6 +252,14 @@ impl SongDoc {
         self.arrange(result, None, Tables::Delete(index))
     }
 
+    /// Inserts an empty section `name` of `bars` bars before section `index`
+    /// (`index` equal to the section count appends), as
+    /// [`insert_section`](tune_song::insert_section) does.
+    pub fn insert_section(&mut self, index: usize, name: &str, bars: u32) -> Result<(), EditError> {
+        let result = tune_song::insert_section(&self.song, index, name, bars);
+        self.arrange(result, None, Tables::Insert(index, name, bars))
+    }
+
     /// Writes the result of a section operation into the text (see the
     /// module docs) and commits it. A result equal to the current song
     /// changes nothing.
@@ -256,7 +267,7 @@ impl SongDoc {
         &mut self,
         result: Result<Arranged, ArrangeError>,
         path: Option<&SongPath>,
-        tables: Tables,
+        tables: Tables<'_>,
     ) -> Result<(), EditError> {
         let arranged = result.map_err(|e| arrange_error(e, path))?;
         if arranged.song == self.song {
