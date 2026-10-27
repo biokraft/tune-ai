@@ -3,7 +3,7 @@
 //! edited section plays as before.
 
 use tune_song::{
-    ArrangeError, Arranged, Clip, LaneOrigin, Song, delete_section, duplicate_section, lane_value,
+    ArrangeError, Arranged, LaneOrigin, Song, delete_section, duplicate_section, lane_value,
     move_section, parse_song, resize_section, set_section_play,
 };
 
@@ -478,10 +478,7 @@ fn step_of(song: &Song, track: &str, step: u64) -> Option<(String, u64)> {
         .play
         .iter()
         .find(|p| p.span().contains(&bar))?;
-    let len = match &song.clips[&p.clip] {
-        Clip::Acid(a) => a.steps().len(),
-        Clip::Drum(d) => d.hits().len(),
-    } as u64;
+    let len = u64::from(song.clips[&p.clip].steps());
     let offset = step - 16 * u64::from(p.start_bar) + 16 * u64::from(p.offset_bars);
     Some((p.clip.clone(), offset % len))
 }
