@@ -205,7 +205,9 @@ pub fn insert_section(
     if !SECTION_BARS.contains(&bars) {
         return Err(ArrangeError::Bars { bars });
     }
-    // The bound `check` keeps arithmetic safe for; a song has a section.
+    // `check` is run for its overflow guard (the song may grow by `bars`)
+    // and needs an existing section's index: an append (`index == len`)
+    // names the last one. A valid song has a section, so that exists.
     let near = index.min(len.saturating_sub(1));
     check(song, near, bars)?;
     let at: u32 = song.sections[..index].iter().map(|s| s.bars).sum();
