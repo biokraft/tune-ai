@@ -259,9 +259,11 @@ fn other_writes(p: &Plan, records: &[ActionRecord], run: &str) -> (Vec<usize>, V
     (others, foreign)
 }
 
-/// The plans of the run's section edit: the sections, and every
-/// placement and lane target a record of the run changed together with
-/// the sections. Empty when the run changed no section.
+/// The plans of the run's section edit: the sections, every placement
+/// and lane target a record of the run changed together with the
+/// sections, and the item the run created that such a change folded into
+/// (a new track whose placements the edit moved). Empty when the run
+/// changed no section.
 fn section_group(plans: &[Plan], records: &[ActionRecord], mine: &[usize]) -> Vec<usize> {
     let Some(sections) = plans.iter().position(|p| p.target == Target::Sections) else {
         return Vec::new();
@@ -278,6 +280,13 @@ fn section_group(plans: &[Plan], records: &[ActionRecord], mine: &[usize]) -> Ve
                 .iter()
                 .any(|r| r.targets.iter().any(|c| c.target == plans[k].target))
     }));
+    let folded = section_records.iter().flat_map(|r| &r.targets);
+    let folded = folded.filter(|c| is_list(&c.target));
+    for k in folded.filter_map(|c| owner(plans, &c.target)) {
+        if !group.contains(&k) {
+            group.push(k);
+        }
+    }
     group
 }
 
