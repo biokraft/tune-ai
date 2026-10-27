@@ -945,7 +945,7 @@ fn swap_changing_the_instrument_keeps_fx_and_strip() {
     let swap_at = BAR + STEP;
     let log = instrument.lock().unwrap();
     assert!(log.events.iter().all(|e| match e {
-        Event::Step { sample, .. } | Event::Param { sample, .. } | Event::Reset { sample } =>
+        Event::Note { sample, .. } | Event::Param { sample, .. } | Event::Reset { sample } =>
             *sample < swap_at,
     }));
     assert!(!log.events.is_empty());

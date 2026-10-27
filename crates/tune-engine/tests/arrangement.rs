@@ -8,7 +8,6 @@ mod common;
 use common::{MINI, compile_song, probe_engine, run, song};
 use tune_dsp::DrumPattern;
 use tune_dsp::acid303::ACID303_PARAMS;
-use tune_engine::Cell;
 use tune_song::{Clip, Placement};
 
 /// One bar at 120 BPM and 48 kHz.
@@ -31,9 +30,8 @@ fn placement(start_bar: u32, bars: u32, clip: &str, offset_bars: u32) -> Placeme
 fn hit_steps(log: &common::SharedLog) -> Vec<u64> {
     log.lock()
         .unwrap()
-        .steps()
+        .ons()
         .into_iter()
-        .filter(|(_, cell, _)| matches!(cell, Cell::Hit { .. }))
         .map(|(_, _, ctx)| ctx.step)
         .collect()
 }

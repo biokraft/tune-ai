@@ -10,5 +10,7 @@ pub mod registry;
 
 pub use builtin::{ACID303, AcidTrack, CLAP, DISTORTION, EQ, HAT_CLOSED, HAT_OPEN, KICK, RIDE};
 pub use descriptor::{ClipKind, MakeEffect, MakeInstrument, ModuleDescriptor, Role, SettingSpec};
-pub use instrument::{Cell, Effect, Instrument, StepCtx};
+pub use instrument::{
+    ACCENT_VELOCITY, DRUM_PITCH, Effect, EventCtx, Instrument, NoteEvent, NoteId,
+};
 pub use registry::{BUILTIN, Registry};

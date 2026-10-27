@@ -2,13 +2,27 @@
 //! every id resolved to an index, every param table filled in, every clip
 //! turned into engine cells and the arrangement cut into regions.
 
+use tune_dsp::acid303::AcidStep;
 use tune_dsp::acid303::math::db2amp;
 use tune_dsp::{DrumHit, ParamSpec, STRIP_PARAMS, find_spec};
-use tune_modules::{Cell, ModuleDescriptor};
+use tune_modules::ModuleDescriptor;
 use tune_song::{Clip, Device, MIX_TRACK_ID, MasterMode, MixUnit, Song, Track, find_mix_param};
 
 use crate::clock::{Clock, track_seed};
 use crate::mixer::pan_gains;
+
+/// One step of a track's clip, as the engine plays it: the engine turns
+/// each into note events for the track's instrument.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Cell {
+    Rest,
+    /// A drum hit.
+    Hit {
+        accent: bool,
+    },
+    /// An acid step that holds a note.
+    Note(AcidStep),
+}
 
 /// A song ready to play. Tracks, clips and sections keep song-file order.
 #[derive(Clone, Debug)]

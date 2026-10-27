@@ -1,5 +1,5 @@
 //! Live knob overrides on the [`Engine`]: they win over static params and
-//! lanes, apply before `on_step`, are clamped, and clear back to the song.
+//! lanes, apply before note events, are clamped, and clear back to the song.
 
 mod common;
 
@@ -11,7 +11,7 @@ use common::{
 };
 use tune_dsp::acid303::ACID303_PARAMS;
 use tune_dsp::{DIST_PARAMS, MASTER_GAIN, STRIP_DUCK_DEPTH, STRIP_SEND_DELAY};
-use tune_engine::{CompiledSong, Engine, MIX_TRACK, ParamTarget};
+use tune_engine::{CompiledSong, Engine, MIX_TRACK, NoteEvent, ParamTarget};
 use tune_song::{MasterMode, MixUnit, Song};
 
 /// One bar at 120 BPM and 48 kHz.
@@ -66,12 +66,18 @@ fn override_applies_after_lanes_before_on_step() {
     let at: Vec<&Event> = log
         .events
         .iter()
-        .filter(|e| matches!(e, Event::Step { sample, .. } | Event::Param { sample, .. } if *sample == 6000))
+        .filter(|e| matches!(e, Event::Note { sample, .. } | Event::Param { sample, .. } if *sample == 6000))
         .collect();
     assert_eq!(at.len(), 3, "{at:?}");
     assert!(matches!(at[0], Event::Param { index: 2, plain, .. } if *plain != 2000.0));
     assert!(matches!(at[1], Event::Param { index: 2, plain, .. } if *plain == 2000.0));
-    assert!(matches!(at[2], Event::Step { .. }));
+    assert!(matches!(
+        at[2],
+        Event::Note {
+            event: NoteEvent::On { .. },
+            ..
+        }
+    ));
 }
 
 #[test]
