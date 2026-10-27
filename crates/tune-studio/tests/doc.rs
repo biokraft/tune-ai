@@ -457,7 +457,7 @@ fn set_section_play_rejects_an_incompatible_clip() {
         EditError::Invalid(errors) => assert!(
             errors.iter().any(|e| e
                 .message
-                .contains("track `acid` (acid303) plays acid clips")),
+                .contains("clip `k4` is a drum clip; track `acid` (acid303) plays acid clips")),
             "{errors:?}"
         ),
         other => panic!("expected Invalid, got {other:?}"),
