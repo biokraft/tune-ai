@@ -1308,3 +1308,33 @@ fn a_list_the_producer_edited_between_the_runs_edits_is_kept() {
     assert_eq!(u.kept, vec![kept_at(4), kept_at(3)]);
     assert_eq!(s.value("tracks.acid.play"), json!([placement(4, "a1", 1)]));
 }
+
+/// r2: a track with a placement in the run's new section came in from
+/// outside the studio: the section edit is kept whole, so that placement
+/// stays in the section.
+#[test]
+fn a_section_edit_is_kept_after_a_track_came_in_from_outside() {
+    let mut s = open();
+    add_break(&mut s);
+    let text = s.text().replacen(
+        "[clips.k4]",
+        "[tracks.x]\ninstrument = \"acid303\"\nplay = [{ at = 3, clip = \"a1\", bars = 2 }]\n\n[clips.k4]",
+        1,
+    );
+    fs::write(&s.path, &text).unwrap();
+    s.core
+        .on_disk_text(text.clone())
+        .expect("an external change");
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert!(u.kept.iter().any(|k| k.target == Target::Sections));
+    assert!(
+        u.kept
+            .iter()
+            .all(|k| k.reason == KeptReason::ChangedLater && k.by == Some(Source::External)),
+        "{:?}",
+        u.kept
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.value("tracks.x.play"), json!([placement(3, "a1", 2)]));
+}

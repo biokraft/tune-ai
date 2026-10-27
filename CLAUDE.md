@@ -369,8 +369,8 @@ The producer may have the studio (app or browser) open on the same song.
   edit (`add_section`, `move_section`, `resize_section` and the like)
   goes back whole with the placements and stretches it moved, or is kept
   whole when any part of it changed later, and also when any other edit
-  since changed placements, lane stretches or sections anywhere in the
-  song. A target someone set back to
+  since changed placements, lane stretches, sections or a whole track
+  anywhere in the song. A target someone set back to
   its value before the run is listed in `already`, not `kept`. The
   result is `{"run", "title", "reverted": [{"target",
   "item"}], "kept": [{"target", "item", "reason", "by", "message"}],
