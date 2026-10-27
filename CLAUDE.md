@@ -111,6 +111,16 @@ Notation:
   `bars` and `offset` are whole numbers. Keep them in time order and never
   overlapping. Two placements whose offsets differ by a clip length play the
   same but count as a change.
+- Scenes: `[scenes.<id>]` tables after the clips, in file order (the row
+  order), each with an optional `slots = { <track id> = "<clip id>" }`; a
+  track without a key has an empty slot, and `[scenes.empty]` is an empty
+  scene. The scene id follows the track and clip id rules (`a-z`, `0-9`, `_`).
+  A slot must name a track of the song and a clip that track's instrument can
+  play (the placement rule: an acid clip on a drum track is an error). Scenes
+  are scenes of live play only: renders play the arrangement and ignore them.
+  They are part of format v2, and a v1 file with `[scenes.*]` gets the
+  "version 2" hint. `tune info` lists them
+  (`scenes: groove (kick k4, acid a1), break (hat h)`; `--json` has `scenes`).
 - Sections: `[[sections]]` with `name` and `bars` (1 to 1024), laid end to end
   from bar 1. They set the song length and hold no content.
 - Devices: a track's `instrument` (a module name, or a table with `type` and

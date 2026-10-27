@@ -239,6 +239,7 @@ fn song(rng: &mut Rng, registry: &Registry) -> Song {
         sample_rate: Some(*rng.pick(&[8_000, 16_000, 22_050])),
         tracks,
         clips,
+        scenes: Default::default(),
         sections,
         automation,
         mix: Mix::default(),

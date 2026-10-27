@@ -39,12 +39,15 @@ pub use error::{LoadError, SongError};
 pub use migrate::{Migration, migrate};
 pub use model::{
     Clip, DEFAULT_VELOCITY, Device, Lane, MIX_TRACK_ID, MasterMode, Mix, MixUnit, NOTE_CLIP_BARS,
-    Note, NoteClip, Placement, SECTION_BARS, Section, SectionPlay, Song, TICKS_PER_STEP, Track,
-    find_mix_param, lane_value, parse_pitch, pitch_name, round_split_value, section_bars_error,
+    Note, NoteClip, Placement, SECTION_BARS, Scene, Section, SectionPlay, Song, TICKS_PER_STEP,
+    Track, find_mix_param, lane_value, parse_pitch, pitch_name, round_split_value,
+    section_bars_error,
 };
 pub use tune_modules::{ClipKind, ModuleDescriptor, Registry, SettingSpec};
 pub use watch::{RawReload, Reload, SongWatcher};
-pub use write::{clip_table_toml, fx_entry_toml, notes_toml, placements_toml, track_table_toml};
+pub use write::{
+    clip_table_toml, fx_entry_toml, notes_toml, placements_toml, scene_table_toml, track_table_toml,
+};
 
 /// The newest song format version, the one [`Song::to_toml`] writes.
 pub const FORMAT_VERSION: u32 = 2;
