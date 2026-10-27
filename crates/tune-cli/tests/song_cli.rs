@@ -2,8 +2,16 @@ use assert_cmd::Command;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
+/// One studio directory per test process, so no test reads the real `~/.tune`.
+fn studio_dir() -> &'static Path {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
+}
+
 fn tune() -> Command {
-    Command::cargo_bin("tune").unwrap()
+    let mut c = Command::cargo_bin("tune").unwrap();
+    c.env("TUNE_STUDIO_DIR", studio_dir());
+    c
 }
 
 fn mini() -> PathBuf {

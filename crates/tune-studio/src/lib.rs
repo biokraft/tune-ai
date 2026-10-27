@@ -11,6 +11,7 @@
 
 mod action;
 mod command;
+mod control;
 mod core;
 mod diff;
 mod doc;
@@ -27,6 +28,7 @@ pub use action::{
     RunTag, Via, action_from_cli, find_action, parse_value,
 };
 pub use command::{Command, StudioCommand};
+pub use control::{ControlServer, STUDIO_DIR_ENV, StudioLink, find_studio, studio_dir};
 pub use core::{
     ExternalChange, OWN_WRITE_RING, PendingEdit, StudioCore, UNDO_DEPTH, UndoEntry, WRITE_DEBOUNCE,
 };

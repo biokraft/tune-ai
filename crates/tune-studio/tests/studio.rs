@@ -397,8 +397,13 @@ fn release_commits() {
     assert!(start.elapsed() <= Duration::from_millis(500));
     assert_eq!(acid_value(&text, "acid303.resonance"), 70.0);
     match f.wait("applied", |e| matches!(e, Event::Applied { .. })) {
-        Event::Applied { source, changes } => {
+        Event::Applied {
+            source,
+            changes,
+            run,
+        } => {
             assert_eq!(source, Source::Human);
+            assert_eq!(run, None);
             assert_eq!(changes.len(), 1);
             assert_eq!(changes[0].path, acid_param("acid303.cutoff"));
             assert_eq!(changes[0].new, json!(823.5));
@@ -935,8 +940,13 @@ fn drag_mix_knob_overrides_live() {
         "{text}"
     );
     match f.wait("applied", |e| matches!(e, Event::Applied { .. })) {
-        Event::Applied { source, changes } => {
+        Event::Applied {
+            source,
+            changes,
+            run,
+        } => {
             assert_eq!(source, Source::Human);
+            assert_eq!(run, None);
             assert_eq!(changes[0].path, SongPath::param("mix", "master.gain"));
             assert_eq!((&changes[0].old, &changes[0].new), (&json!(0), &json!(-6)));
         }

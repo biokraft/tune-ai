@@ -21,6 +21,8 @@ struct Server {
     url: String,
     port: u16,
     song: PathBuf,
+    /// The endpoint directory (`TUNE_STUDIO_DIR`), so nothing touches `~/.tune`.
+    studios: PathBuf,
     _dir: tempfile::TempDir,
 }
 
@@ -32,7 +34,9 @@ impl Server {
         let ui = dir.path().join("ui");
         std::fs::create_dir(&ui).unwrap();
         std::fs::write(ui.join("index.html"), "<html>hello</html>").unwrap();
+        let studios = dir.path().join("studios");
         let mut child = Command::new(env!("CARGO_BIN_EXE_tune"))
+            .env("TUNE_STUDIO_DIR", &studios)
             .arg("serve")
             .arg(&song)
             .args(["--port", "0", "--device", "null", "--json", "--ui"])
@@ -62,6 +66,7 @@ impl Server {
             url,
             port,
             song,
+            studios,
             _dir: dir,
         }
     }
@@ -205,6 +210,43 @@ async fn sigterm_writes_pending_edits() {
         text.contains("\"acid303.cutoff\" = 823.5"),
         "not written:\n{text}"
     );
+    assert_eq!(
+        std::fs::read_dir(&s.studios).unwrap().count(),
+        0,
+        "the endpoint file goes with the server"
+    );
+}
+
+/// `tune serve` runs the control endpoint: `tune set` on its song goes
+/// through it.
+#[tokio::test]
+async fn cli_edits_go_through_the_server() {
+    let s = Server::spawn();
+    let mut ws = s.connect().await;
+    ws.next_json().await;
+    let files: Vec<String> = std::fs::read_dir(&s.studios)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    let want = format!("studio-{}-", s.child.id());
+    assert!(files.len() == 1 && files[0].starts_with(&want), "{files:?}");
+    let out = Command::new(env!("CARGO_BIN_EXE_tune"))
+        .env("TUNE_STUDIO_DIR", &s.studios)
+        .arg("set")
+        .arg(&s.song)
+        .args(["song.bpm=130", "--json"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["via"], "studio");
+    let applied = ws.until(|v| v["event"] == "applied").await;
+    assert_eq!(applied["source"], "claude");
+    assert!(
+        std::fs::read_to_string(&s.song)
+            .unwrap()
+            .contains("bpm = 130")
+    );
 }
 
 #[tokio::test]
@@ -274,6 +316,7 @@ async fn two_clients_share_state() {
 fn missing_ui_dir() {
     let dir = tempfile::tempdir().unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_tune"))
+        .env("TUNE_STUDIO_DIR", dir.path().join("studios"))
         .arg("serve")
         .arg(COMMENTED)
         .args(["--port", "0", "--device", "null", "--ui"])

@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 use tune_engine::{AudioOut, CompiledSong, LiveController, LiveError, ParamTarget, live};
 use tune_song::{RawReload, SongWatcher};
 
-use crate::action::Action;
+use crate::action::{Action, ActionKind, ActionsOutcome, Origin, RunTag, Via};
 use crate::command::{Command, StudioCommand};
 use crate::core::{ExternalChange, StudioCore};
 use crate::diff::Change;
@@ -73,10 +73,13 @@ pub enum Event {
         beat: u32,
         playing: bool,
     },
-    /// A client's edit (or undo, redo, re-apply) changed the song.
+    /// A client's edit (or undo, redo, re-apply) changed the song, or an
+    /// agent's action through [`StudioHandle::run_actions`] did.
     Applied {
         source: Source,
         changes: Vec<Change>,
+        /// The run the agent's action belongs to.
+        run: Option<RunTag>,
     },
     /// The file changed on disk (Claude, an editor, git).
     ExternalChange(ExternalChange),
@@ -187,6 +190,43 @@ impl StudioHandle {
         }
     }
 
+    /// Runs one action or a batch as `origin`. Edits: as
+    /// [`StudioCore::apply_now`], written at once as one undo step. One live
+    /// or history action: as the UI's command, its log entries (for undo
+    /// and redo) carrying `origin.source`; a batch that holds one gives
+    /// [`StudioError::EditsOnly`]. Blocks for at most 5 s.
+    pub fn run_actions(
+        &self,
+        actions: Vec<Action>,
+        origin: Origin,
+    ) -> Result<ActionsOutcome, StudioError> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.inner
+            .tx
+            .send(Msg::Actions(actions, origin, reply_tx))
+            .map_err(|_| StudioError::Closed)?;
+        match reply_rx.recv_timeout(CALL_TIMEOUT) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => Err(StudioError::Timeout),
+            Err(RecvTimeoutError::Disconnected) => Err(StudioError::Closed),
+        }
+    }
+
+    /// The path of the song open in the studio, as it was opened; `None`
+    /// while none is (or its file has not parsed yet).
+    pub(crate) fn song_path(&self) -> Result<Option<PathBuf>, StudioError> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.inner
+            .tx
+            .send(Msg::SongPath(reply_tx))
+            .map_err(|_| StudioError::Closed)?;
+        match reply_rx.recv_timeout(CALL_TIMEOUT) {
+            Ok(path) => Ok(path),
+            Err(RecvTimeoutError::Timeout) => Err(StudioError::Timeout),
+            Err(RecvTimeoutError::Disconnected) => Err(StudioError::Closed),
+        }
+    }
+
     /// A new event stream. Its first event is the current
     /// [`Event::State`]. Dropping the receiver unsubscribes.
     pub fn subscribe(&self) -> Receiver<Event> {
@@ -205,6 +245,13 @@ impl StudioHandle {
 
 enum Msg {
     Call(Command, Sender<Result<Value, StudioError>>),
+    /// An agent's actions (see [`StudioHandle::run_actions`]).
+    Actions(
+        Vec<Action>,
+        Origin,
+        Sender<Result<ActionsOutcome, StudioError>>,
+    ),
+    SongPath(Sender<Option<PathBuf>>),
     Subscribe(Sender<Event>),
     /// A change of the song file; `epoch` names the watcher that saw it,
     /// so reports for a song no longer open are dropped.
@@ -371,6 +418,15 @@ impl Actor {
                         self.emit(Event::Error { message });
                     }
                 }
+                Ok(Msg::Actions(actions, origin, reply)) => {
+                    let result = self.run_actions(&actions, &origin);
+                    self.publish_if_stale();
+                    let _ = reply.send(result);
+                }
+                Ok(Msg::SongPath(reply)) => {
+                    let path = self.song.as_ref().map(|s| s.core.path().to_owned());
+                    let _ = reply.send(path);
+                }
                 Ok(Msg::Subscribe(tx)) => {
                     if tx.send(Event::State(self.state())).is_ok() {
                         // A song opened before anyone listened (the one the
@@ -447,6 +503,61 @@ impl Actor {
             action @ Action::SetParam { commit: true, .. } => self.release(&action),
             edit => self.edit(&edit),
         }
+    }
+
+    /// An agent's actions: one live or history action runs as the UI's
+    /// command would; edits are written at once by
+    /// [`StudioCore::apply_now`].
+    fn run_actions(
+        &mut self,
+        actions: &[Action],
+        origin: &Origin,
+    ) -> Result<ActionsOutcome, StudioError> {
+        let outcome =
+            |changes: Vec<Change>, result: Value, file_hash: Option<String>| ActionsOutcome {
+                via: Via::Studio,
+                changes,
+                results: vec![result],
+                file_hash,
+                migrated_from: None,
+            };
+        match actions {
+            [Action::Undo] | [Action::Redo] => {
+                let undo = matches!(actions, [Action::Undo]);
+                let changes = self.undo_redo_changes(undo, origin.source)?;
+                let hash = (!changes.is_empty())
+                    .then(|| self.core().map(StudioCore::disk_hash))
+                    .transpose()?;
+                let result = serde_json::to_value(&changes).unwrap_or(Value::Null);
+                Ok(outcome(changes, result, hash))
+            }
+            [one] if one.kind() != ActionKind::Edit => {
+                let result = self.handle_action(one.clone())?;
+                Ok(outcome(Vec::new(), result, None))
+            }
+            _ => self.apply_now(actions, origin),
+        }
+    }
+
+    /// Edits written at once; the engine swaps them in without ending a
+    /// knob drag, which the agent's edit did not touch.
+    fn apply_now(
+        &mut self,
+        actions: &[Action],
+        origin: &Origin,
+    ) -> Result<ActionsOutcome, StudioError> {
+        let core = self.core_mut()?;
+        let before = core.song().clone();
+        let result = core.apply_now(actions, origin);
+        // The flush first may take in an unseen change.
+        self.report_unreported();
+        // Even a failed log write leaves the new song in place.
+        if self.core()?.song() != &before {
+            self.song_changed(false);
+        }
+        let out = result?;
+        self.announce_applied(origin.source, origin.run.clone(), out.changes.clone());
+        Ok(out)
     }
 
     /// The sorted `songs/*/song.toml` paths under the songs root, relative
@@ -678,7 +789,7 @@ impl Actor {
         // The override goes even when the edit fails or changes nothing.
         self.song_changed(true);
         let changes = result?;
-        self.announce_applied(changes);
+        self.announce_applied(Source::Human, None, changes);
         Ok(Value::Null)
     }
 
@@ -686,23 +797,37 @@ impl Actor {
         let changes = self.core_mut()?.apply_edit(action, Instant::now())?;
         if !changes.is_empty() {
             self.song_changed(false);
-            self.announce_applied(changes);
+            self.announce_applied(Source::Human, None, changes);
         }
         Ok(Value::Null)
     }
 
+    /// The producer's undo or redo, its changes as the command's result.
     fn undo_redo(&mut self, undo: bool) -> Result<Value, StudioError> {
+        let changes = self.undo_redo_changes(undo, Source::Human)?;
+        Ok(serde_json::to_value(&changes).unwrap_or(Value::Null))
+    }
+
+    /// Undo or redo, logged as `source`.
+    fn undo_redo_changes(
+        &mut self,
+        undo: bool,
+        source: Source,
+    ) -> Result<Vec<Change>, StudioError> {
         let core = self.core_mut()?;
-        let result = if undo { core.undo() } else { core.redo() };
+        let result = if undo {
+            core.undo(source)
+        } else {
+            core.redo(source)
+        };
         // Undo and redo flush first, which may take in an unseen change.
         self.report_unreported();
         let changes = result?;
-        let value = serde_json::to_value(&changes).unwrap_or(Value::Null);
         if !changes.is_empty() {
             self.song_changed(false);
-            self.announce_applied(changes);
+            self.announce_applied(source, None, changes.clone());
         }
-        Ok(value)
+        Ok(changes)
     }
 
     fn resolve_offered(&mut self, reapply: bool) -> Result<Value, StudioError> {
@@ -713,7 +838,7 @@ impl Actor {
             self.emit_state();
         } else {
             self.song_changed(false);
-            self.announce_applied(changes);
+            self.announce_applied(Source::Human, None, changes);
         }
         Ok(Value::Null)
     }
@@ -977,11 +1102,14 @@ impl Actor {
         }
     }
 
-    fn announce_applied(&mut self, changes: Vec<Change>) {
+    /// Tells every client what `source` changed (in `run`), then the new
+    /// state.
+    fn announce_applied(&mut self, source: Source, run: Option<RunTag>, changes: Vec<Change>) {
         if !changes.is_empty() {
             self.emit(Event::Applied {
-                source: Source::Human,
+                source,
                 changes,
+                run,
             });
         }
         self.emit_state();

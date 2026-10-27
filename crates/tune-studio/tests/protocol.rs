@@ -6,8 +6,8 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 use tune_studio::{
-    ACTIONS, Action, Change, Command, DrumHitDto, ErrorView, Event, ExternalChange, SongPath,
-    Source, StudioCommand, StudioCore, StudioState, action_from_cli, find_action,
+    ACTIONS, Action, Change, Command, DrumHitDto, ErrorView, Event, ExternalChange, RunTag,
+    SongPath, Source, StudioCommand, StudioCore, StudioState, action_from_cli, find_action,
 };
 
 const GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/protocol.json");
@@ -179,9 +179,11 @@ fn sample_events() -> Vec<Event> {
             beat: 1,
             playing: true,
         },
+        // One sample per event: Claude's, so the golden pins the run's form.
         Event::Applied {
-            source: Source::Human,
-            changes: vec![change("tracks.acid.acid303.cutoff", json!(500), json!(820))],
+            source: Source::Claude,
+            changes: vec![change("song.bpm", json!(120), json!(130))],
+            run: Some(RunTag::new("r1", Some("open the filter")).expect("a run")),
         },
         Event::ExternalChange(ExternalChange {
             source: Source::Claude,

@@ -5,6 +5,7 @@ export type Source = "human" | "claude" | "external";
 export type DrumHitDto = "rest" | "hit" | "accent";
 export type ErrorView = { line: number | null, column: number | null, message: string, };
 export type Change = { path: string, old: JsonValue, new: JsonValue, };
+export type RunTag = { id: string, title: string | null, };
 export type ExternalChange = { 
 /**
  * `claude` when the edit log holds a `claude` entry with the file's
@@ -196,7 +197,11 @@ file_errors: Array<ErrorView>,
  * opened, while one undo would revert that migration; else `None`.
  */
 migrated_from: number | null, };
-export type Event = { "event": "state" } & StudioState | { "event": "playhead", step: number, bar: number, beat: number, playing: boolean, } | { "event": "applied", source: Source, changes: Array<Change>, } | { "event": "external_change" } & ExternalChange | { "event": "error", message: string, };
+export type Event = { "event": "state" } & StudioState | { "event": "playhead", step: number, bar: number, beat: number, playing: boolean, } | { "event": "applied", source: Source, changes: Array<Change>, 
+/**
+ * The run the agent's action belongs to.
+ */
+run: RunTag | null, } | { "event": "external_change" } & ExternalChange | { "event": "error", message: string, };
 export type Action = { "cmd": "play", "args": { from_bar: number | null, } } | { "cmd": "stop" } | { "cmd": "seek_bar", "args": { bar: number, } } | { "cmd": "set_loop", "args": { bars: [number, number] | null, } } | { "cmd": "undo" } | { "cmd": "redo" } | { "cmd": "set_value", "args": { path: string, value: JsonValue, } } | { "cmd": "set_param", "args": { track: string, param: string, value: number, commit: boolean, } } | { "cmd": "set_device_setting", "args": { track: string, device: string, setting: string, value: string, } } | { "cmd": "set_acid_step", "args": { clip: string, index: number, note: number | null, accent: boolean, slide: boolean, } } | { "cmd": "set_drum_step", "args": { clip: string, index: number, hit: DrumHitDto, } } | { "cmd": "move_section", "args": { from: number, to: number, } } | { "cmd": "resize_section", "args": { index: number, bars: number, } } | { "cmd": "duplicate_section", "args": { index: number, } } | { "cmd": "delete_section", "args": { index: number, } } | { "cmd": "set_section_play", "args": { section: number, track: string, clip: string | null, } } | { "cmd": "set_track_mix", "args": { track: string, gain_db: number | null, pan: number | null, mute: boolean | null, solo: boolean | null, } };
 export type StudioCommand = { "cmd": "list_songs" } | { "cmd": "get_state" } | { "cmd": "open_song", "args": { path: string, } } | { "cmd": "resolve_offered", "args": { reapply: boolean, } };
 export type Command = StudioCommand | Action;

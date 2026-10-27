@@ -82,7 +82,7 @@ fn own_write_ignored() {
 
     assert!(core.on_disk_text(disk(&s)).is_none());
     assert_eq!(log(&s).len(), lines, "no new log line");
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert!(!core.can_undo(), "no new undo entry");
     assert_eq!(disk(&s), FIXTURE);
 }
@@ -118,7 +118,7 @@ fn external_edit_logged_and_undoable() {
     assert_eq!(entries[0].source, Source::External);
     assert_eq!(entries[0].path, "song.bpm");
 
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert_eq!(disk(&s), FIXTURE, "undo writes bpm 120 back");
     assert_eq!(core.song().bpm, 120.0);
 }
@@ -217,8 +217,8 @@ fn external_text_matching_an_older_own_write_is_a_change() {
         .expect("Claude's change");
     core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
     core.flush().unwrap();
-    core.undo().unwrap(); // writes Claude's text back: an own write
-    core.undo().unwrap(); // and the fixture
+    core.undo(Source::Human).unwrap(); // writes Claude's text back: an own write
+    core.undo(Source::Human).unwrap(); // and the fixture
     assert!(core.is_own_write(&tune_studio::text_hash(&claude_text)));
     assert_eq!(core.song().bpm, 120.0);
 
@@ -279,13 +279,13 @@ fn merge_keeps_both_sides() {
     assert!(merged.contains("\"acid303.cutoff\" = 820"), "{merged}");
     assert!(merged.contains("# the squelch"));
 
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     let once = disk(&s);
     assert!(
         once.contains("bpm = 121") && once.contains(CUTOFF_500),
         "{once}"
     );
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert_eq!(disk(&s), FIXTURE);
 }
 
@@ -378,7 +378,7 @@ fn whole_replace_offers_pending() {
     assert!(core.resolve_offered(false).unwrap().is_empty());
     assert!(core.offered().is_empty());
     assert_eq!(disk(&s), FIRST_ACID, "dropping writes nothing");
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert_eq!(disk(&s), FIXTURE, "byte for byte");
 }
 
@@ -406,8 +406,8 @@ fn pending_survives_invalid_external() {
         core.apply_edit(&cutoff(900.0), t0),
         Err(StudioError::FileInvalid)
     );
-    assert_eq!(core.undo(), Err(StudioError::FileInvalid));
-    assert_eq!(core.redo(), Err(StudioError::FileInvalid));
+    assert_eq!(core.undo(Source::Human), Err(StudioError::FileInvalid));
+    assert_eq!(core.redo(Source::Human), Err(StudioError::FileInvalid));
     assert!(core.flush().unwrap().is_empty());
     assert_eq!(disk(&s), "[song\n", "flush writes nothing");
 
@@ -487,7 +487,7 @@ fn flush_keeps_unseen_external_for_report() {
 
     // Undo flushes first, so it can find one too.
     fs::write(&s.path, FIXTURE.replace("bpm = 120", "bpm = 122")).unwrap();
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     let ext = core.take_unreported_external().expect("found by undo");
     assert_eq!(ext.changes[0].path, SongPath::Bpm);
     assert_eq!(ext.changes[0].new, json!(122));

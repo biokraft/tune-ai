@@ -1,12 +1,17 @@
 //! `tune do`, the run flags of `tune set` and the run suffix of `tune changes`,
-//! against a copy of the commented fixture with no studio open.
+//! against a copy of the commented fixture, with no studio open and through
+//! one running in the test.
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use tempfile::TempDir;
+use tune_studio::{
+    Command as StudioCall, ControlServer, Event, Source, Studio, StudioCommand, StudioConfig,
+};
 
 struct Env {
     dir: TempDir,
@@ -287,4 +292,58 @@ fn do_prints_results_and_no_changes() {
     assert!(out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "no changes");
     assert_eq!(e.log(), "");
+}
+
+#[test]
+fn do_goes_through_a_running_studio() {
+    let e = fixture();
+    let studio = Studio::spawn(
+        StudioConfig {
+            audio: Box::new(tune_audio::NullOut::new()),
+            songs_root: e.dir.path().to_owned(),
+        },
+        Some(e.song.clone()),
+    )
+    .unwrap();
+    let events = studio.subscribe();
+    let _control = ControlServer::start(studio.clone(), e.studio.path()).unwrap();
+    let song = e.song.to_str().unwrap();
+
+    let v = json_out(e.tune().args([
+        "do",
+        song,
+        "set_value",
+        "path=song.bpm",
+        "value=130",
+        "--run",
+        "r5",
+        "--json",
+    ]));
+    assert_eq!(v["via"], "studio");
+    assert_eq!(
+        v["changes"][0],
+        json!({"path": "song.bpm", "old": 120, "new": 130})
+    );
+    let applied = loop {
+        if let Event::Applied { source, run, .. } =
+            events.recv_timeout(Duration::from_secs(10)).unwrap()
+        {
+            break (source, run);
+        }
+    };
+    assert_eq!(applied.0, Source::Claude);
+    assert_eq!(applied.1.unwrap().id, "r5");
+    assert_eq!(e.last_entry()["run"], "r5");
+
+    let v = json_out(e.tune().args(["do", song, "play", "--json"]));
+    assert_eq!(v["via"], "studio");
+    let state = studio
+        .call(StudioCall::Studio(StudioCommand::GetState))
+        .unwrap();
+    assert_eq!(state["playing"], true);
+
+    let v = json_out(e.tune().args(["set", song, "song.bpm=128", "--json"]));
+    assert_eq!(v["via"], "studio");
+    assert!(fs::read_to_string(&e.song).unwrap().contains("bpm = 128"));
+    studio.shutdown();
 }

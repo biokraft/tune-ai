@@ -12,6 +12,9 @@
 //! The server listens on `127.0.0.1` only and refuses a WebSocket upgrade
 //! whose `Origin` is not its own page (or the vite dev server), so a web page
 //! on another site cannot drive the studio.
+//!
+//! The studio's control endpoint runs alongside, so `tune do` and `tune set`
+//! on the same song go through it.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -29,7 +32,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::mpsc;
 use tower_http::services::{ServeDir, ServeFile};
 use tune_audio::output;
-use tune_studio::{Command, Event, Studio, StudioConfig, StudioHandle};
+use tune_studio::{Command, ControlServer, Event, Studio, StudioConfig, StudioHandle, studio_dir};
 
 use crate::report::{Failure, finish};
 
@@ -75,7 +78,10 @@ pub fn run(a: &Args) -> ExitCode {
         Ok(h) => h,
         Err(e) => return fail(a.json, e.to_string()),
     };
+    let control = start_control(&handle);
     let result = serve(a, &handle);
+    // The endpoint file goes before the studio stops answering.
+    drop(control);
     handle.shutdown();
     match result {
         Ok(()) => {
@@ -87,6 +93,17 @@ pub fn run(a: &Args) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(m) => fail(a.json, m),
+    }
+}
+
+/// Starts the control endpoint; without it, the CLI edits the file.
+fn start_control(handle: &StudioHandle) -> Option<ControlServer> {
+    match ControlServer::start(handle.clone(), &studio_dir()) {
+        Ok(control) => Some(control),
+        Err(e) => {
+            eprintln!("warning: CLI edits will write the file directly: {e}");
+            None
+        }
     }
 }
 
