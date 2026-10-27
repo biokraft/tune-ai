@@ -6,7 +6,9 @@
 //! a note clip while its notes are held, and structural swaps that
 //! crossfade a track's old and new paths, an instrument swap among them),
 //! a seek, a loop wrap, the song
-//! end and knob overrides on tracks, strips and the mix.
+//! end and knob overrides on tracks, strips and the mix; and that
+//! `Engine::cue` and session play (cues landing, session clips across a
+//! loop wrap and a seek) never allocate either.
 //!
 //! A counting global allocator counts every allocation, reallocation and
 //! deallocation made while the thread-local "audio" flag is set. The flag is
@@ -22,9 +24,12 @@ use std::sync::Arc;
 
 use common::{MINI, MIXED, compile_song, compiled, keep_sections, song, variant_of};
 use tune_dsp::{MASTER_GAIN, STRIP_SEND_DELAY};
-use tune_engine::{CompiledSong, Engine, LiveProcessor, MIX_TRACK, ParamTarget, SongUpdate, live};
+use tune_engine::{
+    CompiledSong, Engine, LiveProcessor, MIX_TRACK, ParamTarget, SessionCue, SongUpdate, TrackPlay,
+    live,
+};
 use tune_modules::{CLAP, EQ, KICK, ModuleDescriptor};
-use tune_song::{Device, MasterMode, MixUnit, Track};
+use tune_song::{Device, MasterMode, MixUnit, Scene, Track};
 
 struct Counting;
 
@@ -591,5 +596,69 @@ fn structural_swaps_fade_without_alloc() {
         assert_eq!(ctl.swaps_applied(), 1 + i as u64);
         assert_eq!(ctl.collect_garbage(), 1, "swap {i}");
     }
+    assert_no_alloc();
+}
+
+/// Runs `f` with the audio flag set.
+fn flagged<T>(f: impl FnOnce() -> T) -> T {
+    AUDIO.with(|a| a.set(true));
+    let out = f();
+    AUDIO.with(|a| a.set(false));
+    out
+}
+
+#[test]
+fn engine_cues_never_allocate() {
+    const BAR: u64 = 96_000;
+    // `mini` plus a scene `drop`: the acid plays a1, the hat h, the kick
+    // stops.
+    let s = compile_song(&variant_of(MINI, |s| {
+        s.scenes.insert(
+            "drop".into(),
+            Scene {
+                slots: [("acid", "a1"), ("hat", "h")]
+                    .into_iter()
+                    .map(|(t, c)| (t.to_owned(), c.to_owned()))
+                    .collect(),
+            },
+        );
+    }));
+    let mut e = Engine::new(s);
+    let mut out = vec![0.0f32; 2 * 4096];
+    let is_clip = |e: &Engine, t: usize| matches!(e.session(t), Some((TrackPlay::Clip(_), _)));
+
+    // A launch landing at step 0, then a scene landing at bar 1.
+    flagged(|| e.cue(SessionCue::Launch { track: 1, clip: 1 }));
+    under_flag(&mut out, 1000, 512, |o| e.process(o));
+    assert!(is_clip(&e, 1));
+    flagged(|| e.cue(SessionCue::Scene(0)));
+    under_flag(&mut out, BAR, 333, |o| e.process(o));
+    assert!(is_clip(&e, 2));
+    assert_eq!(e.session(0).map(|s| s.0), Some(TrackPlay::Stopped));
+
+    // Session clips across a loop wrap, with a stop and a return landing
+    // at the wrap.
+    flagged(|| e.set_loop(Some(1..2)));
+    under_flag(&mut out, BAR / 2, 4096, |o| e.process(o));
+    flagged(|| {
+        e.cue(SessionCue::Stop(1));
+        e.cue(SessionCue::Back(Some(0)));
+    });
+    under_flag(&mut out, BAR, 512, |o| e.process(o));
+    assert_eq!(e.session(1).map(|s| s.0), Some(TrackPlay::Stopped));
+    assert_eq!(e.session(0).map(|s| s.0), Some(TrackPlay::Arrangement));
+    assert!(is_clip(&e, 2));
+
+    // A seek with a session clip playing; every track back at the seek bar.
+    flagged(|| {
+        e.set_loop(None);
+        e.cue(SessionCue::Back(None));
+        e.seek(3);
+    });
+    under_flag(&mut out, 1000, 61, |o| e.process(o));
+    for t in 0..3 {
+        assert_eq!(e.session(t), Some((TrackPlay::Arrangement, None)));
+    }
+
     assert_no_alloc();
 }

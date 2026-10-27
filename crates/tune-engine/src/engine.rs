@@ -26,6 +26,48 @@ use crate::mixer::{Meter, MixRuntime, Strip};
 /// frames (480 at 48 kHz).
 pub const SWAP_FADE_MS: f64 = 10.0;
 
+/// Session cues land on a step that is a multiple of this: one bar.
+pub const LAUNCH_QUANTUM_STEPS: u64 = 16;
+
+/// What a track plays in live play.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TrackPlay {
+    /// The arrangement: its placements and its lanes.
+    #[default]
+    Arrangement,
+    /// A session clip, as a placement from its launch step that loops the
+    /// clip; the track's lanes do not drive it.
+    Clip(CellSource),
+    /// Nothing, until it is sent back to the arrangement; its lanes do not
+    /// drive it.
+    Stopped,
+}
+
+/// What waits for a track's next bar line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cued {
+    /// Launch this clip (an index into `CompiledSong::clips`).
+    Clip(usize),
+    Stop,
+    /// Back to the arrangement.
+    Back,
+}
+
+/// A session command; indices name the song the engine plays. Each lands at
+/// the next bar line the engine fires (see [`Engine::cue`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionCue {
+    /// Track `track` plays clip `clip` from its start, looping.
+    Launch { track: usize, clip: usize },
+    /// Every track plays its slot of the scene: a slot with a clip launches
+    /// it, an empty slot stops the track.
+    Scene(usize),
+    /// The track goes silent until it is sent back.
+    Stop(usize),
+    /// One track, or every track with `None`, back to the arrangement.
+    Back(Option<usize>),
+}
+
 /// The live DSP objects of one track, with its knob overrides.
 pub struct TrackRuntime {
     pub instrument: Box<dyn Instrument>,
@@ -48,6 +90,11 @@ pub struct TrackRuntime {
     /// A placeholder a swap left behind in the old list: it holds nothing
     /// and plays no fade-out.
     vacant: bool,
+    /// What the track plays in live play; it travels with the runtime
+    /// across a swap.
+    play: TrackPlay,
+    /// The session cue waiting for the next bar line, like `play`.
+    cue: Option<Cued>,
 }
 
 /// How a track of the new song plays a swap's crossfade, while
@@ -436,6 +483,8 @@ impl TrackRuntime {
             seq: Sequencer::default(),
             fade: FadeRole::None,
             vacant: false,
+            play: TrackPlay::Arrangement,
+            cue: None,
         };
         rt.apply_static(track);
         rt
@@ -570,6 +619,8 @@ impl TrackRuntime {
             seq: Sequencer::default(),
             fade: FadeRole::None,
             vacant: true,
+            play: TrackPlay::Arrangement,
+            cue: None,
         }
     }
 }
@@ -890,6 +941,107 @@ impl Engine {
         self.overrides_active
     }
 
+    /// Cues for the next bar line; never allocates. An index outside the
+    /// song, or a launch of a clip the track's instrument cannot play, is
+    /// ignored. A cue replaces the one still waiting on its track. It lands
+    /// at the first step boundary whose step is a multiple of
+    /// [`LAUNCH_QUANTUM_STEPS`] the engine fires, whether reached by
+    /// playing, a loop wrap or a seek (see [`land_cues`](Self::land_cues));
+    /// a finished engine keeps it for the next seek.
+    pub fn cue(&mut self, cue: SessionCue) {
+        let song = &*self.song;
+        let launchable = |track: usize, clip: usize| {
+            matches!(
+                (song.tracks.get(track), song.clip_kinds.get(clip)),
+                (Some(t), Some(&kind)) if t.instrument.module.plays(kind)
+            )
+        };
+        match cue {
+            SessionCue::Launch { track, clip } => {
+                if launchable(track, clip) {
+                    self.tracks[track].cue = Some(Cued::Clip(clip));
+                }
+            }
+            SessionCue::Scene(scene) => {
+                let Some(scene) = song.scenes.get(scene) else {
+                    return;
+                };
+                for (t, (rt, slot)) in self.tracks.iter_mut().zip(&scene.slots).enumerate() {
+                    match *slot {
+                        Some(clip) if launchable(t, clip) => rt.cue = Some(Cued::Clip(clip)),
+                        Some(_) => {}
+                        None => rt.cue = Some(Cued::Stop),
+                    }
+                }
+            }
+            SessionCue::Stop(track) => {
+                if let Some(rt) = self.tracks.get_mut(track) {
+                    rt.cue = Some(Cued::Stop);
+                }
+            }
+            SessionCue::Back(Some(track)) => {
+                if let Some(rt) = self.tracks.get_mut(track) {
+                    rt.cue = Some(Cued::Back);
+                }
+            }
+            SessionCue::Back(None) => {
+                for rt in &mut self.tracks {
+                    rt.cue = Some(Cued::Back);
+                }
+            }
+        }
+    }
+
+    /// What track `track` plays and what is cued for it; `None` outside the
+    /// song.
+    pub fn session(&self, track: usize) -> Option<(TrackPlay, Option<Cued>)> {
+        self.tracks.get(track).map(|rt| (rt.play, rt.cue))
+    }
+
+    /// Lands every waiting cue at song step `step`, a bar line: a clip
+    /// plays from its start as a placement starting at `step`, a stop
+    /// silences the track and a return puts it back on the arrangement. The
+    /// track's static params are re-applied (its lanes may have moved them,
+    /// and a track off the arrangement plays its static values). The one
+    /// place a cue takes effect, so a recorder of session play hooks in
+    /// here.
+    fn land_cues(song: &CompiledSong, tracks: &mut [TrackRuntime], step: u64) {
+        for (rt, track) in tracks.iter_mut().zip(&song.tracks) {
+            let Some(cue) = rt.cue.take() else {
+                continue;
+            };
+            rt.play = match cue {
+                Cued::Clip(clip) => TrackPlay::Clip(CellSource {
+                    clip,
+                    start_step: step,
+                    offset_steps: 0,
+                }),
+                Cued::Stop => TrackPlay::Stopped,
+                Cued::Back => TrackPlay::Arrangement,
+            };
+            rt.apply_static(track);
+        }
+    }
+
+    /// Moves every session clip from song step `from` to `to`, keeping its
+    /// phase: at `to` it plays the clip step it would have played at
+    /// `from`. Called where the playhead jumps (a loop wrap, a seek). Every
+    /// session source starts at or before `from`, so nothing underflows.
+    fn rebase(song: &CompiledSong, tracks: &mut [TrackRuntime], from: u64, to: u64) {
+        for rt in tracks {
+            let TrackPlay::Clip(src) = &mut rt.play else {
+                continue;
+            };
+            let len = match song.clips.get(src.clip) {
+                Some(CompiledClip::Steps(cells)) => cells.len() as u64,
+                Some(CompiledClip::Notes(clip)) => clip.steps,
+                None => continue,
+            };
+            src.offset_steps = (from - src.start_step + src.offset_steps) % len.max(1);
+            src.start_step = to;
+        }
+    }
+
     /// Jumps to the start of 0-based `bar` (clamped to the song's end) and
     /// resets every instrument, effect, ducker, bus and the limiter. The
     /// loop, meter and knob overrides are kept.
@@ -899,6 +1051,7 @@ impl Engine {
     /// not the samples.
     pub fn seek(&mut self, bar: u32) {
         let bar = bar.min(self.song.total_bars);
+        Self::rebase(&self.song, &mut self.tracks, self.step, 16 * u64::from(bar));
         for rt in &mut self.tracks {
             rt.reset();
         }
@@ -930,11 +1083,16 @@ impl Engine {
     ///    [`queue_swap`](Self::queue_swap)); the rest of the sample then runs
     ///    on the new song.
     /// 1. When finished, write silence.
-    /// 2. At a step boundary: wrap at the loop end (nothing is reset); finish
-    ///    at the song end; re-apply static params (tracks, strips and mix) on
-    ///    a region change (or the first step after `new`/`seek`); apply the
-    ///    region's lanes for this sample; apply the knob overrides; deliver
-    ///    note events on every track in order (a step note's scheduled Off
+    /// 2. At a step boundary: wrap at the loop end (nothing is reset; session
+    ///    clips keep their phase); finish at the song end; on a bar line
+    ///    (a multiple of [`LAUNCH_QUANTUM_STEPS`]) land the waiting session
+    ///    cues, re-applying each such track's static params; re-apply static
+    ///    params (tracks, strips and mix) on a region change (or the first
+    ///    step after `new`/`seek`); apply the region's lanes for this sample
+    ///    (a track's lanes only while it plays the arrangement); apply the
+    ///    knob overrides; deliver note events on every track in order, each
+    ///    from what it plays: the arrangement, its session clip or nothing
+    ///    (a step note's scheduled Off
     ///    still pending; `AllOff` when a note-clip note may sound and the
     ///    track does not play on from the previous step (the same notes
     ///    clip at the next clip step, whichever placement plays it), as
@@ -1014,6 +1172,7 @@ impl Engine {
             if let Some((start, end)) = self.looping
                 && self.step == end
             {
+                Self::rebase(song, &mut self.tracks, end, start);
                 self.step = start;
                 self.pos = song.clock.step_start(start);
             }
@@ -1022,6 +1181,9 @@ impl Engine {
                 self.finished = true;
                 self.fade = None;
                 return self.silence(&mut stem);
+            }
+            if self.step.is_multiple_of(LAUNCH_QUANTUM_STEPS) {
+                Self::land_cues(song, &mut self.tracks, self.step);
             }
             let region = region_of(song, self.step);
             if region != self.region || self.needs_static {
@@ -1054,12 +1216,20 @@ impl Engine {
                 // Forces only a step note's Off (see `deliver_off`).
                 rt.seq
                     .deliver_off(instrument, self.pos, step, track.seed, true);
-                let src = song.regions[region].cells[t];
+                let src = source(song, rt.play, region, t);
                 let (at, late_on) = rt.seq.cut(instrument, song, src, &ctx);
                 // A notes clip's cell is `Rest`, so a step note before it
                 // does not slide into it.
-                let cell = cell_at(song, region, t, step);
-                let next = cell_at(song, next_region, t, next_step);
+                let cell = cell_at(song, src, step);
+                // The step a note slides into never looks at cues: an
+                // arrangement track reads the arrangement's next step, a
+                // session clip plays on in its own time.
+                let next = match rt.play {
+                    TrackPlay::Arrangement => {
+                        cell_at(song, source(song, rt.play, next_region, t), next_step)
+                    }
+                    _ => cell_at(song, src, step + 1),
+                };
                 let mut on = rt.seq.step(instrument, cell, next, &ctx, self.gate_samples);
                 on |= late_on;
                 if let Some(at) = at {
@@ -1350,24 +1520,34 @@ fn region_of(song: &CompiledSong, step: u64) -> usize {
         .saturating_sub(1)
 }
 
-/// The cell track `t` plays at `step` in `region`: `Rest` when no placement
-/// of the track covers the region or the step lies past the end; otherwise
-/// the clip looped from the placement's start, `offset_steps` in.
-fn cell_at(song: &CompiledSong, region: usize, t: usize, step: u64) -> &Cell {
+/// Where track `t`, playing `play`, takes its cells from in `region`: the
+/// region's placement on the arrangement, the session clip, or nothing
+/// when stopped.
+fn source(song: &CompiledSong, play: TrackPlay, region: usize, t: usize) -> Option<CellSource> {
+    match play {
+        TrackPlay::Arrangement => song.regions[region].cells[t],
+        TrackPlay::Clip(src) => Some(src),
+        TrackPlay::Stopped => None,
+    }
+}
+
+/// The cell `src` plays at `step`: `Rest` with no source or past the end;
+/// otherwise the clip looped from the source's start, `offset_steps` in.
+fn cell_at(song: &CompiledSong, src: Option<CellSource>, step: u64) -> &Cell {
     if step >= 16 * u64::from(song.total_bars) {
         return &REST;
     }
-    match song.regions[region].cells[t] {
+    match src {
         None => &REST,
         Some(source) => {
-            match &song.clips[source.clip] {
-                CompiledClip::Steps(clip) => {
+            match song.clips.get(source.clip) {
+                Some(CompiledClip::Steps(clip)) => {
                     let offset = step - source.start_step + source.offset_steps;
                     &clip[(offset % clip.len() as u64) as usize]
                 }
                 // A notes clip plays events, not cells (see
                 // `Sequencer::notes_step`).
-                CompiledClip::Notes(_) => &REST,
+                Some(CompiledClip::Notes(_)) | None => &REST,
             }
         }
     }
@@ -1382,7 +1562,9 @@ fn apply_overrides(tracks: &mut [TrackRuntime], mix: &mut MixRuntime) {
 }
 
 /// Applies every lane of `region` at song sample `pos`, each at its bar
-/// offset from its own stretch's start.
+/// offset from its own stretch's start. A track's lane does not drive a
+/// track off the arrangement (playing a session clip or stopped); a mix
+/// lane always runs.
 fn apply_lanes(
     song: &CompiledSong,
     region: usize,
@@ -1395,6 +1577,9 @@ fn apply_lanes(
         return;
     }
     for lane in &r.lanes {
+        if lane.track != MIX_TRACK && tracks[lane.track].play != TrackPlay::Arrangement {
+            continue;
+        }
         let x = pos.saturating_sub(lane.start_sample) as f64 / (16.0 * song.clock.samples_per_step);
         let plain = lane.spec.to_plain(lane_value(&lane.points, x));
         match lane.target {
