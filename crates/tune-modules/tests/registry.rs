@@ -1,6 +1,6 @@
 use tune_modules::{
-    ACID303, BUILTIN, CLAP, Cell, ClipKind, DISTORTION, EQ, HAT_CLOSED, HAT_OPEN, KICK, RIDE,
-    Registry, StepCtx,
+    ACID303, BUILTIN, CLAP, ClipKind, DISTORTION, DRUM_PITCH, EQ, EventCtx, HAT_CLOSED, HAT_OPEN,
+    KICK, NoteEvent, NoteId, RIDE, Registry,
 };
 
 #[test]
@@ -76,13 +76,21 @@ fn distortion_has_a_mode_setting() {
 #[test]
 fn factories_build_their_voices() {
     let mut kick = KICK.make_instrument(48_000.0, &[]).unwrap();
-    let ctx = StepCtx {
+    let ctx = EventCtx {
+        pos: 0,
         step: 0,
-        next_has_gate: false,
-        gate_samples: 3000,
         seed: 1,
     };
-    kick.on_step(&Cell::Hit { accent: false }, &ctx);
+    kick.note(
+        &NoteEvent::On {
+            id: NoteId(0),
+            pitch: DRUM_PITCH,
+            velocity: 100,
+            accent: false,
+            slide: false,
+        },
+        &ctx,
+    );
     assert!((0..100).any(|_| kick.process() != 0.0));
 
     assert!(DISTORTION.make_effect(48_000.0, &["hard"]).is_some());

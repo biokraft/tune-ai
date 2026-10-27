@@ -14,12 +14,12 @@ pub mod wav;
 
 pub use clock::{Clock, hit_seed, track_seed};
 pub use compile::{
-    CellSource, CompiledDevice, CompiledLane, CompiledMix, CompiledRegion, CompiledSection,
+    Cell, CellSource, CompiledDevice, CompiledLane, CompiledMix, CompiledRegion, CompiledSection,
     CompiledSong, CompiledTrack, MIX_TRACK, ParamTarget,
 };
 pub use engine::{Engine, TrackRuntime};
 pub use live::{AudioOut, LiveController, LiveError, LiveProcessor, SongUpdate, live};
 pub use mixer::{CLIP_CEILING, CLIP_KNEE, Meter, MixRuntime, Strip, pan_gains, soft_clip};
 pub use offline::{RenderError, RenderOptions, RenderReport, Rendered, render, render_to_files};
-pub use tune_modules::{AcidTrack, Cell, Effect, Instrument, StepCtx};
+pub use tune_modules::{AcidTrack, Effect, EventCtx, Instrument, NoteEvent, NoteId};
 pub use wav::{WavError, WavFormat, WavWriter, write_wav};

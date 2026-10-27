@@ -1,7 +1,7 @@
 use tune_dsp::ParamError;
 use tune_dsp::acid303::AcidStep;
-use tune_engine::{Cell, Clock, Instrument, StepCtx, hit_seed, track_seed};
-use tune_modules::{ACID303, KICK, Registry};
+use tune_engine::{Cell, Clock, EventCtx, Instrument, NoteEvent, NoteId, hit_seed, track_seed};
+use tune_modules::{ACID303, DRUM_PITCH, KICK, Registry};
 
 fn rms(x: &[f64]) -> f64 {
     (x.iter().map(|v| v * v).sum::<f64>() / x.len() as f64).sqrt()
@@ -15,22 +15,66 @@ fn note(slide_or_tie: bool) -> Cell {
     })
 }
 
-/// Drives `cells` at 120 BPM / 48 kHz, one per step, for `len` samples.
+/// Drives `cells` at 120 BPM / 48 kHz, one per step, for `len` samples, as
+/// the engine's step events: a note's On, then the Off of a note that slid
+/// into it; a note that does not slide into a note ends half a step later.
 fn drive(inst: &mut dyn Instrument, cells: &[Cell], len: usize) -> Vec<f64> {
     let clock = Clock::new(120.0, 48_000);
+    let gate = u64::try_from(clock.gate_samples()).unwrap();
+    let mut held = None;
+    let mut off = None;
     let mut out = Vec::with_capacity(len);
     for pos in 0..len as u64 {
         let k = clock.step_at(pos);
+        let ctx = EventCtx {
+            pos,
+            step: k,
+            seed: hit_seed(track_seed(1, "t"), k),
+        };
+        if let Some((at, id, pitch)) = off
+            && pos >= at
+        {
+            inst.note(&NoteEvent::Off { id, pitch }, &ctx);
+            off = None;
+        }
         if clock.step_start(k) == pos {
             let cell = &cells[k as usize % cells.len()];
             let next = &cells[(k as usize + 1) % cells.len()];
-            let ctx = StepCtx {
-                step: k,
-                next_has_gate: matches!(next, Cell::Note(s) if s.note.is_some()),
-                gate_samples: clock.gate_samples(),
-                seed: hit_seed(track_seed(1, "t"), k),
+            let id = NoteId(k as u32);
+            let (pitch, accent, into) = match cell {
+                Cell::Note(s) => (
+                    s.note.unwrap(),
+                    s.accent,
+                    s.slide && matches!(next, Cell::Note(_)),
+                ),
+                Cell::Hit { accent } => (DRUM_PITCH, *accent, false),
+                Cell::Rest => {
+                    if let Some((id, pitch)) = held.take() {
+                        inst.note(&NoteEvent::Off { id, pitch }, &ctx);
+                    }
+                    out.push(inst.process());
+                    continue;
+                }
             };
-            inst.on_step(cell, &ctx);
+            let velocity = if accent { 127 } else { 100 };
+            inst.note(
+                &NoteEvent::On {
+                    id,
+                    pitch,
+                    velocity,
+                    accent,
+                    slide: into,
+                },
+                &ctx,
+            );
+            if let Some((id, pitch)) = held.take() {
+                inst.note(&NoteEvent::Off { id, pitch }, &ctx);
+            }
+            if into {
+                held = Some((id, pitch));
+            } else {
+                off = Some((pos + gate, id, pitch));
+            }
         }
         out.push(inst.process());
     }

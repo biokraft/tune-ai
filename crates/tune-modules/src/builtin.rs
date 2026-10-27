@@ -1,31 +1,31 @@
 //! Today's modules: the `tune-dsp` voices behind the instrument and effect
 //! traits, and their descriptors.
 
-use tune_dsp::acid303::{ACID303_PARAMS, Acid303, AcidGate, AcidStep};
+use tune_dsp::acid303::{ACID303_PARAMS, Acid303};
 use tune_dsp::{
     CLAP_PARAMS, Clap, DIST_PARAMS, Distortion, DistortionMode, EQ_PARAMS, Equalizer,
     HAT_CLOSED_PARAMS, HAT_OPEN_PARAMS, Hat, HatKind, KICK_PARAMS, Kick, ParamSpec, RIDE_PARAMS,
 };
 
 use crate::descriptor::{ClipKind, ModuleDescriptor, Role, SettingSpec};
-use crate::instrument::{Cell, Effect, Instrument, StepCtx};
+use crate::instrument::{Effect, EventCtx, Instrument, NoteEvent, NoteId};
 
-/// An [`Acid303`] driven by the song clock instead of its own sequencer.
+/// An [`Acid303`] played by note events.
 ///
-/// `process` keeps `AcidPlayer`'s order: gate tick, then the pending step,
-/// then the voice sample.
+/// An On slides when a note sounds and triggers otherwise, so a step that
+/// slides into the next one (its Off comes after the next On) glides
+/// without a retrigger, as the 303 sequencer does.
 pub struct AcidTrack {
     voice: Acid303,
-    gate: AcidGate,
-    pending: Option<(AcidStep, StepCtx)>,
+    /// The note the voice is holding, until its Off.
+    sounding: Option<NoteId>,
 }
 
 impl AcidTrack {
     pub fn new(sample_rate: f64) -> Self {
         Self {
             voice: Acid303::with_param_defaults(sample_rate),
-            gate: AcidGate::new(),
-            pending: None,
+            sounding: None,
         }
     }
 }
@@ -39,34 +39,40 @@ impl Instrument for AcidTrack {
         self.voice.set_param_at(index, plain);
     }
 
-    fn on_step(&mut self, cell: &Cell, ctx: &StepCtx) {
-        self.pending = match cell {
-            Cell::Note(step) => Some((step.clone(), *ctx)),
-            // A rest (or a stray drum hit) still ends a pending slide.
-            Cell::Rest | Cell::Hit { .. } => Some((
-                AcidStep {
-                    note: None,
-                    accent: false,
-                    slide: false,
-                },
-                *ctx,
-            )),
-        };
+    fn note(&mut self, event: &NoteEvent, _ctx: &EventCtx) {
+        match *event {
+            NoteEvent::On {
+                id, pitch, accent, ..
+            } => {
+                let pitch = pitch.min(127);
+                if self.sounding.is_some() {
+                    self.voice.slide_to_note(pitch, accent);
+                } else {
+                    self.voice.trigger_note(pitch, accent);
+                }
+                self.sounding = Some(id);
+            }
+            NoteEvent::Off { id, .. } => {
+                if self.sounding == Some(id) {
+                    self.voice.release_note();
+                    self.sounding = None;
+                }
+            }
+            NoteEvent::AllOff => {
+                if self.sounding.take().is_some() {
+                    self.voice.release_note();
+                }
+            }
+        }
     }
 
     fn process(&mut self) -> f64 {
-        self.gate.tick(&mut self.voice);
-        if let Some((step, ctx)) = self.pending.take() {
-            self.gate
-                .on_step(&mut self.voice, &step, ctx.next_has_gate, ctx.gate_samples);
-        }
         self.voice.get_sample()
     }
 
     fn reset(&mut self) {
         self.voice.reset();
-        self.gate.reset();
-        self.pending = None;
+        self.sounding = None;
     }
 }
 
@@ -79,9 +85,9 @@ macro_rules! drum_instrument {
             fn set_param_at(&mut self, index: usize, plain: f64) {
                 <$ty>::set_param_at(self, index, plain);
             }
-            fn on_step(&mut self, cell: &Cell, ctx: &StepCtx) {
-                if let Cell::Hit { accent } = cell {
-                    self.trigger(*accent, ctx.seed);
+            fn note(&mut self, event: &NoteEvent, ctx: &EventCtx) {
+                if let NoteEvent::On { accent, .. } = *event {
+                    self.trigger(accent, ctx.seed);
                 }
             }
             fn process(&mut self) -> f64 {
@@ -104,9 +110,9 @@ impl Instrument for Hat {
     fn set_param_at(&mut self, index: usize, plain: f64) {
         Hat::set_param_at(self, index, plain);
     }
-    fn on_step(&mut self, cell: &Cell, ctx: &StepCtx) {
-        if let Cell::Hit { accent } = cell {
-            self.trigger(*accent, ctx.seed);
+    fn note(&mut self, event: &NoteEvent, ctx: &EventCtx) {
+        if let NoteEvent::On { accent, .. } = *event {
+            self.trigger(accent, ctx.seed);
         }
     }
     fn process(&mut self) -> f64 {

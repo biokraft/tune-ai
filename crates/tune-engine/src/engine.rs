@@ -8,12 +8,13 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use tune_dsp::acid303::AcidStep;
 use tune_dsp::{ParamSpec, STRIP_PARAMS};
-use tune_modules::{Cell, Effect, Instrument, StepCtx};
+use tune_modules::{DRUM_PITCH, Effect, EventCtx, Instrument, NoteEvent, NoteId};
 use tune_song::lane_value;
 
 use crate::clock::hit_seed;
-use crate::compile::{CompiledDevice, CompiledSong, CompiledTrack, MIX_TRACK, ParamTarget};
+use crate::compile::{Cell, CompiledDevice, CompiledSong, CompiledTrack, MIX_TRACK, ParamTarget};
 use crate::live::SongUpdate;
 use crate::mixer::{Meter, MixRuntime, Strip};
 
@@ -30,6 +31,116 @@ pub struct TrackRuntime {
     /// One override table per fx slot, like `overrides`. Each travels with
     /// its device: a swap that rebuilds a device drops it.
     fx_overrides: Vec<Vec<f64>>,
+    /// What the instrument is sounding, from the engine's side: it travels
+    /// with the instrument on a swap and is reset with it.
+    seq: Sequencer,
+}
+
+/// The step notes a track's instrument is sounding.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Sequencer {
+    /// A note that slides into the next step: its Off follows that step's On.
+    held: Option<(NoteId, u8)>,
+    /// A note that does not slide: its Off and the sample it lands on.
+    off: Option<(u64, NoteId, u8)>,
+}
+
+impl Sequencer {
+    /// The note id of a step's note.
+    fn step_id(step: u64) -> NoteId {
+        NoteId((step % (1 << 31)) as u32)
+    }
+
+    /// Delivers the scheduled Off once `pos` reaches it, in `step` of a
+    /// track with noise seed `seed`. At a step start (`boundary`, before the
+    /// step's events) it goes whatever its sample, so no step note outlasts
+    /// the next step's start; with a gate of half a step, one never does.
+    fn deliver_off(
+        &mut self,
+        instrument: &mut dyn Instrument,
+        pos: u64,
+        step: u64,
+        seed: u64,
+        boundary: bool,
+    ) {
+        if let Some((at, id, pitch)) = self.off
+            && (boundary || pos >= at)
+        {
+            let ctx = EventCtx {
+                pos,
+                step,
+                seed: hit_seed(seed, step),
+            };
+            instrument.note(&NoteEvent::Off { id, pitch }, &ctx);
+            self.off = None;
+        }
+    }
+
+    /// Delivers the step events of `cell` (with `next` the cell of the step
+    /// after it): an On for a note or a hit, then the Off of the note held
+    /// into this step (a drum track never holds one), and schedules this
+    /// note's own Off `gate_samples` later unless it slides into a note.
+    /// Returns whether an On was delivered.
+    fn step(
+        &mut self,
+        instrument: &mut dyn Instrument,
+        cell: &Cell,
+        next: &Cell,
+        ctx: &EventCtx,
+        gate_samples: u64,
+    ) -> bool {
+        let id = Self::step_id(ctx.step);
+        let velocity = |accent: bool| if accent { 127 } else { 100 };
+        match cell {
+            &Cell::Note(AcidStep {
+                note: Some(note),
+                accent,
+                slide,
+            }) => {
+                let pitch = note.min(127);
+                let into = slide && matches!(next, Cell::Note(n) if n.note.is_some());
+                let on = NoteEvent::On {
+                    id,
+                    pitch,
+                    velocity: velocity(accent),
+                    accent,
+                    slide: into,
+                };
+                instrument.note(&on, ctx);
+                self.release_held(instrument, ctx);
+                if into {
+                    self.held = Some((id, pitch));
+                } else {
+                    self.off = Some((ctx.pos + gate_samples, id, pitch));
+                }
+                true
+            }
+            &Cell::Hit { accent } => {
+                let on = NoteEvent::On {
+                    id,
+                    pitch: DRUM_PITCH,
+                    velocity: velocity(accent),
+                    accent,
+                    slide: false,
+                };
+                instrument.note(&on, ctx);
+                self.release_held(instrument, ctx);
+                self.off = Some((ctx.pos + gate_samples, id, DRUM_PITCH));
+                true
+            }
+            Cell::Note(_) | Cell::Rest => {
+                self.release_held(instrument, ctx);
+                false
+            }
+        }
+    }
+
+    /// Ends the note held into this step, if any.
+    fn release_held(&mut self, instrument: &mut dyn Instrument, ctx: &EventCtx) {
+        if let Some((id, pitch)) = self.held.take() {
+            instrument.note(&NoteEvent::Off { id, pitch }, ctx);
+        }
+    }
 }
 
 impl TrackRuntime {
@@ -62,6 +173,7 @@ impl TrackRuntime {
                 .iter()
                 .map(|fx| vec![f64::NAN; fx.params.len()])
                 .collect(),
+            seq: Sequencer::default(),
         };
         rt.apply_static(track);
         rt
@@ -174,6 +286,7 @@ impl TrackRuntime {
 
     fn reset(&mut self) {
         self.instrument.reset();
+        self.seq = Sequencer::default();
         self.strip.reset();
         for fx in &mut self.fx {
             fx.reset();
@@ -192,6 +305,7 @@ impl TrackRuntime {
             overrides: Vec::new(),
             strip_overrides: Vec::new(),
             fx_overrides: Vec::new(),
+            seq: Sequencer::default(),
         }
     }
 }
@@ -204,7 +318,7 @@ impl Instrument for Vacant {
         &[]
     }
     fn set_param_at(&mut self, _: usize, _: f64) {}
-    fn on_step(&mut self, _: &Cell, _: &StepCtx) {}
+    fn note(&mut self, _: &NoteEvent, _: &EventCtx) {}
     fn process(&mut self) -> f64 {
         0.0
     }
@@ -239,7 +353,8 @@ pub struct Engine {
     looping: Option<(u64, u64)>,
     finished: bool,
     any_solo: bool,
-    gate_samples: i32,
+    /// How long a step note sounds unless it slides into the next one.
+    gate_samples: u64,
     meter: Meter,
     /// A swap waiting for the next step boundary.
     pending: Option<Box<SongUpdate>>,
@@ -279,7 +394,7 @@ impl Engine {
         );
         Self {
             any_solo: song.tracks.iter().any(|t| t.solo),
-            gate_samples: song.clock.gate_samples(),
+            gate_samples: gate_samples(&song),
             mix: MixRuntime::build(&song),
             song,
             tracks,
@@ -381,7 +496,7 @@ impl Engine {
     /// sets the param back to its static value; a lane then takes it over
     /// again from the next sample. A mix param takes track [`MIX_TRACK`] and
     /// a [`ParamTarget::Mix`] target. An override wins over static params
-    /// and lanes and is applied every sample, before `on_step` (see
+    /// and lanes and is applied every sample, before note events (see
     /// [`process`](Self::process)). A track or target outside the song is
     /// ignored. Never allocates. Overrides are live-only: offline renders
     /// build their own engine and never see them.
@@ -488,13 +603,17 @@ impl Engine {
     /// 2. At a step boundary: wrap at the loop end (nothing is reset); finish
     ///    at the song end; re-apply static params (tracks, strips and mix) on
     ///    a region change (or the first step after `new`/`seek`); apply the
-    ///    region's lanes for this sample; apply the knob overrides; fire
-    ///    `on_step` on every track in order; if the duck source's cell at
-    ///    this step is a hit (muted or not), trigger every track's ducker;
-    ///    advance the step. Elsewhere: apply the region's lanes, then the
-    ///    overrides, for this sample. Lanes and overrides run exactly once
-    ///    per sample (overrides only when one is set), always before the
-    ///    tracks' `on_step`, so a hit reads the overridden value.
+    ///    region's lanes for this sample; apply the knob overrides; deliver
+    ///    note events on every track in order (a scheduled Off still
+    ///    pending, then the step's: an On for a note or a hit, the Off of a
+    ///    note that slid into this step); if the duck source got an On
+    ///    (muted or not), trigger every track's ducker; advance the step.
+    ///    Elsewhere: apply the region's lanes, then the overrides, for this
+    ///    sample, then deliver every track's scheduled Off that lands on it
+    ///    (a step note that does not slide ends `gate_samples` after its
+    ///    On). Lanes and overrides run exactly once per sample (overrides
+    ///    only when one is set), always before the note events, so a hit
+    ///    reads the overridden value.
     /// 3. For every track in song order: instrument, then fx in order, then
     ///    the ducker (`y`); `l, r = y·gain·pan`; write its stem; when audible
     ///    (mute and solo), add `l, r` to the master and `y·gain·send` to the
@@ -576,19 +695,22 @@ impl Engine {
                 _ => step + 1,
             };
             let next_region = region_of(song, next_step);
+            let mut duck = false;
             for (t, (rt, track)) in self.tracks.iter_mut().zip(&song.tracks).enumerate() {
-                let next = cell_at(song, next_region, t, next_step);
-                let ctx = StepCtx {
+                let ctx = EventCtx {
+                    pos: self.pos,
                     step,
-                    next_has_gate: matches!(next, Cell::Note(n) if n.note.is_some()),
-                    gate_samples: self.gate_samples,
                     seed: hit_seed(track.seed, step),
                 };
-                rt.instrument.on_step(cell_at(song, region, t, step), &ctx);
+                let instrument = rt.instrument.as_mut();
+                rt.seq
+                    .deliver_off(instrument, self.pos, step, track.seed, true);
+                let cell = cell_at(song, region, t, step);
+                let next = cell_at(song, next_region, t, next_step);
+                let on = rt.seq.step(instrument, cell, next, &ctx, self.gate_samples);
+                duck |= on && song.mix.duck_source == Some(t);
             }
-            if let Some(source) = song.mix.duck_source
-                && matches!(cell_at(song, region, source, step), Cell::Hit { .. })
-            {
+            if duck {
                 for rt in &mut self.tracks {
                     rt.strip.trigger_duck();
                 }
@@ -598,6 +720,13 @@ impl Engine {
             apply_lanes(song, self.region, self.pos, &mut self.tracks, &mut self.mix);
             if self.overrides_active > 0 {
                 apply_overrides(&mut self.tracks, &mut self.mix);
+            }
+            // The step being played; the first sample after `new`, `seek`
+            // or a swap is always a step start.
+            let step = self.step.saturating_sub(1);
+            for (rt, track) in self.tracks.iter_mut().zip(&song.tracks) {
+                rt.seq
+                    .deliver_off(rt.instrument.as_mut(), self.pos, step, track.seed, false);
             }
         }
 
@@ -654,6 +783,7 @@ impl Engine {
                     if !same_device(&old.instrument, &new.instrument) {
                         std::mem::swap(&mut kept.instrument, &mut unused.instrument);
                         std::mem::swap(&mut kept.overrides, &mut unused.overrides);
+                        std::mem::swap(&mut kept.seq, &mut unused.seq);
                     }
                     // Deal every kept device into its new slot of the fresh
                     // chain, then take that chain; the old one goes back
@@ -696,7 +826,7 @@ impl Engine {
 
         let song = &*self.song;
         self.any_solo = song.tracks.iter().any(|t| t.solo);
-        self.gate_samples = song.clock.gate_samples();
+        self.gate_samples = gate_samples(song);
         let total_steps = 16 * u64::from(song.total_bars);
         self.looping = self
             .looping
@@ -751,6 +881,11 @@ impl Engine {
     pub fn song(&self) -> &Arc<CompiledSong> {
         &self.song
     }
+}
+
+/// The song's gate length in samples (half a step).
+fn gate_samples(song: &CompiledSong) -> u64 {
+    u64::try_from(song.clock.gate_samples()).unwrap_or(0)
 }
 
 /// Index of the region containing `step` (the last one for steps past the
