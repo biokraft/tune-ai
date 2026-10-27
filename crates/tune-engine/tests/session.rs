@@ -625,11 +625,13 @@ fn a_value_swap_keeps_a_session_notes_clip_sounding() {
         if swap {
             assert!(e.queue_swap(SongUpdate::new(louder_hat.clone())).is_none());
         }
-        out.extend(render(&mut e, SONG - 3 * BAR / 2));
+        // Frame 144 000 is step 24's first: the swap lands on it.
+        out.extend(render(&mut e, 1));
         if swap {
             assert_eq!(e.swaps_applied(), 1);
-            assert!(!e.swap_fading());
+            assert!(!e.swap_fading(), "a value swap does not crossfade");
         }
+        out.extend(render(&mut e, SONG - 3 * BAR / 2 - 1));
         out
     };
     let (swapped, plain) = (run(true), run(false));
@@ -755,4 +757,111 @@ fn live_cues_reach_the_engine() {
     ctl.cue(launch).unwrap();
     pull(&mut p, BAR);
     assert_eq!(p.session(ACID), Some((clip(A1, 32, 0), None)));
+}
+
+#[test]
+fn a_session_notes_clip_that_moves_in_the_pool_keeps_sounding() {
+    // The swap only inserts a clip before `pad`, so `pad` moves to the next
+    // index: its held note plays on only if the remap runs before the held
+    // notes are carried over.
+    let padded = with_pad(MINI, |s| {
+        common::unplay(s, "acid");
+        s.tracks.get_mut("kick").expect("a kick").mute = true;
+        s.tracks.get_mut("hat").expect("a hat").mute = true;
+    });
+    let s = compile_song(&padded);
+    let pad = s.clip_index("pad").expect("the pad");
+    let shifted = compile_song(&variant_of(&padded.to_toml(), |s| {
+        let z = tune_dsp::DrumPattern::parse("x...............").expect("a pattern");
+        s.clips.shift_insert(0, "z".into(), Clip::Drum(z));
+    }));
+    assert_eq!(shifted.clip_index("pad"), Some(pad + 1));
+    let run = |swap: bool| {
+        let mut e = Engine::new(s.clone());
+        e.cue(SessionCue::Launch {
+            track: ACID,
+            clip: pad,
+        });
+        let mut out = render(&mut e, 3 * BAR / 2);
+        if swap {
+            assert!(e.queue_swap(SongUpdate::new(shifted.clone())).is_none());
+        }
+        out.extend(render(&mut e, 1));
+        if swap {
+            assert_eq!(e.swaps_applied(), 1);
+            assert_eq!(e.session(ACID).map(|s| s.0), Some(clip(pad + 1, 0, 0)));
+        }
+        out.extend(render(&mut e, SONG - 3 * BAR / 2 - 1));
+        out
+    };
+    let (swapped, plain) = (run(true), run(false));
+    assert_eq!(swapped.len(), plain.len());
+    assert_eq!(
+        first_difference(&swapped, &plain),
+        None,
+        "the first frame that differs"
+    );
+}
+
+#[test]
+fn session_state_follows_a_track_to_its_new_index() {
+    // Launched: a1 on the acid, h on the hat; waiting: k4 on the kick. The
+    // swap reorders the tracks to kick, hat, acid and inserts `z` first, so
+    // the acid's old index names the hat and the hat's the acid: a clip
+    // checked against the track at its old index would stop.
+    let mut e = Engine::new(compiled(MINI));
+    e.cue(SessionCue::Launch {
+        track: ACID,
+        clip: A1,
+    });
+    e.cue(SessionCue::Launch {
+        track: HAT,
+        clip: H,
+    });
+    render(&mut e, 1);
+    e.cue(SessionCue::Launch {
+        track: KICK,
+        clip: K4,
+    });
+    let reordered = compile_song(&variant_of(MINI, |s| {
+        let z = tune_dsp::DrumPattern::parse("x...............").expect("a pattern");
+        s.clips.shift_insert(0, "z".into(), Clip::Drum(z));
+        s.tracks.move_index(1, 2);
+    }));
+    let ids: Vec<_> = reordered.tracks.iter().map(|t| t.id.as_str()).collect();
+    assert_eq!(ids, ["kick", "hat", "acid"]);
+    swap_at_next_step(&mut e, reordered);
+    assert_eq!(
+        e.session(0),
+        Some((TrackPlay::Arrangement, Some(Cued::Clip(1))))
+    );
+    assert_eq!(e.session(1), Some((clip(3, 0, 0), None)));
+    assert_eq!(e.session(2), Some((clip(2, 0, 0), None)));
+    render(&mut e, BAR);
+    assert_eq!(e.session(0), Some((clip(1, 16, 0), None)));
+    render(&mut e, 3 * BAR);
+    assert!(e.finished());
+}
+
+#[test]
+fn a_crossfading_swap_remaps_the_launched_clip() {
+    // The acid loses its distortion (its path changes, so it crossfades)
+    // while a1 plays, and `z` goes in first.
+    let mut e = Engine::new(compiled(MINI));
+    e.cue(SessionCue::Launch {
+        track: ACID,
+        clip: A1,
+    });
+    render(&mut e, 3 * STEP + 100);
+    let dry = compile_song(&variant_of(MINI, |s| {
+        let z = tune_dsp::DrumPattern::parse("x...............").expect("a pattern");
+        s.clips.shift_insert(0, "z".into(), Clip::Drum(z));
+        s.tracks.get_mut("acid").expect("an acid").fx.clear();
+    }));
+    swap_at_next_step(&mut e, dry);
+    assert!(e.swap_fading());
+    assert_eq!(e.session(ACID), Some((clip(2, 0, 0), None)));
+    render(&mut e, SONG);
+    assert!(e.finished());
+    assert_eq!(e.session(ACID).map(|s| s.0), Some(clip(2, 0, 0)));
 }
