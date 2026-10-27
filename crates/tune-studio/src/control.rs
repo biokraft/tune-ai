@@ -217,20 +217,36 @@ fn serve(listener: &TcpListener, handle: &StudioHandle, secret: &Secret, stop: &
             std::thread::sleep(Duration::from_millis(10));
             continue;
         };
-        if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-            open.fetch_sub(1, Ordering::SeqCst);
+        let (slot, open_before) = ConnectionSlot::take(&open);
+        if open_before >= MAX_CONNECTIONS {
             continue;
         }
-        let (handle, secret, count) = (handle.clone(), secret.clone(), open.clone());
-        let spawned = std::thread::Builder::new()
+        let (handle, secret) = (handle.clone(), secret.clone());
+        // Should the spawn fail, the closure and so the slot are dropped.
+        let _ = std::thread::Builder::new()
             .name("studio-control-conn".into())
             .spawn(move || {
+                let _slot = slot;
                 connection(stream, &handle, &secret);
-                count.fetch_sub(1, Ordering::SeqCst);
             });
-        if spawned.is_err() {
-            open.fetch_sub(1, Ordering::SeqCst);
-        }
+    }
+}
+
+/// One of the [`MAX_CONNECTIONS`] slots, given back when dropped: when the
+/// connection ends, also by a panic.
+struct ConnectionSlot(Arc<AtomicUsize>);
+
+impl ConnectionSlot {
+    /// Takes a slot and says how many were taken before it.
+    fn take(open: &Arc<AtomicUsize>) -> (Self, usize) {
+        let before = open.fetch_add(1, Ordering::SeqCst);
+        (Self(open.clone()), before)
+    }
+}
+
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -486,6 +502,21 @@ impl StudioLink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_connection_slot_comes_back_after_a_panic() {
+        let open = Arc::new(AtomicUsize::new(0));
+        let (slot, before) = ConnectionSlot::take(&open);
+        assert_eq!((before, open.load(Ordering::SeqCst)), (0, 1));
+        let panicked = std::thread::spawn(move || {
+            let _slot = slot;
+            // Unwinds as a panic does, without printing one.
+            std::panic::resume_unwind(Box::new("a connection fails"));
+        })
+        .join();
+        assert!(panicked.is_err());
+        assert_eq!(open.load(Ordering::SeqCst), 0);
+    }
 
     #[test]
     fn a_studio_timeout_is_no_answer() {
