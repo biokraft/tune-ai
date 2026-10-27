@@ -325,6 +325,23 @@ fn find_studio_matches_the_open_song() {
     assert_eq!(f.endpoint_files().len(), 1, "a live studio's file stays");
 }
 
+/// An endpoint directory others can write to may hold a file another user
+/// planted (naming their own port): it is not trusted, so `tune do` falls
+/// back as for no studio, and nothing in it is deleted.
+#[test]
+fn an_endpoint_dir_others_can_write_is_not_trusted() {
+    let f = fixture(COMMENTED);
+    let dir = f.endpoints.path();
+    let chmod = |mode| fs::set_permissions(dir, fs::Permissions::from_mode(mode)).unwrap();
+    for mode in [0o770, 0o750, 0o707, 0o701, 0o710] {
+        chmod(mode);
+        assert!(find_studio(dir, &f.path).is_none(), "{mode:o}");
+    }
+    chmod(0o700);
+    assert_eq!(f.endpoint_files().len(), 1, "nothing deleted");
+    assert!(find_studio(dir, &f.path).is_some());
+}
+
 #[test]
 fn a_wrong_secret_or_http_is_refused() {
     let f = fixture(COMMENTED);
@@ -378,9 +395,17 @@ fn only_claude_acts_through_the_endpoint() {
     assert!(f.log().is_empty());
 }
 
+/// A temp endpoint directory made private, as a studio leaves it:
+/// `find_studio` trusts no other.
+fn private_dir() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    dir
+}
+
 #[test]
 fn stale_endpoint_files_are_removed() {
-    let endpoints = tempfile::tempdir().unwrap();
+    let endpoints = private_dir();
     let song_dir = tempfile::tempdir().unwrap();
     let song = song_dir.path().join("song.toml");
     fs::write(&song, COMMENTED).unwrap();
@@ -423,7 +448,7 @@ fn silent_studio(endpoints: &Path, song: &Path) {
 
 #[test]
 fn a_studio_that_does_not_answer_is_an_error_not_a_fallback() {
-    let endpoints = tempfile::tempdir().unwrap();
+    let endpoints = private_dir();
     let song_dir = tempfile::tempdir().unwrap();
     let song = song_dir.path().join("song.toml");
     fs::write(&song, COMMENTED).unwrap();
