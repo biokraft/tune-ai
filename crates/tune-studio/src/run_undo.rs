@@ -272,7 +272,7 @@ pub fn undo_run(
             continue;
         }
         match put_all(doc, &puts, &renames) {
-            Ok(()) => out.reverted.extend(reverted_items(puts)),
+            Ok(idle) => written(&mut out, puts, idle),
             Err(error) => waiting.push(Waiting { puts, error }),
         }
     }
@@ -282,7 +282,7 @@ pub fn undo_run(
         let mut still = Vec::new();
         for w in waiting {
             match put_all(doc, &w.puts, &renames) {
-                Ok(()) => out.reverted.extend(reverted_items(w.puts)),
+                Ok(idle) => written(&mut out, w.puts, idle),
                 Err(error) => still.push(Waiting { error, ..w }),
             }
         }
@@ -1015,9 +1015,14 @@ type Put = (Target, Value, Vec<Option<Value>>);
 /// longer song first), else first (the song grows back before they move);
 /// failing both, a put the song refuses waits for the others (a renamed
 /// track's lane goes back once the track is there). The scene order goes
-/// last in each: it can only place the scenes that are there.
-fn put_all(doc: &mut SongDoc, puts: &[Put], renames: &[(String, String)]) -> Result<(), EditError> {
-    let in_order = |order: Vec<&Put>| -> Result<SongDoc, EditError> {
+/// last in each: it can only place the scenes that are there. Gives
+/// whether the scenes came out as they were, ids and order.
+fn put_all(
+    doc: &mut SongDoc,
+    puts: &[Put],
+    renames: &[(String, String)],
+) -> Result<bool, EditError> {
+    let in_order = |order: Vec<&Put>| -> Result<(SongDoc, bool), EditError> {
         let mut copy = doc.clone();
         let renamed = rename_scenes_back(&mut copy, &order, renames);
         let (orders, rest): (Vec<&Put>, Vec<&Put>) =
@@ -1025,7 +1030,8 @@ fn put_all(doc: &mut SongDoc, puts: &[Put], renames: &[(String, String)]) -> Res
         for (target, value, _) in rest.into_iter().chain(orders) {
             copy.put(target, &with_old_names(target, value, &renamed))?;
         }
-        Ok(copy)
+        let idle = scene_ids(&copy) == scene_ids(doc);
+        Ok((copy, idle))
     };
     let (sections, rest): (Vec<&Put>, Vec<&Put>) =
         puts.iter().partition(|p| p.0 == Target::Sections);
@@ -1041,8 +1047,24 @@ fn put_all(doc: &mut SongDoc, puts: &[Put], renames: &[(String, String)]) -> Res
             }
         }
     };
-    *doc = copy;
-    Ok(())
+    *doc = copy.0;
+    Ok(copy.1)
+}
+
+/// The scene ids of `doc`, in row order.
+fn scene_ids(doc: &SongDoc) -> Vec<String> {
+    doc.song().scenes.keys().cloned().collect()
+}
+
+/// Lists the targets `puts` wrote as reverted; the scene order among them
+/// as already back when the write left the scenes as they were, ids and
+/// order (`order_idle`): the run's own later edits had put the order back.
+fn written(out: &mut RunUndo, puts: Vec<Put>, order_idle: bool) {
+    let (idle, rest): (Vec<Put>, Vec<Put>) = puts
+        .into_iter()
+        .partition(|p| order_idle && p.0 == Target::SceneOrder);
+    out.already.extend(idle.into_iter().map(|p| p.0));
+    out.reverted.extend(reverted_items(rest));
 }
 
 /// Puts each value on one copy of `doc`, a refused one again after the
@@ -1051,7 +1073,7 @@ fn waiting_for_others(
     doc: &SongDoc,
     puts: &[Put],
     renames: &[(String, String)],
-) -> Option<SongDoc> {
+) -> Option<(SongDoc, bool)> {
     let mut copy = doc.clone();
     let renamed = rename_scenes_back(&mut copy, &puts.iter().collect::<Vec<_>>(), renames);
     // The scene order once all the others are in.
@@ -1074,7 +1096,8 @@ fn waiting_for_others(
             }
         }
     }
-    Some(copy)
+    let idle = scene_ids(&copy) == scene_ids(doc);
+    Some((copy, idle))
 }
 
 /// Undoes in place each scene rename of the run (`renames`, old name to

@@ -2528,3 +2528,20 @@ fn a_removed_tracks_slot_stays_off_a_track_made_by_hand() {
     assert_eq!(f.value("scenes.groove.slots.acid"), Value::Null);
     assert_eq!(f.value("scenes.jam.slots.acid"), json!("a1"));
 }
+
+/// M3: an order put that changes nothing is not listed as reverted. The
+/// run added a scene, moved it to the top and removed it again: the order
+/// is back already.
+#[test]
+fn an_order_already_back_is_not_reverted() {
+    let mut s = session();
+    s.agent("r1", &[add_scene("jam", None)]);
+    s.agent("r1", &[move_scene("jam", 0)]);
+    s.agent("r1", &[remove_scene("jam")]);
+    let u = s.undo_run("r1");
+    assert_eq!((&u.reverted, &u.kept), (&vec![], &vec![]));
+    let mut already: Vec<String> = u.already.iter().map(Target::to_string).collect();
+    already.sort();
+    assert_eq!(already, ["scenes", "scenes.jam"]);
+    assert_eq!(s.scenes(), ["groove", "break"]);
+}
