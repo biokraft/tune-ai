@@ -402,12 +402,14 @@ fn decide(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionRecord]) 
     }
 }
 
-/// A track's placements or a lane's stretches, element by element: an
-/// element the run added goes if it is still there and no other write took
-/// it away or put it there again since; one it removed comes back if no
-/// other write put it back or took it again, or rebuilt what it belongs to
-/// (see [`container`]), nothing there now overlaps it and every element
-/// the run added was still there.
+/// A track's placements or a lane's stretches, element by element, each
+/// rule checked in turn. An element the run added: kept when another write
+/// since took it away or put it there again, or rebuilt what it belongs
+/// to (see [`container`]); else it goes if it is still there; else kept.
+/// An element the run removed: kept when an element the run added was
+/// kept; else kept when another write put it back or took it again, or
+/// rebuilt what it belongs to; else kept when something there now
+/// overlaps it; else it comes back.
 fn decide_list(
     doc: &SongDoc,
     p: &Plan,
