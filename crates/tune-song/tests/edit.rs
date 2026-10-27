@@ -1,9 +1,11 @@
 //! Track and device edits: the song each one makes, what it removes, and its
 //! refusals.
 
+use tune_dsp::DrumPattern;
 use tune_song::{
-    EditOpError, LaneOrigin, Registry, Song, add_effect, add_track, move_effect, parse_song,
-    remove_effect, remove_track, rename_device, rename_track, set_instrument, track_table_toml,
+    Clip, EditOpError, LaneOrigin, Registry, Song, add_clip, add_effect, add_track,
+    clip_table_toml, duplicate_clip, move_effect, parse_song, remove_clip, remove_effect,
+    remove_track, rename_clip, rename_device, rename_track, set_instrument, track_table_toml,
 };
 
 const SONG: &str = r#"
@@ -481,4 +483,123 @@ fn swap_refusals() {
         err(set_instrument(&taken, registry(), "acid", "kick")),
         "track `acid` already has a device `kick`; rename it first"
     );
+}
+
+// ----- clips -----
+
+fn clip_ids(song: &Song) -> Vec<&str> {
+    song.clips.keys().map(String::as_str).collect()
+}
+
+fn drum(steps: &str) -> Clip {
+    Clip::Drum(DrumPattern::parse(steps).unwrap())
+}
+
+#[test]
+fn a_new_clip_goes_last() {
+    let s = swap_song();
+    let edited = add_clip(&s, "k8", drum("x.x.x.x.x.x.x.x.")).unwrap();
+    assert_eq!(clip_ids(&edited.arranged.song), ["k4", "a1", "lead", "k8"]);
+    assert_eq!(edited.arranged.song.clips["k8"], drum("x.x.x.x.x.x.x.x."));
+    assert_eq!(edited.arranged.song.tracks, s.tracks);
+    assert_eq!(edited.arranged.lanes.len(), s.automation.len());
+    assert_eq!(edited.removed, Default::default());
+}
+
+#[test]
+fn clip_id_rules() {
+    let s = swap_song();
+    let clip = || drum("x...");
+    assert_eq!(err(add_clip(&s, "k4", clip())), "clip `k4` already exists");
+    assert_eq!(
+        err(add_clip(&s, "K9", clip())),
+        "a clip id is lower-case letters, digits and `_`, got `K9`"
+    );
+    assert_eq!(err(remove_clip(&s, "k9")), "there is no clip `k9`");
+    assert_eq!(err(rename_clip(&s, "k9", "k8")), "there is no clip `k9`");
+    assert_eq!(err(rename_clip(&s, "k4", "a1")), "clip `a1` already exists");
+    assert_eq!(
+        err(rename_clip(&s, "k4", "K8")),
+        "a clip id is lower-case letters, digits and `_`, got `K8`"
+    );
+    assert_eq!(err(duplicate_clip(&s, "k9", "k8")), "there is no clip `k9`");
+    assert_eq!(
+        err(duplicate_clip(&s, "k4", "a1")),
+        "clip `a1` already exists"
+    );
+    assert_eq!(
+        err(duplicate_clip(&s, "k4", "k4")),
+        "clip `k4` already exists"
+    );
+}
+
+#[test]
+fn removing_a_clip_removes_and_lists_its_placements() {
+    let s = swap_song();
+    let edited = remove_clip(&s, "a1").unwrap();
+    let song = &edited.arranged.song;
+    assert_eq!(clip_ids(song), ["k4", "lead"]);
+    let plays: Vec<_> = song.tracks["acid"]
+        .play
+        .iter()
+        .map(|p| p.clip.as_str())
+        .collect();
+    assert_eq!(plays, ["lead"]);
+    let removed: Vec<_> = edited
+        .removed
+        .placements
+        .iter()
+        .map(|(t, p)| (t.as_str(), p.clip.as_str(), p.start_bar, p.bars))
+        .collect();
+    assert_eq!(removed, [("acid", "a1", 1, 1)]);
+    assert!(edited.removed.lanes.is_empty());
+    assert_eq!(edited.removed.duck_source, None);
+    assert_eq!(edited.arranged.lanes.len(), 2);
+}
+
+#[test]
+fn renaming_a_clip_keeps_its_place_and_follows_its_placements() {
+    let s = swap_song();
+    let edited = rename_clip(&s, "a1", "bass1").unwrap();
+    let song = &edited.arranged.song;
+    assert_eq!(clip_ids(song), ["k4", "bass1", "lead"]);
+    assert_eq!(song.clips["bass1"], s.clips["a1"]);
+    let plays: Vec<_> = song.tracks["acid"]
+        .play
+        .iter()
+        .map(|p| p.clip.as_str())
+        .collect();
+    assert_eq!(plays, ["lead", "bass1"]);
+    assert_eq!(edited.removed, Default::default());
+    // The same name changes nothing.
+    assert_eq!(rename_clip(&s, "a1", "a1").unwrap().arranged.song, s);
+}
+
+#[test]
+fn a_duplicate_stands_right_after_the_original() {
+    let s = swap_song();
+    let edited = duplicate_clip(&s, "k4", "k4b").unwrap();
+    let song = &edited.arranged.song;
+    assert_eq!(clip_ids(song), ["k4", "k4b", "a1", "lead"]);
+    assert_eq!(song.clips["k4b"], s.clips["k4"]);
+    assert_eq!(song.tracks, s.tracks);
+}
+
+#[test]
+fn clip_tables_are_written_as_to_toml_writes_them() {
+    let s = swap_song();
+    assert_eq!(
+        clip_table_toml("k4", &s.clips["k4"]),
+        "[clips.k4]\nkind = \"drum\"\nsteps = \"x... x... x... X...\"\n"
+    );
+    assert_eq!(
+        clip_table_toml("lead", &s.clips["lead"]),
+        "[clips.lead]\nkind = \"notes\"\nbars = 1\n\
+         notes = [{ start = 0, pitch = \"C3\", len = 3 }]\n"
+    );
+    // Every table of a song's text is one of these.
+    let whole = s.to_toml();
+    for (id, clip) in &s.clips {
+        assert!(whole.contains(&clip_table_toml(id, clip)), "{id}");
+    }
 }

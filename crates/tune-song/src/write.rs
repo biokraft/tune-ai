@@ -60,20 +60,8 @@ impl Song {
         }
 
         for (id, clip) in &self.clips {
-            let _ = write!(out, "\n[clips.{}]\n", key(id));
-            let _ = writeln!(out, "kind = {}", string(clip.kind().name()));
-            match clip {
-                Clip::Notes(n) => {
-                    let _ = writeln!(out, "bars = {}", n.bars);
-                    if !n.notes.is_empty() {
-                        let _ = writeln!(out, "notes = {}", notes_toml(&n.notes));
-                    }
-                }
-                steps => {
-                    let text = steps.steps_text().expect("a steps clip has step notation");
-                    let _ = writeln!(out, "steps = {}", string(&text));
-                }
-            }
+            out.push('\n');
+            out.push_str(&clip_table_toml(id, clip));
         }
 
         for section in &self.sections {
@@ -100,6 +88,28 @@ impl Song {
         }
         out
     }
+}
+
+/// The table of clip `id`, `[clips.<id>]` and its keys, as [`Song::to_toml`]
+/// writes it: `kind`, then `steps`, or `bars` and the `notes` when there
+/// are any. Ends with a newline.
+pub fn clip_table_toml(id: &str, clip: &Clip) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "[clips.{}]", key(id));
+    let _ = writeln!(out, "kind = {}", string(clip.kind().name()));
+    match clip {
+        Clip::Notes(n) => {
+            let _ = writeln!(out, "bars = {}", n.bars);
+            if !n.notes.is_empty() {
+                let _ = writeln!(out, "notes = {}", notes_toml(&n.notes));
+            }
+        }
+        steps => {
+            let text = steps.steps_text().expect("a steps clip has step notation");
+            let _ = writeln!(out, "steps = {}", string(&text));
+        }
+    }
+    out
 }
 
 /// The table of track `id`, `[tracks.<id>]` and its keys: the instrument,

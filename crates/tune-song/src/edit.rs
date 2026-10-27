@@ -1,5 +1,6 @@
-//! Structural edits of a song's tracks and devices: add, remove or rename a
-//! track, add, remove, move or rename an effect, rename a device.
+//! Structural edits of a song's tracks, devices and clips: add, remove or
+//! rename a track, add, remove, move or rename an effect, rename a device,
+//! swap an instrument, add, remove, rename or duplicate a clip.
 //!
 //! Like the section operations, these do not validate their result (the
 //! caller re-parses it, and so gets the validator's positioned messages for
@@ -17,7 +18,7 @@ use tune_dsp::STRIP_PARAMS;
 use tune_modules::{ClipKind, ModuleDescriptor, Registry};
 
 use crate::arrange::{Arranged, LaneOrigin};
-use crate::model::{Device, Lane, MIX_TRACK_ID, Placement, Song, Track};
+use crate::model::{Clip, Device, Lane, MIX_TRACK_ID, Placement, Song, Track};
 
 /// The song an edit made, where its stretches came from, and what it
 /// removed.
@@ -68,6 +69,12 @@ pub enum EditOpError {
     /// A new instrument's id is its module's prefix, and an effect has it.
     #[error("track `{track}` already has a device `{device}`; rename it first")]
     InstrumentIdTaken { track: String, device: String },
+    #[error("clip `{0}` already exists")]
+    ClipExists(String),
+    #[error("there is no clip `{0}`")]
+    NoSuchClip(String),
+    #[error("unknown clip kind `{name}` (expected {expected})")]
+    UnknownClipKind { name: String, expected: String },
     #[error("`send` and `duck` are reserved for the strip params")]
     StripReserved,
     #[error("index {index} is out of bounds (the chain has {len})")]
@@ -301,6 +308,89 @@ pub fn set_instrument(
         l.track == track && l.param.starts_with(&old_prefix)
     });
     Ok(edited(song, kept, removed))
+}
+
+/// Appends clip `id` to the pool. The clip is built by the caller, so it is
+/// valid; its id is checked here.
+pub fn add_clip(song: &Song, id: &str, clip: Clip) -> Result<Edited, EditOpError> {
+    check_new_clip(song, id)?;
+    let mut song = song.clone();
+    song.clips.insert(id.to_owned(), clip);
+    Ok(untouched_lanes(song, Removed::default()))
+}
+
+/// Removes clip `id` and every placement of it (listed in
+/// `removed.placements`, track by track in song order).
+pub fn remove_clip(song: &Song, id: &str) -> Result<Edited, EditOpError> {
+    clip_of(song, id)?;
+    let mut song = song.clone();
+    song.clips.shift_remove(id);
+    let mut removed = Removed::default();
+    for (track_id, track) in &mut song.tracks {
+        let (gone, kept): (Vec<Placement>, Vec<Placement>) = std::mem::take(&mut track.play)
+            .into_iter()
+            .partition(|p| p.clip == id);
+        track.play = kept;
+        removed
+            .placements
+            .extend(gone.into_iter().map(|p| (track_id.clone(), p)));
+    }
+    Ok(untouched_lanes(song, removed))
+}
+
+/// Renames clip `id` to `to`, keeping its place in the pool and following
+/// it in every placement.
+pub fn rename_clip(song: &Song, id: &str, to: &str) -> Result<Edited, EditOpError> {
+    clip_of(song, id)?;
+    if id == to {
+        return Ok(untouched_lanes(song.clone(), Removed::default()));
+    }
+    check_new_clip(song, to)?;
+    let mut song = song.clone();
+    song.clips = std::mem::take(&mut song.clips)
+        .into_iter()
+        .map(|(k, v)| if k == id { (to.to_owned(), v) } else { (k, v) })
+        .collect();
+    for placement in song.tracks.values_mut().flat_map(|t| &mut t.play) {
+        if placement.clip == id {
+            placement.clip = to.to_owned();
+        }
+    }
+    Ok(untouched_lanes(song, Removed::default()))
+}
+
+/// Copies clip `id` as `to`, which stands right after it in the pool.
+pub fn duplicate_clip(song: &Song, id: &str, to: &str) -> Result<Edited, EditOpError> {
+    let at = song
+        .clips
+        .get_index_of(id)
+        .ok_or_else(|| EditOpError::NoSuchClip(id.to_owned()))?;
+    check_new_clip(song, to)?;
+    let mut song = song.clone();
+    let copy = song.clips[at].clone();
+    song.clips.shift_insert(at + 1, to.to_owned(), copy);
+    Ok(untouched_lanes(song, Removed::default()))
+}
+
+fn clip_of<'s>(song: &'s Song, id: &str) -> Result<&'s Clip, EditOpError> {
+    song.clips
+        .get(id)
+        .ok_or_else(|| EditOpError::NoSuchClip(id.to_owned()))
+}
+
+/// Checks that `id` is a well-formed clip id nobody has. The existing clip
+/// is reported first, so a duplicate id reads as that.
+pub fn check_new_clip(song: &Song, id: &str) -> Result<(), EditOpError> {
+    if song.clips.contains_key(id) {
+        return Err(EditOpError::ClipExists(id.to_owned()));
+    }
+    if !well_formed(id) {
+        return Err(EditOpError::BadId {
+            what: "clip",
+            id: id.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn track_of<'s>(song: &'s Song, id: &str) -> Result<&'s Track, EditOpError> {
