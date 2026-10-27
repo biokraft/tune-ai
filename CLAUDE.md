@@ -399,9 +399,10 @@ The producer may have the studio (app or browser) open on the same song.
   cannot play) stops, and a renamed or new track follows the arrangement. A
   launch sent right after an edit waits until the engine plays the edit, so
   it can land one bar later; one whose scene or track an edit took away in
-  the meantime, or whose slot an edit emptied (`set_slot`, or a new
-  instrument that cannot play the clip), is dropped with an error event. Session clips do not make the
-  song longer: it still ends where the arrangement ends, so loop to jam on. A
+  the meantime, or whose slot an edit emptied (`set_slot`, `remove_clip`, or
+  a new instrument that cannot play the clip), is dropped with an error
+  event. Session clips do not make the song longer: it still ends where the
+  arrangement ends, so loop to jam on. A
   `~` on the last step before the bar line still slides into the launched
   clip's first note when the old clip or arrangement has a note next, because
   the slide reads what the track was playing and ignores cues; the samples
