@@ -357,7 +357,9 @@ The producer may have the studio (app or browser) open on the same song.
   placed again, with the validator's `message`). A track's placements and
   a lane's stretches go back one at a time: a placement the run added
   goes if it is still there, one it removed comes back if nothing there
-  now overlaps it. The result is `{"run", "title", "reverted": [{"target",
+  now overlaps it; when one the run added was changed later, every one it
+  removed from that list is kept too (it may have been moved on). The
+  result is `{"run", "title", "reverted": [{"target",
   "item"}], "kept": [{"target", "item", "reason", "by", "message"}],
   "already": [<target>]}` (`item` is the placement or stretch for
   `tracks.<t>.play` and `automation.<t>.<param>`, else `null`; `already`
