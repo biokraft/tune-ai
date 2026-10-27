@@ -818,7 +818,10 @@ impl Actor {
         let stream = match self.audio.start(processor) {
             Ok(stream) => stream,
             Err(e) => {
-                self.stop();
+                // Not `stop`: the cursor stays where the last playback
+                // left it, not at the bar this one never played.
+                self.player = None;
+                self.off_arrangement.clear();
                 return Err(StudioError::Audio(e));
             }
         };

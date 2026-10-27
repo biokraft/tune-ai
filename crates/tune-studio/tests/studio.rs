@@ -813,6 +813,33 @@ fn failed_play_publishes_stopped_state() {
     assert_eq!(playing, Some(false), "the last state says stopped");
 }
 
+/// A device that fails to start leaves the cursor where the stopped
+/// playback left it, not at the bar the failed play asked for.
+#[test]
+fn failed_play_keeps_the_cursor() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.toml");
+    fs::write(&path, MINI).unwrap();
+    let config = StudioConfig {
+        audio: Box::new(OnceOut {
+            slot: Slot::default(),
+            started: false,
+        }),
+        songs_root: dir.path().to_owned(),
+    };
+    let studio = tune_studio::Studio::spawn(config, Some(path)).unwrap();
+    studio.call(play(Some(1))).unwrap();
+    assert!(matches!(
+        studio.call(play(Some(3))),
+        Err(StudioError::Audio(_))
+    ));
+    let state = studio
+        .call(Command::Studio(StudioCommand::GetState))
+        .unwrap();
+    assert_eq!(state["playing"], json!(false));
+    assert_eq!(state["cursor_bar"], json!(1));
+}
+
 /// An undo that changes no value still moves the history (here: a save
 /// that only added a comment), so the state goes out.
 #[test]
