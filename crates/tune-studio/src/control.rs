@@ -395,8 +395,9 @@ impl fmt::Debug for StudioLink {
 }
 
 /// The studio that has `song` open, if one runs: reads every
-/// `studio-*.json` in `dir`, newest first, deletes those it cannot connect
-/// to within 200 ms, and returns the first whose song is `song` (both
+/// `studio-*.json` in `dir`, newest first, skips those it cannot connect to
+/// within 200 ms (deleting them when the connection is refused: nothing
+/// listens there any more), and returns the first whose song is `song` (both
 /// canonical).
 pub fn find_studio(dir: &Path, song: &Path) -> Option<StudioLink> {
     let song = fs::canonicalize(song).ok()?;
@@ -414,8 +415,10 @@ pub fn find_studio(dir: &Path, song: &Path) -> Option<StudioLink> {
         };
         let stream = match TcpStream::connect_timeout(&local(link.port), CONNECT_TIMEOUT) {
             Ok(s) => s,
-            Err(_) => {
-                let _ = fs::remove_file(&file);
+            Err(e) => {
+                if left_behind(&e) {
+                    let _ = fs::remove_file(&file);
+                }
                 continue;
             }
         };
@@ -429,6 +432,13 @@ pub fn find_studio(dir: &Path, song: &Path) -> Option<StudioLink> {
         }
     }
     None
+}
+
+/// Whether a failed connect says nothing listens on the port: the studio
+/// that wrote the file is gone. A timeout or any other error may be a busy
+/// or slow studio, whose file stays.
+fn left_behind(e: &io::Error) -> bool {
+    e.kind() == ErrorKind::ConnectionRefused
 }
 
 /// The `studio-*.json` files in `dir`, newest first.
@@ -516,6 +526,18 @@ mod tests {
         .join();
         assert!(panicked.is_err());
         assert_eq!(open.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn only_a_refused_connection_marks_a_file_stale() {
+        assert!(left_behind(&ErrorKind::ConnectionRefused.into()));
+        for kind in [
+            ErrorKind::TimedOut,
+            ErrorKind::WouldBlock,
+            ErrorKind::PermissionDenied,
+        ] {
+            assert!(!left_behind(&kind.into()), "{kind:?}");
+        }
     }
 
     #[test]
