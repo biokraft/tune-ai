@@ -43,6 +43,24 @@ describe("describeChange on v2 songs", () => {
       "Upgraded the song file to format version 2 (comments kept)",
     );
   });
+  it("names going back to an older format as a restore, not an upgrade", () => {
+    expect(change("song.version", 2, 1)).toBe("Restored the song file to format version 1");
+  });
+  it("names a distortion mode change by its device id", () => {
+    expect(change("tracks.acid.dist.mode", "soft", "hard")).toBe("acid distortion soft → hard");
+    const dist = song.tracks.find((t) => t.id === "acid")!.fx.find((f) => f.id === "dist")!;
+    const two = {
+      ...song,
+      tracks: song.tracks.map((t) =>
+        t.id === "acid" ? { ...t, fx: [...t.fx, { ...dist, id: "d2", params: [] }] } : t,
+      ),
+    };
+    expect(
+      describeChange({ path: "tracks.acid.d2.mode", old: "soft", new: "hard" } as never, two),
+    ).toBe("acid distortion d2 soft → hard");
+    // A mode on no distortion keeps the plain form.
+    expect(change("tracks.acid.d2.mode", "soft", "hard")).toBe("acid d2.mode soft → hard");
+  });
   it("says what a track plays in a section changed when it is not one clip", () => {
     const placements = [{ at: 1, clip: "a1", bars: 1 }];
     expect(change("sections[1].play.acid", "a1", placements)).toBe("Changed what acid plays in b");

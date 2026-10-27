@@ -48,6 +48,21 @@ function implied(song: SongView | null, track: string): boolean {
   return acids.length === 1 && acids[0]!.id === track;
 }
 
+const MODE = /^([^.]+)\.mode$/;
+
+/**
+ * "distortion" (or "distortion d2" for one with another id) when `rest` is the mode of a
+ * distortion on `track`. Without the song, only the default id `dist` is known to be one.
+ */
+function distortionMode(song: SongView | null, track: string, rest: string): string | null {
+  const id = MODE.exec(rest)?.[1];
+  if (id === undefined) return null;
+  const fx = song?.tracks.find((x) => x.id === track)?.fx.find((f) => f.id === id);
+  const isDistortion = fx ? fx.kind === "distortion" : song === null && id === "dist";
+  if (!isDistortion) return null;
+  return id === "dist" ? "distortion" : `distortion ${id}`;
+}
+
 const MIX = /^mix\.(.+)$/;
 const TRACK = /^tracks\.([^.]+)(?:\.(.+))?$/;
 const SECTION = /^sections\[(\d+)\]\.(bars|name|lanes|play\.(.+))$/;
@@ -57,6 +72,10 @@ const PATTERN = /^clips\.(.+)\.steps$/;
 export function describeChange(c: Change, song: SongView | null): string {
   if (c.path === "song.bpm") return `Tempo ${span(c.old, c.new, "BPM")}`;
   if (c.path === "song.version") {
+    // Back to an older version: an undo of the migration, or the old text put back.
+    if (typeof c.old === "number" && typeof c.new === "number" && c.new < c.old) {
+      return `Restored the song file to format version ${show(c.new)}`;
+    }
     return `Upgraded the song file to format version ${show(c.new)} (comments kept)`;
   }
   if (c.path === "sections") return "Arrangement";
@@ -118,9 +137,9 @@ export function describeChange(c: Change, song: SongView | null): string {
         return c.new ? `${t} muted` : `${t} unmuted`;
       case "solo":
         return c.new ? `${t} soloed` : `${t} unsoloed`;
-      case "dist.mode":
-        return `${t} distortion ${span(c.old, c.new)}`;
     }
+    const mode = distortionMode(song, t, rest);
+    if (mode !== null) return `${t} ${mode} ${span(c.old, c.new)}`;
     const p = findParam(song, t, rest);
     if (!p) return `${t} ${rest} ${span(c.old, c.new)}`;
     const label = sentenceCase(p.label);
