@@ -453,8 +453,9 @@ fn decide_list(
     let mut items = Vec::new();
     let mut out = Vec::new();
     for a in &added {
-        // Someone else took it away or put it there again: theirs now.
-        if let Some(by) = touched(a) {
+        // Someone else took it away or put it there again, or rebuilt
+        // what it belongs to: theirs now.
+        if let Some(by) = touched(a).or_else(|| rebuilt(a)) {
             out.push(kept_by(a, Some(by)));
             continue;
         }
