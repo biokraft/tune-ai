@@ -1247,3 +1247,29 @@ fn a_section_edit_is_kept_after_a_later_placement_elsewhere() {
     assert!(u.kept.iter().any(|k| k.target == Target::Sections));
     assert_eq!(s.text(), text);
 }
+
+/// q3: the producer removed the track and brought it back with ⌘Z: the
+/// placement the run added is part of the producer's restored track now.
+#[test]
+fn an_addition_on_a_track_the_producer_rebuilt_is_kept() {
+    let mut s = open();
+    s.agent("r1", &[place("acid", "a1", 1, 1)]);
+    s.human(Action::RemoveTrack {
+        track: "acid".into(),
+    });
+    s.core.undo(Source::Human).unwrap();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept,
+        vec![kept_item(
+            "tracks.acid.play",
+            placement(1, "a1", 1),
+            Some(Source::Human)
+        )]
+    );
+    assert_eq!(
+        s.value("tracks.acid.play"),
+        json!([placement(1, "a1", 1), placement(3, "a1", 2)])
+    );
+}
