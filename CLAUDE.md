@@ -8,8 +8,8 @@ and lock-free live playback) driven through the `tune` CLI.
 
 - `crates/tune-dsp` - DSP library (`param`, `acid303/*`, `drums/*`, `fx/*`: eq, delay, reverb, duck, limiter). No Tauri, UI,
   MCP, `cc` or `open303-ref` dependencies (`open303-ref` only as a dev-dependency).
-- `crates/tune-modules` - instrument and effect traits, today's modules and
-  the registry; depends only on tune-dsp.
+- `crates/tune-modules` - instrument and effect traits (instruments receive
+  note events), today's modules and the registry; depends only on tune-dsp.
 - `crates/tune-song` - song file model (format v2): parse, validate
   (positional errors), canonical write, the comment-keeping migration of v1
   files to v2, section operations, file watcher. Headless.

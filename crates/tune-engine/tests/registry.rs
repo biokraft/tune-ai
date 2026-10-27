@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tune_dsp::{Curve, ParamSpec};
 use tune_engine::{CompiledSong, RenderOptions, render};
-use tune_modules::{Cell, ClipKind, Effect, Instrument, ModuleDescriptor, Role, StepCtx};
+use tune_modules::{ClipKind, Effect, EventCtx, Instrument, ModuleDescriptor, NoteEvent, Role};
 use tune_song::{Registry, parse_with};
 
 #[test]
@@ -48,8 +48,8 @@ fn a_test_module_plays_without_edits_elsewhere() {
         fn set_param_at(&mut self, _index: usize, plain: f64) {
             self.freq = plain;
         }
-        fn on_step(&mut self, cell: &Cell, _ctx: &StepCtx) {
-            if matches!(cell, Cell::Hit { .. }) {
+        fn note(&mut self, event: &NoteEvent, _ctx: &EventCtx) {
+            if matches!(event, NoteEvent::On { .. }) {
                 self.since_hit = Some(0);
             }
         }

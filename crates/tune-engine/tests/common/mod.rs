@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use tune_dsp::ParamSpec;
 use tune_engine::{
-    Cell, CompiledSong, CompiledTrack, Effect, Engine, Instrument, StepCtx, TrackRuntime,
+    CompiledSong, CompiledTrack, Effect, Engine, EventCtx, Instrument, NoteEvent, TrackRuntime,
 };
 use tune_song::{Lane, Placement, Song, parse_song};
 
@@ -112,10 +112,10 @@ pub fn bits(x: &[f32]) -> Vec<u32> {
 /// `process` calls the probe saw before the call.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    Step {
+    Note {
         sample: u64,
-        cell: Cell,
-        ctx: StepCtx,
+        event: NoteEvent,
+        ctx: EventCtx,
     },
     Param {
         sample: u64,
@@ -135,15 +135,29 @@ pub struct Log {
 }
 
 impl Log {
-    /// Every `on_step` as `(sample, cell, ctx)`.
-    pub fn steps(&self) -> Vec<(u64, Cell, StepCtx)> {
+    /// Every `note` as `(sample, event, ctx)`.
+    pub fn notes(&self) -> Vec<(u64, NoteEvent, EventCtx)> {
         self.events
             .iter()
             .filter_map(|e| match e {
-                Event::Step { sample, cell, ctx } => Some((*sample, cell.clone(), *ctx)),
+                Event::Note { sample, event, ctx } => Some((*sample, *event, *ctx)),
                 _ => None,
             })
             .collect()
+    }
+
+    /// Every `On`, like [`notes`](Self::notes).
+    pub fn ons(&self) -> Vec<(u64, NoteEvent, EventCtx)> {
+        let mut notes = self.notes();
+        notes.retain(|(_, e, _)| matches!(e, NoteEvent::On { .. }));
+        notes
+    }
+
+    /// Every `Off`, like [`notes`](Self::notes).
+    pub fn offs(&self) -> Vec<(u64, NoteEvent, EventCtx)> {
+        let mut notes = self.notes();
+        notes.retain(|(_, e, _)| matches!(e, NoteEvent::Off { .. }));
+        notes
     }
 
     /// Every `set_param_at` as `(sample, index, plain)`.
@@ -223,10 +237,10 @@ impl Instrument for Probe {
             plain,
         });
     }
-    fn on_step(&mut self, cell: &Cell, ctx: &StepCtx) {
-        self.push(Event::Step {
+    fn note(&mut self, event: &NoteEvent, ctx: &EventCtx) {
+        self.push(Event::Note {
             sample: self.samples,
-            cell: cell.clone(),
+            event: *event,
             ctx: *ctx,
         });
     }
