@@ -12,8 +12,9 @@ use crate::action::{Action, ActionsOutcome, ApplyCtx, Origin, Via, apply_all, pa
 use crate::diff::{Change, version_change};
 use crate::doc::SongDoc;
 use crate::error::{ErrorView, StudioError};
-use crate::log::{EditLog, Source, text_hash};
+use crate::log::{ActionRecord, EditLog, Source, entries_for, text_hash};
 use crate::path::SongPath;
+use crate::target::target_changes;
 
 /// Splits `PATH=VALUE` at the first `=`. The value is a TOML value
 /// (`820`, `true`, `"hard"`); text that is not one is a string (`hard`); an
@@ -96,10 +97,10 @@ pub fn set_paths(
 
 /// All or nothing: applies every action to one document, writes the file once
 /// and logs one entry per change, each with its action's name and the
-/// origin's run. A file in an older format is written in the newest with a
-/// `song.version` change first (no action name). No change: nothing written
-/// or logged. A live or history action gives
-/// [`StudioError::NeedsStudio`].
+/// origin's run, then the write's record. A file in an older format is
+/// written in the newest with a `song.version` change first (no action
+/// name). No change: nothing written or logged. A live or history action
+/// gives [`StudioError::NeedsStudio`].
 pub fn apply_to_file(
     song_path: &Path,
     actions: &[Action],
@@ -113,6 +114,7 @@ pub fn apply_to_file(
     let ctx = ApplyCtx { log: Some(&log) };
     // The text as parsed: the migrated one for a file in an older format.
     let start = doc.text();
+    let before = doc.song().clone();
     let migrated_from = doc.migrated_from();
     let applied = apply_all(
         &mut doc,
@@ -139,13 +141,13 @@ pub fn apply_to_file(
     write_atomic(song_path, &new_text)
         .map_err(|e| StudioError::Io(format!("cannot write {}: {e}", song_path.display())))?;
     let file_hash = text_hash(&new_text);
-    let entries = applied.entries(
-        Timestamp::now(),
-        origin.source,
-        &file_hash,
-        origin.run.as_ref(),
-    );
-    log.append(&entries)
+    let ts = Timestamp::now();
+    let run = origin.run.as_ref();
+    let entries = applied.entries(ts, origin.source, &file_hash, run);
+    let targets = target_changes(&before, doc.song());
+    let names = actions.iter().map(Action::name);
+    let record = ActionRecord::new(ts, origin.source, names, run, targets, &file_hash);
+    log.append_logged(&entries, &record)
         .map_err(|e| StudioError::Io(format!("cannot write the edit log: {e}")))?;
     Ok(ActionsOutcome {
         via: Via::File,
@@ -173,7 +175,8 @@ pub enum MigrateOutcome {
 
 /// Upgrades a song file to the newest format, keeping its comments. Writes
 /// atomically and logs one entry `{path: "song.version", old: from, new:
-/// <newest>}` with `source`, unless `dry_run`, which writes and logs nothing.
+/// <newest>}` with `source` and a `migrate` record, unless `dry_run`, which
+/// writes and logs nothing.
 /// An invalid file is left as it is and its errors are returned.
 pub fn migrate_file(
     song_path: &Path,
@@ -182,28 +185,42 @@ pub fn migrate_file(
 ) -> Result<MigrateOutcome, StudioError> {
     let text = fs::read_to_string(song_path)
         .map_err(|e| StudioError::Io(format!("cannot read {}: {e}", song_path.display())))?;
-    let migration = tune_song::migrate(&text)
-        .map_err(|errs| StudioError::Load(errs.iter().map(ErrorView::from).collect()))?;
-    let Migration::Migrated { from, text } = migration else {
+    let load = |errs: Vec<tune_song::SongError>| {
+        StudioError::Load(errs.iter().map(ErrorView::from).collect())
+    };
+    let migration = tune_song::migrate(&text).map_err(load)?;
+    let Migration::Migrated {
+        from,
+        text: migrated,
+    } = migration
+    else {
         return Ok(MigrateOutcome::Current);
     };
     if dry_run {
         return Ok(MigrateOutcome::Migrated {
             from,
-            text,
+            text: migrated,
             file_hash: None,
         });
     }
-    write_atomic(song_path, &text)
+    // The format changes, not the song: no targets, unless a bug says so.
+    let targets = target_changes(
+        &tune_song::parse_song(&text).map_err(load)?,
+        &tune_song::parse_song(&migrated).map_err(load)?,
+    );
+    write_atomic(song_path, &migrated)
         .map_err(|e| StudioError::Io(format!("cannot write {}: {e}", song_path.display())))?;
-    let file_hash = text_hash(&text);
+    let file_hash = text_hash(&migrated);
     let changes: Vec<Change> = version_change(from, FORMAT_VERSION).into_iter().collect();
+    let ts = Timestamp::now();
+    let entries = entries_for(ts, source, &changes, &file_hash, None, None);
+    let record = ActionRecord::new(ts, source, ["migrate"], None, targets, &file_hash);
     EditLog::for_song(song_path)
-        .append_changes(source, &changes, &file_hash, None, None)
+        .append_logged(&entries, &record)
         .map_err(|e| StudioError::Io(format!("cannot write the edit log: {e}")))?;
     Ok(MigrateOutcome::Migrated {
         from,
-        text,
+        text: migrated,
         file_hash: Some(file_hash),
     })
 }

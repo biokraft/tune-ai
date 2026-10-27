@@ -36,7 +36,7 @@ pub use core::{
 pub use diff::{Change, diff_songs, is_whole_replace};
 pub use doc::{EditError, SongDoc, effective_value, placement_json};
 pub use error::{ErrorView, StudioError};
-pub use log::{EditEntry, EditLog, Source, text_hash};
+pub use log::{ActionRecord, EditEntry, EditLog, Source, text_hash};
 pub use path::{SongPath, TrackField};
 pub use set::{
     MigrateOutcome, SetOutcome, apply_to_file, migrate_file, parse_assignment, set_paths,

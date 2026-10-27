@@ -63,10 +63,18 @@ fn set_writes_and_logs_claude() {
         assert!(text.contains(c), "lost comment {c}");
     }
     assert_eq!(v["file_hash"], text_hash(&text));
-    let log = fs::read_to_string(dir.path().join("edits.jsonl")).unwrap();
-    let last: Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+    let last = last_entry(dir.path());
     assert_eq!(last["source"], "claude");
     assert_eq!(last["file_hash"], text_hash(&text));
+}
+
+/// The last line of the edit log that is an entry (not an action record).
+fn last_entry(dir: &Path) -> Value {
+    let log = fs::read_to_string(dir.join("edits.jsonl")).unwrap();
+    let mut lines = log
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap());
+    lines.rfind(|v| v.get("record").is_none()).unwrap()
 }
 
 #[test]
@@ -155,8 +163,7 @@ fn set_same_clip_on_a_phase_shifted_section_is_a_change() {
         text.contains("{ at = 3, clip = \"k3\", bars = 2 }"),
         "{text}"
     );
-    let log = fs::read_to_string(dir.path().join("edits.jsonl")).unwrap();
-    let last: Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+    let last = last_entry(dir.path());
     assert_eq!(
         (&last["source"], &last["path"]),
         (&"claude".into(), &"sections[1].play.k".into())

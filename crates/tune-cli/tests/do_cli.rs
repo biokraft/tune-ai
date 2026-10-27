@@ -45,8 +45,17 @@ impl Env {
         fs::read_to_string(self.dir.path().join("edits.jsonl")).unwrap_or_default()
     }
 
+    /// The log's entries: its lines without the action records.
+    fn entries(&self) -> Vec<Value> {
+        let log = self.log();
+        let lines = log.lines().map(|l| serde_json::from_str(l).unwrap());
+        lines
+            .filter(|v: &Value| v.get("record").is_none())
+            .collect()
+    }
+
     fn last_entry(&self) -> Value {
-        serde_json::from_str(self.log().lines().last().unwrap()).unwrap()
+        self.entries().pop().unwrap()
     }
 }
 
@@ -151,11 +160,7 @@ fn do_batch_is_all_or_nothing() {
             .write_stdin(GOOD_BATCH),
     );
     assert_eq!(v["changes"].as_array().unwrap().len(), 2);
-    let log = e.log();
-    let entries: Vec<Value> = log
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
+    let entries = e.entries();
     assert_eq!(entries.len(), 2);
     assert!(entries.iter().all(|x| x["action"] == "set_value"));
     assert_eq!(entries[0]["file_hash"], entries[1]["file_hash"]);

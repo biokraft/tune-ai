@@ -353,6 +353,9 @@ The producer may have the studio (app or browser) open on the same song.
   Ctrl-C or `kill` stops the server and writes pending edits (it prints
   `stopped`). Never commit screenshots.
 - `edits.jsonl` sits next to the song: local and gitignored, never committed.
+  Besides one entry per changed path, each write logs one action record
+  (`"record": "action"`: the actions, the run and each target's value before
+  and after) for run undo; `tune changes` leaves the records out.
 
 ## Rules
 
