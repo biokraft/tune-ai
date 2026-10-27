@@ -411,34 +411,38 @@ The producer may have the studio (app or browser) open on the same song.
   duck source that followed it), or is kept whole when any part of it
   changed later (the new name renamed again or removed included), so the
   old name never comes back beside the new one; a renamed scene is renamed
-  back where it sits now, its comments kept. Scenes go back one at a time too: a slot (`scenes.<s>.slots.<t>`) is
-  kept when someone since changed it or its scene, or made, removed or
-  rebuilt its track or a clip it named (a scene the producer removed does
-  not come back for it, and a track or clip they made again gets no old
-  slot); a scene the run added or removed (`scenes.<s>`, with the slots
-  the run set in a scene it added) is kept when someone since changed it
-  or any slot in it, moved any scene, or made, removed or rebuilt a track
-  or clip its slots name. The scene order (`scenes`, from `move_scene`)
-  goes back unless someone added, removed or moved a scene since; a slot
-  edit does not keep it. The scenes the run added or removed around its
-  moves go back with the order, or are kept with it.
-  Live session actions (`launch_clip`, `launch_scene`, `stop_clip`,
+  back where it sits now, its comments kept. Scenes go back one at a time
+  too: a slot (`scenes.<s>.slots.<t>`) is kept when someone since changed
+  it or its scene, or made, removed or rebuilt its track or a clip it
+  named (a scene the producer removed does not come back for it, and a
+  track or clip they made again gets no old slot); a scene the run added
+  or removed (`scenes.<s>`, with the slots the run set in a scene it
+  added) is kept when someone since changed it or any slot in it, moved
+  any scene, or made, removed or rebuilt a track or clip its slots name,
+  and one the run added or renamed is kept when it is no longer on the row
+  the run left it on (a scene added, removed or moved above it, by hand
+  too; `by` names a logged scene edit since, else `null`), even when the
+  producer only added a row above it. The scene order (`scenes`, from
+  `move_scene`) goes back unless someone added, removed or moved a scene
+  since; a slot edit does not keep it. The scenes the run added or removed
+  around its moves go back with the order, or are kept with it. Live
+  session actions (`launch_clip`, `launch_scene`, `stop_clip`,
   `back_to_arrangement`) are never part of a run. A target someone set
   back to its value before the run is listed in `already`, not `kept`. The
-  result is `{"run", "title", "reverted": [{"target",
-  "item"}], "kept": [{"target", "item", "reason", "by", "message"}],
-  "already": [<target>]}` (`item` is the placement or stretch for
-  `tracks.<t>.play` and `automation.<t>.<param>`, else `null`; `already`
-  lists targets back at their value before the run); the text is `undid
-  run r1: 4 reverted, 1 kept` and one `kept <target>: changed later by
-  human` (`by another run`, `outside the studio`, `still used: <message>`)
-  line each. A damaged record line in the log refuses it ("the edit log
-  has a damaged record at line N; nothing was changed"). Costs: a removed
-  lane, track, clip or scene comes back without its comments (so do the
-  lanes `rename_device` moved, and a section `rename_section` renamed
-  loses the comment above it), a restored clip goes to the end of the
-  clip pool, and an explicit `send.* = -60` (a silent bus) is not
-  restored.
+  result is `{"run", "title", "reverted": [{"target", "item"}], "kept":
+  [{"target", "item", "reason", "by", "message"}], "already": [<target>]}`
+  (`item` is the placement or stretch for `tracks.<t>.play` and
+  `automation.<t>.<param>`, else `null`; `already` lists targets back at
+  their value before the run); the text is `undid run r1: 4 reverted, 1
+  kept` and one `kept <target>: changed later by human` (`by another run`,
+  `outside the studio`, `still used: <message>`) line each. A damaged
+  record line in the log refuses it ("the edit log has a damaged record at
+  line N; nothing was changed"). Costs: a removed lane, track, clip or
+  scene comes back without its comments (so do the lanes `rename_device`
+  moved, and a section `rename_section` renamed loses the comment above
+  it), a restored clip goes to the end of the clip pool, a removed scene
+  comes back at the row it had (above any row the producer has put there
+  since), and an explicit `send.* = -60` (a silent bus) is not restored.
 - To see the UI: `tune serve <song> --device null --port 4580` (in the
   background; `task ui:build` first), then drive Chrome with the
   `agent-browser` skill: start the agent Chrome, pick a session

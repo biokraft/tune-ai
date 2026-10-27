@@ -2139,18 +2139,18 @@ fn a_track_the_producer_made_again_gets_no_old_slots() {
     assert_eq!(s.value("scenes.groove.slots.acid"), Value::Null);
 }
 
-/// Protects nothing of the producer's, but a scene the run made is
-/// compared without its place: the producer's scene before it moved it
-/// down a row, and the run's scene still goes.
+/// The producer's scene above it moved the run's scene down a row. Its
+/// row counts (ruling I2): it is not where the run left it, so it is kept,
+/// by the producer, rather than guessed about (an accepted over-keep).
 #[test]
-fn a_scene_the_run_made_goes_wherever_it_sits() {
+fn a_scene_the_run_made_is_kept_when_a_scene_was_added_above() {
     let mut s = session();
     s.agent("r1", &[add_scene("jam", None)]);
     s.human(add_scene("intro", Some(0)));
     let u = s.undo_run("r1");
-    assert_eq!(u.kept, vec![]);
-    assert_eq!(u.reverted, reverted(&["scenes.jam"]));
-    assert_eq!(s.scenes(), ["intro", "groove", "break"]);
+    assert_eq!(u.kept, vec![kept("scenes.jam", Some(Source::Human))]);
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(s.scenes(), ["intro", "groove", "break", "jam"]);
 }
 
 // ----- Plan 10: slots and scenes whose clip or track was rebuilt -----
@@ -2445,4 +2445,52 @@ fn a_scene_rename_goes_back_in_place() {
     let u = s.undo_run("r1");
     assert_eq!(u.kept, vec![]);
     assert_eq!(s.text(), SESSION);
+}
+
+/// I2 (p31): with the studio closed, the producer moved the run's new
+/// scene by hand after the run. Nothing in the log says so, but the scene
+/// is not where the run left it: it is kept, not deleted with their move.
+#[test]
+fn a_scene_moved_by_hand_after_the_run_is_kept() {
+    let f = closed_on(SESSION);
+    f.agent("r1", &[add_scene("jam", None)]);
+    f.hand("[scenes.jam]\n", "");
+    f.hand("# jam rows\n", "[scenes.jam]\n\n# jam rows\n");
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept("scenes.jam", None)]);
+    assert_eq!(f.text(), text);
+
+    // p51: the run renamed a scene, the producer moved it below `break`
+    // by hand. The rename is kept whole, the producer's row order stays.
+    let f = closed_on(SESSION);
+    f.agent("r1", &[rename_scene("groove", "drop")]);
+    let groove = "# jam rows\n[scenes.drop]\nslots = { kick = \"k4\", acid = \"a1\" }\n\n";
+    f.hand(groove, "");
+    f.hand("[[sections]]", &format!("{groove}[[sections]]"));
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(kept_targets(&u, None), ["scenes.drop", "scenes.groove"]);
+    assert_eq!(f.text(), text);
+}
+
+/// I2 (p57): the producer added a scene above the run's renamed one. Its
+/// row moved down: kept rather than guessed, by the producer (an
+/// accepted over-keep), and their top row stays on top.
+#[test]
+fn a_scene_shifted_by_a_scene_added_above_is_kept() {
+    let mut s = session();
+    s.agent("r1", &[rename_scene("groove", "drop")]);
+    s.human(add_scene("intro", Some(0)));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        kept_targets(&u, Some(Source::Human)),
+        ["scenes.drop", "scenes.groove"]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["intro", "drop", "break"]);
 }

@@ -19,6 +19,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tune_dsp::STRIP_PARAMS;
+use tune_song::Song;
 
 use crate::doc::{EditError, SongDoc};
 use crate::error::StudioError;
@@ -177,6 +178,11 @@ pub fn undo_run(
         kept: Vec::new(),
         already: Vec::new(),
     };
+    // The scenes not where the run left them, read before any revert moves
+    // one.
+    let moved: Vec<Option<Option<Source>>> = (plans.iter())
+        .map(|p| moved_since(doc.song(), p, records, &mine, run))
+        .collect();
     let mut waiting = Vec::new();
     for (unit, grouped) in units {
         // Each part's decision, and for a part the run changed, who last
@@ -189,7 +195,7 @@ pub fn undo_run(
                 let decision = if is_list(&p.target) {
                     decide_list(doc, p, &others, &foreign, records)
                 } else {
-                    decide(doc, p, &others, &foreign, records)
+                    decide(doc, p, &others, &foreign, records, moved[k])
                 };
                 let decision = match track_kept(doc, &plans, &unit, p, records, run) {
                     Some(by) if !matches!(decision, Decision::Kept(_)) => {
@@ -324,7 +330,8 @@ fn track_kept(
         return None;
     }
     let (others, foreign) = other_writes(&plans[k], records, run);
-    match decide(doc, &plans[k], &others, &foreign, records) {
+    // A track has no row: only a scene plan is `moved`.
+    match decide(doc, &plans[k], &others, &foreign, records, None) {
         Decision::Kept(kept) => Some(kept.first().and_then(|k| k.by)),
         _ => None,
     }
@@ -343,6 +350,64 @@ fn kept_whole(p: &Plan, by: Option<Source>) -> Vec<KeptTarget> {
             message: None,
         })
         .collect()
+}
+
+/// For a scene plan whose scene is in `song` and was there after the run:
+/// `Some` when it is not at the row the run left it on, with the source of
+/// the last other write since that changed the scenes (`None` when the log
+/// has none: a hand edit). The run's row for it is its index when the run
+/// last wrote it, carried through the run's later scene writes (each
+/// order it set, the scenes it added or removed above it).
+fn moved_since(
+    song: &Song,
+    p: &Plan,
+    records: &[ActionRecord],
+    mine: &[usize],
+    run: &str,
+) -> Option<Option<Source>> {
+    let Target::Scene(id) = &p.target else {
+        return None;
+    };
+    let index = |v: &Value| v["index"].as_u64().and_then(|n| usize::try_from(n).ok());
+    let mut at = index(&p.after)?;
+    let now = song.scenes.get_index_of(id)?;
+    let from = p.touched.iter().rev().find(|(_, old)| old.is_some())?.0;
+    for r in mine.iter().filter(|&&i| i > from).map(|&i| &records[i]) {
+        if let Some(c) = r.targets.iter().find(|c| c.target == Target::SceneOrder) {
+            at = elements(&c.new)
+                .iter()
+                .position(|s| s.as_str() == Some(id.as_str()))?;
+            continue;
+        }
+        let scenes = r
+            .targets
+            .iter()
+            .filter(|c| matches!(c.target, Target::Scene(_)));
+        let gone = scenes
+            .clone()
+            .filter(|c| c.new.is_null() && !c.old.is_null());
+        at -= gone
+            .filter(|c| index(&c.old).is_some_and(|n| n < at))
+            .count();
+        let came = scenes.filter(|c| c.old.is_null() && !c.new.is_null());
+        let mut came: Vec<usize> = came.filter_map(|c| index(&c.new)).collect();
+        came.sort_unstable();
+        for n in came {
+            if n <= at {
+                at += 1;
+            }
+        }
+    }
+    if now == at {
+        return None;
+    }
+    let scenes = |c: &TargetChange| matches!(c.target, Target::Scene(_) | Target::SceneOrder);
+    let by = (p.last + 1..records.len())
+        .rev()
+        .filter(|&j| records[j].run.as_deref() != Some(run))
+        .find(|&j| records[j].targets.iter().any(scenes))
+        .map(|j| records[j].source);
+    Some(by)
 }
 
 /// Whether the run changed `p`'s target: its value after the run's last
@@ -662,6 +727,7 @@ fn decide(
     others: &[usize],
     foreign: &[usize],
     records: &[ActionRecord],
+    moved: Option<Option<Source>>,
 ) -> Decision {
     let current = target_value(doc.song(), &p.target);
     if approx(p, &current, &p.before) {
@@ -689,6 +755,11 @@ fn decide(
     });
     if let Some(&j) = rebuilt {
         return kept(Some(records[j].source));
+    }
+    // A scene not at the row the run left it on: someone added, removed or
+    // moved a scene since, and putting it back would guess where.
+    if let Some(by) = moved {
+        return kept(by);
     }
     let mut before = p.before.clone();
     if let Some(&j) = foreign.last() {
