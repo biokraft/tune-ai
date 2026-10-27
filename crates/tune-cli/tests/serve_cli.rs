@@ -312,6 +312,51 @@ async fn two_clients_share_state() {
     assert_eq!(seen["event"], "state");
 }
 
+/// Without a usable endpoint directory, `tune serve` warns and serves on.
+#[test]
+fn serve_warns_without_a_control_endpoint() {
+    use std::io::Read;
+    let dir = tempfile::tempdir().unwrap();
+    let song = dir.path().join("song.toml");
+    std::fs::copy(COMMENTED, &song).unwrap();
+    let ui = dir.path().join("ui");
+    std::fs::create_dir(&ui).unwrap();
+    std::fs::write(ui.join("index.html"), "<html>hello</html>").unwrap();
+    // A file where the directory should be.
+    let blocked = dir.path().join("studios");
+    std::fs::write(&blocked, "").unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tune"))
+        .env("TUNE_STUDIO_DIR", &blocked)
+        .arg("serve")
+        .arg(&song)
+        .args(["--port", "0", "--device", "null", "--json", "--ui"])
+        .arg(&ui)
+        .current_dir(dir.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn tune serve");
+    let mut first = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut first)
+        .unwrap();
+    let v: Value = serde_json::from_str(&first).unwrap_or_else(|_| panic!("not JSON: {first}"));
+    assert_eq!(v["event"], "serving");
+    let _ = child.kill();
+    let _ = child.wait();
+    let mut err = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut err)
+        .unwrap();
+    assert!(
+        err.contains("warning: CLI edits will write the file directly: "),
+        "{err}"
+    );
+}
+
 #[test]
 fn missing_ui_dir() {
     let dir = tempfile::tempdir().unwrap();

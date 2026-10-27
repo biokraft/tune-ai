@@ -32,7 +32,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::mpsc;
 use tower_http::services::{ServeDir, ServeFile};
 use tune_audio::output;
-use tune_studio::{Command, ControlServer, Event, Studio, StudioConfig, StudioHandle, studio_dir};
+use tune_studio::{Command, ControlServer, Event, Studio, StudioConfig, StudioHandle};
 
 use crate::report::{Failure, finish};
 
@@ -78,7 +78,9 @@ pub fn run(a: &Args) -> ExitCode {
         Ok(h) => h,
         Err(e) => return fail(a.json, e.to_string()),
     };
-    let control = start_control(&handle);
+    let control = ControlServer::start_or_warn(handle.clone())
+        .map_err(|warning| eprintln!("{warning}"))
+        .ok();
     let result = serve(a, &handle);
     // The endpoint file goes before the studio stops answering.
     drop(control);
@@ -93,17 +95,6 @@ pub fn run(a: &Args) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(m) => fail(a.json, m),
-    }
-}
-
-/// Starts the control endpoint; without it, the CLI edits the file.
-fn start_control(handle: &StudioHandle) -> Option<ControlServer> {
-    match ControlServer::start(handle.clone(), &studio_dir()) {
-        Ok(control) => Some(control),
-        Err(e) => {
-            eprintln!("warning: CLI edits will write the file directly: {e}");
-            None
-        }
     }
 }
 
