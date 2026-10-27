@@ -67,9 +67,10 @@ Notation:
 - Clips: `[clips.<id>]` with `kind = "acid" | "drum"` and `steps`. An acid
   clip plays on an instrument that plays acid, a drum clip on a drum module.
 - Placements: the track's `play = [{ at, clip, bars, offset }]`. `at` is the
-  1-based start bar, `offset` the bars into the clip (default 0). Keep them in
-  time order and never overlapping. Two placements whose offsets differ by a
-  clip length play the same but count as a change.
+  1-based start bar, `offset` the bars into the clip (default 0); `at`,
+  `bars` and `offset` are whole numbers. Keep them in time order and never
+  overlapping. Two placements whose offsets differ by a clip length play the
+  same but count as a change.
 - Sections: `[[sections]]` with `name` and `bars` (1 to 1024), laid end to end
   from bar 1. They set the song length and hold no content.
 - Devices: a track's `instrument` (a module name, or a table with `type` and
@@ -81,9 +82,11 @@ Notation:
   `<track>.send.delay`, `mix.<param id>`), `at`, `bars` and
   `points = [[bar_offset, normalized_0_to_1], ...]`; offsets are relative to
   `at`. Outside every stretch of a param, its static value plays.
-- `tune migrate <song>` rewrites a v1 file as v2, keeping comments. Every
-  other command reads a v1 file in memory and prints a `note:`. Migrating a
-  CRLF file produces LF line endings.
+- `tune migrate <song>` rewrites a v1 file as v2, keeping comments.
+  `tune set` also writes a v1 file back as v2 when it changes a value, and
+  `tune serve` and the studio rewrite it as v2 on open (logged `external`,
+  one undo step). Every other command reads a v1 file in memory and prints
+  a `note:`. Migrating a CRLF file produces LF line endings.
 - `tune params --json` is the source of param ids, ranges and units.
 
 ### Mixing
@@ -107,8 +110,9 @@ gain/pan -> sends -> delay and reverb buses -> master gain -> clip or limit.
   params = { "delay.feedback" = 40, "reverb.size" = 30, "master.gain" = 6 }
   ```
 
-- Lane params: `<track>.<device>.<param>`, `<track>.send.delay` (delay throws), `<track>.duck.depth`,
-  `mix.<param id>` (e.g. `param = "mix.reverb.size"`).
+- Lane params: `<track>.<device>.<param>`, `<track>.send.delay` (delay
+  throws), `<track>.duck.depth`, `mix.<param id>` (e.g.
+  `param = "mix.reverb.size"`).
 - A delay/reverb bus is built only if some track sets `send.delay` /
   `send.reverb` explicitly (even at -60) or a lane drives it. Ducking follows
   the source's hits even if it is muted; no hits, no ducking.
