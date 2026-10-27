@@ -277,6 +277,48 @@
         "index": 1,
         "name": "drop"
       }
+    },
+    {
+      "cmd": "add_lane",
+      "args": {
+        "param": "mix.reverb.size",
+        "at": 1,
+        "bars": 4,
+        "points": [
+          [
+            0.0,
+            0.2
+          ],
+          [
+            4.0,
+            0.6
+          ]
+        ]
+      }
+    },
+    {
+      "cmd": "remove_lane",
+      "args": {
+        "param": "acid.acid303.cutoff",
+        "at": 3
+      }
+    },
+    {
+      "cmd": "set_lane_points",
+      "args": {
+        "param": "acid.acid303.cutoff",
+        "at": 3,
+        "points": [
+          [
+            0.0,
+            0.3
+          ],
+          [
+            2.0,
+            0.9
+          ]
+        ]
+      }
     }
   ],
   "events": [

@@ -238,6 +238,26 @@ pub enum Action {
         index: usize,
         name: String,
     },
+    // ----- lanes (`param` as in the file; `at` is a 1-based bar) -----
+    /// Adds a stretch of the lane for `param` from bar `at` for `bars` bars.
+    /// `points` are `[bar offset from at, value 0 to 1]`.
+    AddLane {
+        param: String,
+        at: u32,
+        bars: u32,
+        points: Vec<[f64; 2]>,
+    },
+    /// Removes the stretch of `param` that starts at bar `at`.
+    RemoveLane {
+        param: String,
+        at: u32,
+    },
+    /// Replaces the points of the stretch of `param` that starts at bar `at`.
+    SetLanePoints {
+        param: String,
+        at: u32,
+        points: Vec<[f64; 2]>,
+    },
 }
 
 fn yes() -> bool {
@@ -363,6 +383,9 @@ impl Action {
             Self::RemovePlacement { .. } => "remove_placement",
             Self::AddSection { .. } => "add_section",
             Self::RenameSection { .. } => "rename_section",
+            Self::AddLane { .. } => "add_lane",
+            Self::RemoveLane { .. } => "remove_lane",
+            Self::SetLanePoints { .. } => "set_lane_points",
         }
     }
 
@@ -436,6 +459,9 @@ impl Action {
             | Self::ResizePlacement { track, .. }
             | Self::RemovePlacement { track, .. } => vec![format!("tracks.{track}.play")],
             Self::RenameSection { index, .. } => vec![format!("sections[{index}].name")],
+            Self::AddLane { param, .. }
+            | Self::RemoveLane { param, .. }
+            | Self::SetLanePoints { param, .. } => vec![format!("automation.{param}")],
             Self::MoveSection { .. }
             | Self::DuplicateSection { .. }
             | Self::DeleteSection { .. }

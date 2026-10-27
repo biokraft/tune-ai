@@ -425,6 +425,52 @@ pub const ACTIONS: &[ActionSpec] = &[
             arg("name", Text, "new name"),
         ],
     ),
+    // ----- lanes -----
+    action(
+        "add_lane",
+        Edit,
+        "Adds a stretch of a param's automation lane from bar `at` (1-based) for `bars` bars. \
+         Points are [bar offset from `at`, value 0 to 1] pairs; a stretch may not overlap \
+         another of the same param.",
+        &[
+            arg(
+                "param",
+                ParamId,
+                "lane param as in the file, e.g. acid.acid303.cutoff or mix.reverb.size",
+            ),
+            arg("at", Int, "first bar, from 1"),
+            arg("bars", Int, "length in bars"),
+            arg(
+                "points",
+                Json,
+                "[[bar offset, value 0 to 1], ...] in time order",
+            ),
+        ],
+    ),
+    action(
+        "remove_lane",
+        Edit,
+        "Removes the lane stretch of `param` that starts at bar `at` (1-based); the result \
+         lists it.",
+        &[
+            arg("param", ParamId, "lane param as in the file"),
+            arg("at", Int, "start bar of the stretch, from 1"),
+        ],
+    ),
+    action(
+        "set_lane_points",
+        Edit,
+        "Replaces the points of the lane stretch of `param` that starts at bar `at` (1-based).",
+        &[
+            arg("param", ParamId, "lane param as in the file"),
+            arg("at", Int, "start bar of the stretch, from 1"),
+            arg(
+                "points",
+                Json,
+                "[[bar offset, value 0 to 1], ...] in time order",
+            ),
+        ],
+    ),
 ];
 
 /// The catalog entry of the action named `name`.

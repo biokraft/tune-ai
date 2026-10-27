@@ -10,11 +10,11 @@ use serde_json::Value as Json;
 use toml_edit::{Decor, DocumentMut, InlineTable, Item, Key, Table, Value};
 use tune_song::toml_doc::{Slot, normalize_positions, reshape, root_child, walk, walk_mut};
 use tune_song::{
-    Clip, ClipKind, Device, EditOpError, Edited, Placement, Registry, Removed, Track,
-    clip_table_toml, fx_entry_toml, parse, track_table_toml,
+    Clip, ClipKind, Device, EditOpError, Edited, Lane, LaneOrigin, Placement, Registry, Removed,
+    Track, clip_table_toml, fx_entry_toml, parse, track_table_toml,
 };
 
-use super::arrange::{write_automation, write_plays};
+use super::arrange::{block_start, rerank, write_automation, write_plays};
 use super::{EditError, SongDoc, fx_table, notes_value, put_instrument_setting, track_table};
 
 impl SongDoc {
@@ -293,6 +293,56 @@ impl SongDoc {
         self.write_plays_of(edited)
     }
 
+    /// Adds a stretch of the lane for `param` (`<track>.<param id>`, `mix.`
+    /// for a mix param) from 0-based bar `start_bar` for `bars` bars (see
+    /// [`tune_song::add_lane`]). It gets a table of its own, laid out right
+    /// after the stretches of the section it starts in; the first one
+    /// creates the root `[[automation]]` list. Overlaps, unknown params and
+    /// points out of range are the validator's.
+    pub fn add_lane(
+        &mut self,
+        param: &str,
+        start_bar: u32,
+        bars: u32,
+        points: Vec<(f64, f64)>,
+    ) -> Result<(), EditError> {
+        let (track, param) = split_lane_param(param)?;
+        let lane = Lane {
+            track: track.to_owned(),
+            param: param.to_owned(),
+            start_bar,
+            bars,
+            points,
+        };
+        let edited = tune_song::add_lane(&self.song, lane)?;
+        self.write_edited(edited, |_| Some(()))?;
+        Ok(())
+    }
+
+    /// Removes the stretch of `param` that starts at 0-based bar `start_bar`,
+    /// its table and the comments on it, and returns it (see
+    /// [`tune_song::remove_lane`]).
+    pub fn remove_lane(&mut self, param: &str, start_bar: u32) -> Result<Removed, EditError> {
+        let (track, param) = split_lane_param(param)?;
+        let edited = tune_song::remove_lane(&self.song, track, param, start_bar)?;
+        self.write_edited(edited, |_| Some(()))
+    }
+
+    /// Replaces the `points` of the stretch of `param` that starts at
+    /// 0-based bar `start_bar`, leaving the rest of its table as it is (see
+    /// [`tune_song::set_lane_points`]).
+    pub fn set_lane_points(
+        &mut self,
+        param: &str,
+        start_bar: u32,
+        points: Vec<(f64, f64)>,
+    ) -> Result<(), EditError> {
+        let (track, param) = split_lane_param(param)?;
+        let edited = tune_song::set_lane_points(&self.song, track, param, start_bar, points)?;
+        self.write_edited(edited, |_| Some(()))?;
+        Ok(())
+    }
+
     /// Writes the `play` lists an edit changed.
     fn write_plays_of(&mut self, edited: Edited) -> Result<Removed, EditError> {
         let old = self.song.clone();
@@ -318,11 +368,37 @@ impl SongDoc {
         let mut doc = self.doc.clone();
         write(&mut doc).ok_or_else(broken)?;
         if arranged.song.automation != self.song.automation {
+            // A new stretch is laid out among the section tables, as a
+            // section operation lays out its own.
+            let new_tables = arranged.lanes.contains(&LaneOrigin::New);
+            let start = if new_tables {
+                normalize_positions(&mut doc);
+                block_start(&doc)
+            } else {
+                None
+            };
             write_automation(&mut doc, &self.song, &arranged).ok_or_else(broken)?;
+            if let Some(start) = start {
+                rerank(&mut doc, &arranged.song, start);
+            }
         }
         self.commit_as(doc, Some(&arranged.song))?;
         Ok(removed)
     }
+}
+
+/// Splits a lane's `param` as the file spells it, `<track>.<param id>`, at
+/// its first `.`; `mix` is the track of a mix param.
+fn split_lane_param(param: &str) -> Result<(&str, &str), EditError> {
+    param
+        .split_once('.')
+        .filter(|(track, id)| !track.is_empty() && !id.is_empty())
+        .ok_or_else(|| EditError::BadValue {
+            path: param.to_owned(),
+            message: "a lane param is `<track>.<param id>`, such as `acid.acid303.cutoff` \
+                      or `mix.reverb.size`"
+                .to_owned(),
+        })
 }
 
 /// Where the first clip table goes: after the last of these tables.

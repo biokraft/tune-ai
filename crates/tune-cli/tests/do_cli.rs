@@ -474,3 +474,55 @@ fn placements_and_sections_from_the_cli() {
         "{err}"
     );
 }
+
+#[test]
+fn lanes_from_the_cli() {
+    let e = fixture();
+    let song = e.song.to_str().unwrap();
+    // The points go in as a TOML array, quoted for the shell.
+    let v = json_out(e.tune().args([
+        "do",
+        song,
+        "add_lane",
+        "param=mix.reverb.size",
+        "at=1",
+        "bars=2",
+        "points=[[0, 0.2], [2, 0.6]]",
+        "--json",
+    ]));
+    assert_eq!(v["changes"][0]["path"], "sections[0].lanes");
+    let text = fs::read_to_string(&e.song).unwrap();
+    assert!(
+        text.contains(
+            "param = \"mix.reverb.size\"\nat = 1\nbars = 2\npoints = [[0, 0.2], [2, 0.6]]"
+        ),
+        "{text}"
+    );
+
+    // Text mode says which stretch went.
+    let out = e
+        .tune()
+        .args(["do", song, "remove_lane", "acid.acid303.cutoff", "at=3"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("removed lane acid.acid303.cutoff at bar 3"),
+        "{text}"
+    );
+
+    // A refusal exits 2 with the lane named as the producer counts bars.
+    let err = fails(e.tune().args([
+        "do",
+        song,
+        "set_lane_points",
+        "mix.reverb.size",
+        "at=2",
+        "points=[[0, 1]]",
+    ]));
+    assert!(
+        err.contains("there is no lane `mix.reverb.size` at bar 2"),
+        "{err}"
+    );
+}
