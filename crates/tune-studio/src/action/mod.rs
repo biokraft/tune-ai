@@ -238,6 +238,34 @@ pub enum Action {
         index: usize,
         name: String,
     },
+    // ----- scenes (`index` is 0-based) -----
+    /// Adds an empty scene before scene `index` (the end by default).
+    AddScene {
+        scene: String,
+        #[serde(default)]
+        index: Option<usize>,
+    },
+    /// Removes a scene with its slots.
+    RemoveScene {
+        scene: String,
+    },
+    /// Renames a scene, keeping its place.
+    RenameScene {
+        scene: String,
+        to: String,
+    },
+    /// Moves a scene to `index`, as a removal then an insertion.
+    MoveScene {
+        scene: String,
+        index: usize,
+    },
+    /// Puts `clip` in a scene's slot for `track`; no clip empties the slot.
+    SetSlot {
+        scene: String,
+        track: String,
+        #[serde(default)]
+        clip: Option<String>,
+    },
     // ----- lanes (`param` as in the file; `at` is a 1-based bar) -----
     /// Adds a stretch of the lane for `param` from bar `at` for `bars` bars.
     /// `points` are `[bar offset from at, value 0 to 1]`.
@@ -389,6 +417,11 @@ impl Action {
             Self::RemovePlacement { .. } => "remove_placement",
             Self::AddSection { .. } => "add_section",
             Self::RenameSection { .. } => "rename_section",
+            Self::AddScene { .. } => "add_scene",
+            Self::RemoveScene { .. } => "remove_scene",
+            Self::RenameScene { .. } => "rename_scene",
+            Self::MoveScene { .. } => "move_scene",
+            Self::SetSlot { .. } => "set_slot",
             Self::AddLane { .. } => "add_lane",
             Self::RemoveLane { .. } => "remove_lane",
             Self::SetLanePoints { .. } => "set_lane_points",
@@ -466,6 +499,14 @@ impl Action {
             | Self::ResizePlacement { track, .. }
             | Self::RemovePlacement { track, .. } => vec![format!("tracks.{track}.play")],
             Self::RenameSection { index, .. } => vec![format!("sections[{index}].name")],
+            Self::AddScene { scene, .. } | Self::RemoveScene { scene } => {
+                vec![format!("scenes.{scene}")]
+            }
+            Self::RenameScene { scene, to } => {
+                vec![format!("scenes.{scene}"), format!("scenes.{to}")]
+            }
+            Self::MoveScene { .. } => vec!["scenes".to_owned()],
+            Self::SetSlot { scene, track, .. } => vec![format!("scenes.{scene}.slots.{track}")],
             Self::AddLane { param, .. }
             | Self::RemoveLane { param, .. }
             | Self::SetLanePoints { param, .. } => vec![format!("automation.{param}")],

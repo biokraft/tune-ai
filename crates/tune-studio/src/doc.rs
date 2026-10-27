@@ -31,6 +31,7 @@ use crate::path::{SongPath, TrackField};
 
 mod arrange;
 mod items;
+mod scenes;
 
 use arrange::{Tables, block_start, rerank, section_tables, write_automation, write_plays};
 
@@ -71,6 +72,9 @@ pub enum EditError {
         "this file writes `{key}` as {form}; the studio can't edit that form yet, so change it by hand"
     )]
     UnsupportedForm { key: String, form: String },
+    /// The file writes its scenes in a form `action` cannot edit.
+    #[error("`{action}` needs each scene as its own [scenes.<id>] table; edit this form by hand")]
+    ScenesByHand { action: &'static str },
     #[error("the edit would make the song invalid:\n{}", summary(.0))]
     Invalid(Vec<SongError>),
     /// The studio could not carry out an edit it accepted: a bug, never a

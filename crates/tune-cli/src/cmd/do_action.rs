@@ -141,6 +141,14 @@ fn result_lines(result: &Value) -> Vec<String> {
                 p["at"]
             ));
         }
+        for slot in removed["slots"].as_array().into_iter().flatten() {
+            lines.push(format!(
+                "removed slot {} on {} in scene {}",
+                slot["clip"].as_str().unwrap_or("?"),
+                slot["track"].as_str().unwrap_or("?"),
+                slot["scene"].as_str().unwrap_or("?")
+            ));
+        }
         if let Some(src) = removed["duck_source"].as_str() {
             lines.push(format!("cleared duck source {src}"));
         }

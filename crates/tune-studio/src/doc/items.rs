@@ -390,7 +390,7 @@ impl SongDoc {
     /// the lane stretches it kept, and commits the copy only when it
     /// describes exactly the edited song. An edit that changes nothing
     /// writes nothing.
-    fn write_edited(
+    pub(super) fn write_edited(
         &mut self,
         edited: Edited,
         write: impl FnOnce(&mut DocumentMut) -> Option<()>,
@@ -832,7 +832,7 @@ pub(super) fn insert_track(doc: &mut DocumentMut, id: &str, track: &Track) -> Op
 
 /// Where [`insert_table`] puts a table among its container's.
 #[derive(Clone, Copy)]
-enum Place<'a> {
+pub(super) enum Place<'a> {
     /// Right after this sibling's table.
     After(&'a str),
     /// Right before this sibling's table (and the comments above it).
@@ -847,7 +847,7 @@ enum Place<'a> {
 /// table yet is created after the last table, in the file's order, of any
 /// of `anchors`. A container written as inline entries gets an inline
 /// entry.
-fn insert_table(
+pub(super) fn insert_table(
     doc: &mut DocumentMut,
     container: &str,
     id: &str,
@@ -961,7 +961,7 @@ pub(super) fn remove_track_table(doc: &mut DocumentMut, id: &str) -> Option<()> 
 
 /// Renames the keys of `slot` that `rename` gives a new name for, keeping
 /// their order, spacing and values.
-fn rename_keys(slot: Slot<'_>, rename: impl Fn(&str) -> Option<String>) -> Option<()> {
+pub(super) fn rename_keys(slot: Slot<'_>, rename: impl Fn(&str) -> Option<String>) -> Option<()> {
     let renamed = |key: Key| match rename(key.get()) {
         Some(new) => Key::new(new)
             .with_leaf_decor(key.leaf_decor().clone())

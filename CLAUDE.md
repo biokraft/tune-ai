@@ -362,6 +362,19 @@ The producer may have the studio (app or browser) open on the same song.
   | `remove_lane` | `tune do <song> remove_lane param=acid.acid303.cutoff at=3` drops the stretch's table with its comments (the result lists it) |
   | `set_lane_points` | `tune do <song> set_lane_points param=acid.acid303.cutoff at=3 points='[[0, 0.3], [2, 0.9]]'` changes only the `points` line |
 
+  The scene ones, refused the same way (`index` is 0-based, like a section's; a
+  file that writes `scenes = { … }` as one root inline table refuses `add_scene` and
+  `move_scene`, and one with `[scenes]` and inline entries refuses `move_scene`: edit
+  those forms by hand):
+
+  | Action | Example |
+  | --- | --- |
+  | `add_scene` | `tune do <song> add_scene scene=jam index=0` adds an empty scene before scene 0 (the end by default); its table goes right before that scene's comments |
+  | `remove_scene` | `tune do <song> remove_scene scene=jam` removes the scene, the comments above it and its slots (the result lists them; the text line is `removed slot a1 on acid in scene groove`) |
+  | `rename_scene` | `tune do <song> rename_scene scene=groove to=drop`; keeps its place and comments |
+  | `move_scene` | `tune do <song> move_scene scene=break index=0` removes the scene and inserts it at `index`; its comments travel with it |
+  | `set_slot` | `tune do <song> set_slot scene=groove track=acid clip=a1` puts the clip in the slot (a clip the track's instrument can play); `clip=` empties the slot |
+
 - Undo a whole run: `tune do <song> undo_run <run id> --json` (the studio
   open or closed; the app's "Undo this run" does the same). It reads the
   run's action records in `edits.jsonl` and puts back every target the run

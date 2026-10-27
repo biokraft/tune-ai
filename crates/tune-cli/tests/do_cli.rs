@@ -737,3 +737,69 @@ fn undo_run_says_what_it_kept() {
         "{err}"
     );
 }
+
+#[test]
+fn scenes_from_the_cli() {
+    let e = fixture();
+    let session =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/session.toml");
+    fs::copy(session, &e.song).unwrap();
+    let song = e.song.to_str().unwrap();
+
+    let v = json_out(
+        e.tune()
+            .args(["do", song, "add_scene", "scene=jam", "index=0", "--json"]),
+    );
+    assert_eq!(v["results"][0], Value::Null);
+    json_out(e.tune().args([
+        "do",
+        song,
+        "set_slot",
+        "scene=jam",
+        "track=acid",
+        "clip=a1",
+        "--json",
+    ]));
+    json_out(
+        e.tune()
+            .args(["do", song, "move_scene", "scene=jam", "index=2", "--json"]),
+    );
+    json_out(
+        e.tune()
+            .args(["do", song, "rename_scene", "scene=jam", "to=fill", "--json"]),
+    );
+    let text = fs::read_to_string(&e.song).unwrap();
+    assert!(
+        text.contains("[scenes.fill]\nslots = { acid = \"a1\" }"),
+        "{text}"
+    );
+    assert!(
+        text.find("[scenes.break]") < text.find("[scenes.fill]"),
+        "{text}"
+    );
+
+    // Text mode says which slots went with the scene.
+    let out = e
+        .tune()
+        .args(["do", song, "remove_scene", "scene=groove"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("removed slot k4 on kick in scene groove"),
+        "{text}"
+    );
+    assert!(
+        text.contains("removed slot a1 on acid in scene groove"),
+        "{text}"
+    );
+    let v = json_out(
+        e.tune()
+            .args(["do", song, "remove_scene", "scene=break", "--json"]),
+    );
+    assert_eq!(
+        v["results"][0]["removed"]["slots"],
+        json!([{"scene": "break", "track": "hat", "clip": "h"}])
+    );
+}
