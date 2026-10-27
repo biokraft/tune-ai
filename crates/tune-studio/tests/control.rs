@@ -395,6 +395,30 @@ fn a_studio_that_does_not_answer_is_an_error_not_a_fallback() {
     assert_eq!(fs::read_to_string(&song).unwrap(), COMMENTED, "no fallback");
 }
 
+/// A link names the song it was found for: once the studio has switched
+/// to another song, its `do` is refused and neither file changes.
+#[test]
+fn a_studio_that_switched_songs_refuses_the_link() {
+    let f = fixture(COMMENTED);
+    let other = f.path.parent().unwrap().join("other").join("song.toml");
+    fs::create_dir(other.parent().unwrap()).unwrap();
+    fs::write(&other, COMMENTED).unwrap();
+    let link = f.link();
+    f.call(Command::Studio(StudioCommand::OpenSong {
+        path: "other/song.toml".into(),
+    }));
+    let err = link
+        .run(&[set("song.bpm", json!(130))], &Origin::claude(None))
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "the studio has another song open now; nothing was changed"
+    );
+    sleep(Duration::from_millis(300));
+    assert_eq!(f.disk(), COMMENTED);
+    assert_eq!(fs::read_to_string(&other).unwrap(), COMMENTED);
+}
+
 #[test]
 fn actions_through_the_link_are_one_undo_step_each() {
     let f = fixture(COMMENTED);

@@ -46,6 +46,8 @@ pub enum StudioError {
     NoSuchRun(String),
     #[error("the studio did not answer; check it before retrying")]
     NoAnswer,
+    #[error("the studio has another song open now; nothing was changed")]
+    SongChanged,
     #[error("{0}")]
     Audio(String),
     #[error("timed out")]
