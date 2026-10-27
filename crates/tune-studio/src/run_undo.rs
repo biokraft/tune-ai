@@ -184,7 +184,7 @@ pub fn undo_run(
                 let decision = if is_list(&p.target) {
                     decide_list(doc, p, &others, &foreign, records)
                 } else {
-                    decide(doc, p, &foreign, records)
+                    decide(doc, p, &others, &foreign, records)
                 };
                 let decision = match track_kept(doc, &plans, &unit, p, records, run) {
                     Some(by) if !matches!(decision, Decision::Kept(_)) => {
@@ -318,8 +318,8 @@ fn track_kept(
     if unit.contains(&k) {
         return None;
     }
-    let (_, foreign) = other_writes(&plans[k], records, run);
-    match decide(doc, &plans[k], &foreign, records) {
+    let (others, foreign) = other_writes(&plans[k], records, run);
+    match decide(doc, &plans[k], &others, &foreign, records) {
         Decision::Kept(kept) => Some(kept.first().and_then(|k| k.by)),
         _ => None,
     }
@@ -554,8 +554,16 @@ impl Plan {
 }
 
 /// A target other than a list: back to its value before the run, unless
-/// it holds that already or someone changed it later.
-fn decide(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionRecord]) -> Decision {
+/// it holds that already or someone changed it later. A slot or scene is
+/// also kept when another write since rebuilt a track or clip it names
+/// (see [`names_rebuilt`]).
+fn decide(
+    doc: &SongDoc,
+    p: &Plan,
+    others: &[usize],
+    foreign: &[usize],
+    records: &[ActionRecord],
+) -> Decision {
     let current = target_value(doc.song(), &p.target);
     if approx(p, &current, &p.before) {
         return Decision::Already;
@@ -573,6 +581,15 @@ fn decide(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionRecord]) 
     // held then is not known, so it is kept.
     if p.unlogged_gap(foreign) {
         return kept(None);
+    }
+    // A track or clip it names was made, removed or rebuilt since: putting
+    // it back would point it at what is there now.
+    let rebuilt = others.iter().rev().find(|&&j| {
+        let mut targets = records[j].targets.iter();
+        targets.any(|c| names_rebuilt(p, &c.target))
+    });
+    if let Some(&j) = rebuilt {
+        return kept(Some(records[j].source));
     }
     let mut before = p.before.clone();
     if let Some(&j) = foreign.last() {
@@ -726,6 +743,34 @@ fn decide_list(
         value: Value::Array(next),
         items,
         kept: out,
+    }
+}
+
+/// Whether a change to `other` makes, removes or rebuilds a track or clip
+/// that plan `p`, a slot or a scene, names in its value before or after
+/// the run: the slot's track and clip, a scene's slot tracks and clips. Only
+/// the slot or scene looks at this: a clip the run made is not kept because
+/// the producer slotted it (the song refuses its removal instead).
+fn names_rebuilt(p: &Plan, other: &Target) -> bool {
+    let values = [&p.before, &p.after];
+    let (tracks, clips): (Vec<&str>, Vec<&str>) = match &p.target {
+        Target::Value(SongPath::SceneSlot { track, .. }) => (
+            vec![track.as_str()],
+            values.iter().filter_map(|v| v.as_str()).collect(),
+        ),
+        Target::Scene(_) => {
+            let slots = values.iter().filter_map(|v| v["slots"].as_object());
+            slots
+                .flat_map(|m| m.iter())
+                .filter_map(|(t, c)| Some((t.as_str(), c.as_str()?)))
+                .unzip()
+        }
+        _ => return false,
+    };
+    match other {
+        Target::Track(t) => tracks.contains(&t.as_str()),
+        Target::Clip(c) => clips.contains(&c.as_str()),
+        _ => false,
     }
 }
 

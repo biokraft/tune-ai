@@ -2152,3 +2152,81 @@ fn a_scene_the_run_made_goes_wherever_it_sits() {
     assert_eq!(u.reverted, reverted(&["scenes.jam"]));
     assert_eq!(s.scenes(), ["intro", "groove", "break"]);
 }
+
+// ----- Plan 10: slots and scenes whose clip or track was rebuilt -----
+
+fn add_clip_a1_again() -> Action {
+    Action::AddClip {
+        clip: "a1".into(),
+        kind: "acid".into(),
+        steps: Some("C3 . . .".into()),
+        bars: None,
+        notes: None,
+    }
+}
+
+/// Protects a clip the producer made under the id of one the run removed:
+/// the run's old slot does not come back to play it.
+#[test]
+fn a_clip_the_producer_made_again_gets_no_old_slot() {
+    let mut s = session();
+    s.agent("r1", &[Action::RemoveClip { clip: "a1".into() }]);
+    s.human(add_clip_a1_again());
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let names = kept_targets(&u, Some(Source::Human));
+    assert!(
+        names.contains(&"scenes.groove.slots.acid".to_owned()),
+        "{names:?}"
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.value("scenes.groove.slots.acid"), Value::Null);
+}
+
+/// Protects the producer's rebuild of a clip a slot the run emptied held:
+/// the slot does not come back to name their new clip.
+#[test]
+fn a_slot_whose_clip_the_producer_rebuilt_is_kept() {
+    let mut s = session();
+    s.agent("r1", &[set_slot("groove", "acid", None)]);
+    s.human(Action::RemoveClip { clip: "a1".into() });
+    s.human(add_clip_a1_again());
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept,
+        vec![kept("scenes.groove.slots.acid", Some(Source::Human))]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.value("scenes.groove.slots.acid"), Value::Null);
+}
+
+/// Protects a track the producer made again under the id of one a scene
+/// the run removed has a slot for: the scene does not come back with a
+/// slot on their new track.
+#[test]
+fn a_scene_whose_track_the_producer_rebuilt_is_kept() {
+    let mut s = session();
+    s.agent(
+        "r1",
+        &[Action::RemoveScene {
+            scene: "groove".into(),
+        }],
+    );
+    s.human(Action::RemoveTrack {
+        track: "acid".into(),
+    });
+    s.human(Action::AddTrack {
+        track: "acid".into(),
+        instrument: "acid303".into(),
+    });
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept("scenes.groove", Some(Source::Human))]);
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["break"]);
+    assert_eq!(s.value("scenes.groove"), Value::Null);
+}

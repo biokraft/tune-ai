@@ -412,11 +412,13 @@ The producer may have the studio (app or browser) open on the same song.
   changed later (the new name renamed again or removed included), so the
   old name never comes back beside the new one.
   Scenes go back one at a time too: a slot (`scenes.<s>.slots.<t>`) is
-  kept when someone changed it, its scene or its whole track since (a
-  scene the producer removed does not come back for it, and a track they
-  made again gets no old slot); a scene the run added or removed
-  (`scenes.<s>`, with the slots the run set in a scene it added) is kept
-  when someone changed it or any slot in it, or moved any scene, since.
+  kept when someone since changed it or its scene, or made, removed or
+  rebuilt its track or a clip it named (a scene the producer removed does
+  not come back for it, and a track or clip they made again gets no old
+  slot); a scene the run added or removed (`scenes.<s>`, with the slots
+  the run set in a scene it added) is kept when someone since changed it
+  or any slot in it, moved any scene, or made, removed or rebuilt a track
+  or clip its slots name.
   The scene order (`scenes`, from `move_scene`) goes back unless someone
   added, removed or moved a scene since; a slot edit does not keep it.
   Live session actions (`launch_clip`, `launch_scene`, `stop_clip`,
