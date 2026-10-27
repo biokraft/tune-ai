@@ -1,4 +1,4 @@
-import type { Change, Json, ParamView, SongView } from "../client/protocol";
+import type { Change, Json, KeptTarget, ParamView, SongView } from "../client/protocol";
 import { changedSteps } from "../store/changedSteps";
 import { formatNumber, sentenceCase } from "./song";
 
@@ -6,7 +6,7 @@ const show = (v: Json): string =>
   v === null ? "none" : typeof v === "number" ? formatNumber(v) : String(v);
 
 /** `old → new` with the param's unit: "500 → 820 Hz", "70 → 90%". */
-function span(old: Json, next: Json, unit = ""): string {
+function spanOf(old: Json, next: Json, unit = ""): string {
   const tail = unit === "" ? "" : unit === "%" ? "%" : ` ${unit}`;
   return `${show(old)} → ${show(next)}${tail}`;
 }
@@ -71,6 +71,12 @@ const NOTE_CLIP = /^clips\.(.+)\.(notes|bars)$/;
 
 /** One change in a few plain words, for the change notice. */
 export function describeChange(c: Change, song: SongView | null): string {
+  return describeWith(c, song, spanOf);
+}
+
+type Span = (old: Json, next: Json, unit?: string) => string;
+
+function describeWith(c: Change, song: SongView | null, span: Span): string {
   if (c.path === "song.bpm") return `Tempo ${span(c.old, c.new, "BPM")}`;
   if (c.path === "song.version") {
     // Back to an older version: an undo of the migration, or the old text put back.
@@ -162,4 +168,47 @@ export function describeChanges(changes: Change[], song: SongView | null, max = 
   const shown = changes.slice(0, max).map((c) => describeChange(c, song));
   if (changes.length > max) shown.push(`and ${changes.length - max} more`);
   return shown.join(", ");
+}
+
+const TARGET_TRACK = /^tracks\.([^.]+)(?:\.(instrument|fx|play))?$/;
+const TARGET_CLIP = /^clips\.([^.]+)$/;
+const TARGET_LANE = /^automation\.([^.]+)\.(.+)$/;
+
+/** What a leaf target is called, without its change: describeChange's wording minus the span. */
+function leafLabel(path: string, song: SongView | null): string {
+  const steps = PATTERN.exec(path);
+  if (steps) return `${steps[1]} pattern`;
+  const flag = /^tracks\.([^.]+)\.(mute|solo)$/.exec(path);
+  if (flag) return `${flag[1]} ${flag[2]}`;
+  return describeWith({ path, old: null, new: null }, song, () => "").trim();
+}
+
+/** A target a run undo kept, in a few plain words: "Cutoff (by you)", "clip a1", "the sections". */
+export function describeTarget(k: KeptTarget, song: SongView | null): string {
+  const path = k.target;
+  let what: string;
+  const track = TARGET_TRACK.exec(path);
+  const lane = TARGET_LANE.exec(path);
+  if (track) {
+    const [, t, part] = track as unknown as [string, string, string | undefined];
+    what =
+      part === "instrument"
+        ? `${t}'s instrument`
+        : part === "fx"
+          ? `${t}'s effects`
+          : part === "play"
+            ? `a clip on ${t}`
+            : `track ${t}`;
+  } else if (TARGET_CLIP.test(path)) {
+    what = `clip ${TARGET_CLIP.exec(path)![1]}`;
+  } else if (lane) {
+    what = lane[1] === "mix" ? `mix ${lane[2]} automation` : `${lane[2]} automation on ${lane[1]}`;
+  } else if (path === "sections") {
+    what = "the sections";
+  } else {
+    what = leafLabel(path, song);
+  }
+  if (k.by === "human") return `${what} (by you)`;
+  if (k.by === "claude") return `${what} (another run)`;
+  return what;
 }
