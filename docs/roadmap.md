@@ -133,6 +133,8 @@ rewritten.
 Goal: the song model and engine can support what the design needs, behind
 stable interfaces (spec G9).
 
+Design: `docs/superpowers/specs/2026-10-26-phase-2-modular-model-design.md`.
+
 - **Devices.** Each track holds an instrument plus an effect chain, built
   from a registry of modules. Instruments and effects can be added, removed
   and reordered.
@@ -258,8 +260,9 @@ After the learning test, ordered by what the track and the producer ask for:
    unless you already know.
 2. **Model access and billing** for the in-app agent: an API key, a
    subscription-backed harness, or a local model.
-3. **Session view:** do you want an Ableton-style session or clip-launch view
-   next to the arrangement, or arrangement only?
+3. **Session view:** answered 2026-10-26: both. A session view and the
+   arrangement play the same clips from one clip pool per song. See the
+   Phase 2 design.
 4. **Plugin hosting:** confirm it stays out until Phase 7.
 5. **Spec revision:** approve the changes listed under "What this changes in
    the spec" so Phase 1 can start from an updated spec.
