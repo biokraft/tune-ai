@@ -588,12 +588,14 @@ impl Actor {
         origin: &Origin,
     ) -> Result<ActionsOutcome, StudioError> {
         let core = self.core_mut()?;
-        let before = core.song().clone();
+        // The text decides, not the `Song`: its equality ignores the order
+        // of the scenes, so a scene move would look like no change.
+        let before = core.text();
         let result = core.apply_now(actions, origin);
         // The flush first may take in an unseen change.
         self.report_unreported();
         // Even a failed log write leaves the new song in place.
-        if self.core()?.song() != &before {
+        if self.core()?.text() != before {
             self.song_changed(false);
         }
         let out = result?;

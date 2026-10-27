@@ -17,6 +17,7 @@ use tune_studio::{
     StudioError, StudioHandle, StudioState, set_paths,
 };
 
+const SESSION: &str = include_str!("../../tune-song/tests/fixtures/session.toml");
 const MINI: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
 /// The longest any test waits for one thing.
 // Generous: FSEvents delivery can take seconds while the machine is busy
@@ -1018,4 +1019,32 @@ fn a_new_track_plays_live_and_is_one_undo_step() {
     assert_eq!(undone[0]["path"], json!("tracks.bass"));
     f.disk_until(WAIT, "lost the track", |t| !t.contains("bass"));
     assert_eq!(f.disk(), MINI);
+}
+
+/// A scene move changes no value the `Song` comparison can see, yet the
+/// engine's scene order must follow it: the studio swaps on the write.
+#[test]
+fn a_scene_move_reaches_the_playing_engine() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.pull(2_000);
+    let swaps = || {
+        lock(&f.slot)
+            .as_ref()
+            .expect("audio is playing")
+            .swaps_applied()
+    };
+    let before = swaps();
+    let move_break = Action::MoveScene {
+        scene: "break".into(),
+        index: 0,
+    };
+    f.studio
+        .run_actions(vec![move_break], Origin::claude(None))
+        .expect("moves");
+    // The swap lands at the next step.
+    f.pull(12_000);
+    assert_eq!(swaps(), before + 1, "the move was swapped in");
+    let moved = parse_song(&f.disk()).expect("parses");
+    assert_eq!(moved.scenes.keys().collect::<Vec<_>>(), ["break", "groove"]);
 }

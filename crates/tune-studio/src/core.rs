@@ -697,6 +697,11 @@ impl StudioCore {
         self.doc.song()
     }
 
+    /// The song text as it stands in memory.
+    pub fn text(&self) -> String {
+        self.doc.text()
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }

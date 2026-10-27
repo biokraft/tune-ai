@@ -367,6 +367,11 @@ impl LiveProcessor {
         self.sample_rate
     }
 
+    /// Swaps this processor has applied so far.
+    pub fn swaps_applied(&self) -> u64 {
+        self.engine.swaps_applied()
+    }
+
     /// What track `track` plays and what is cued for it, as of the last
     /// block (see [`Engine::session`]).
     pub fn session(&self, track: usize) -> Option<(TrackPlay, Option<Cued>)> {
