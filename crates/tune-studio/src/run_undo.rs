@@ -174,7 +174,9 @@ pub fn undo_run(
     };
     let mut waiting = Vec::new();
     for (unit, grouped) in units {
-        let decided: Vec<(&Plan, Decision)> = unit
+        // Each part's decision, and for a part the run changed, who last
+        // wrote it since (when the log says).
+        let decided: Vec<(&Plan, Decision, Option<Source>)> = unit
             .iter()
             .map(|&k| {
                 let p = &plans[k];
@@ -184,22 +186,51 @@ pub fn undo_run(
                 } else {
                     decide(doc, p, &foreign, records)
                 };
-                (p, decision)
+                let by = foreign.last().map(|&j| records[j].source);
+                (p, decision, by)
             })
             .collect();
         // The first kept part, if any: it keeps the whole unit.
-        let cause = decided.iter().find_map(|(_, d)| match d {
+        let cause = decided.iter().find_map(|(_, d, _)| match d {
             Decision::Already => None,
             Decision::Kept(kept) | Decision::Revert { kept, .. } => kept.first(),
         });
+        // A part of a group the run changed that is back at its value
+        // before the run was set back since (a rename's new name renamed
+        // again or removed): writing the rest back would put the old name
+        // beside what became of the new one, so the group is kept, naming
+        // who set it back (`None` when the log does not say).
+        let writes = decided
+            .iter()
+            .any(|(_, d, _)| matches!(d, Decision::Revert { .. }));
+        let set_back = |p: &Plan, d: &Decision| {
+            grouped && writes && matches!(d, Decision::Already) && changed(p)
+        };
+        let set_back_by = decided
+            .iter()
+            .find(|(p, d, _)| set_back(p, d))
+            .map(|(_, _, by)| *by);
         // A section edit is also kept when anyone has changed the
         // arrangement since: what they placed sits where the section put it.
         let forced = rearranged.filter(|_| unit.iter().any(|k| section.contains(k)));
-        let whole = cause.is_none() && forced.is_none();
-        let cause_by = cause.map_or(forced, |k| k.by);
+        let whole = cause.is_none() && forced.is_none() && set_back_by.is_none();
+        let cause_by = (cause.map(|k| k.by))
+            .or(forced.map(Some))
+            .or(set_back_by)
+            .flatten();
         let mut puts = Vec::new();
-        for (p, decision) in decided {
+        for (p, decision, by) in decided {
             match decision {
+                Decision::Already if set_back(p, &decision) => {
+                    out.kept
+                        .extend(changed_items(p).into_iter().map(|item| KeptTarget {
+                            target: p.target.clone(),
+                            item,
+                            reason: KeptReason::ChangedLater,
+                            by,
+                            message: None,
+                        }));
+                }
                 Decision::Already => out.already.push(p.target.clone()),
                 Decision::Kept(kept) => out.kept.extend(kept),
                 Decision::Revert { value, items, kept } if whole || !grouped => {
@@ -256,6 +287,31 @@ pub fn undo_run(
         }
     }
     Ok(out)
+}
+
+/// Whether the run changed `p`'s target: its value after the run's last
+/// change is not the one before its first.
+fn changed(p: &Plan) -> bool {
+    if is_list(&p.target) {
+        p.before != p.after
+    } else {
+        !approx(p, &p.before, &p.after)
+    }
+}
+
+/// The items the run changed in `p`'s target: each element it added or
+/// removed for a list, else the target itself (`None`).
+fn changed_items(p: &Plan) -> Vec<Option<Value>> {
+    if !is_list(&p.target) {
+        return vec![None];
+    }
+    let (before, after) = (elements(&p.before), elements(&p.after));
+    let added = minus(&after, &before);
+    added
+        .into_iter()
+        .chain(minus(&before, &after))
+        .map(Some)
+        .collect()
 }
 
 /// The other writes since the run first changed `p`'s target, and those

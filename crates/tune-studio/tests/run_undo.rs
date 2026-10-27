@@ -1618,3 +1618,93 @@ fn a_rename_and_a_section_edit_in_one_write_go_back_together() {
     let tracks: Vec<&String> = s.core.song().tracks.keys().collect();
     assert_eq!(tracks, ["kick", "lead", "hat"]);
 }
+
+// ----- review round 2: a rename whose new name was taken away later -----
+
+fn rename_track(track: &str, to: &str) -> Action {
+    Action::RenameTrack {
+        track: track.into(),
+        to: to.into(),
+    }
+}
+
+/// C1 (p48): the producer renamed the run's new track name again. The new
+/// name is gone as before the run, but the old one must not come back
+/// beside the producer's track.
+#[test]
+fn a_rename_the_producer_renamed_again_is_kept_whole() {
+    let mut s = open();
+    s.agent("r1", &[rename_track("acid", "lead")]);
+    s.human(rename_track("lead", "lead2"));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.already, vec![]);
+    let names = kept_targets(&u, Some(Source::Human));
+    for t in ["tracks.acid", "tracks.lead"] {
+        assert!(names.contains(&t.to_owned()), "{t}: {names:?}");
+    }
+    assert_eq!(s.text(), text);
+    let tracks: Vec<&String> = s.core.song().tracks.keys().collect();
+    assert_eq!(tracks, ["kick", "lead2", "hat"]);
+
+    // The same with the studio closed, the producer's rename logged.
+    let f = closed();
+    f.agent("r1", &[rename_track("acid", "lead")]);
+    apply_to_file(&f.path, &[rename_track("lead", "lead2")], &Origin::human()).unwrap();
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let names = kept_targets(&u, Some(Source::Human));
+    assert!(names.contains(&"tracks.acid".to_owned()), "{names:?}");
+    assert_eq!(f.text(), text);
+}
+
+/// C1 (p49): the producer removed the run's renamed track. It does not
+/// come back under its old name.
+#[test]
+fn a_rename_the_producer_removed_is_kept_whole() {
+    let mut s = open();
+    s.agent("r1", &[rename_track("acid", "lead")]);
+    s.human(Action::RemoveTrack {
+        track: "lead".into(),
+    });
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.already, vec![]);
+    let names = kept_targets(&u, Some(Source::Human));
+    for t in ["tracks.acid", "tracks.lead"] {
+        assert!(names.contains(&t.to_owned()), "{t}: {names:?}");
+    }
+    assert_eq!(s.text(), text);
+    let tracks: Vec<&String> = s.core.song().tracks.keys().collect();
+    assert_eq!(tracks, ["kick", "hat"]);
+}
+
+/// C1, a clip: an unplaced clip the run renamed and the producer renamed
+/// again does not come back under its old name. (A placed clip is kept by
+/// its placements already.)
+#[test]
+fn a_clip_rename_the_producer_renamed_again_is_kept_whole() {
+    let rename = |clip: &str, to: &str| Action::RenameClip {
+        clip: clip.into(),
+        to: to.into(),
+    };
+    let mut s = open();
+    s.human(Action::DuplicateClip {
+        clip: "h".into(),
+        to: "h2".into(),
+    });
+    s.agent("r1", &[rename("h2", "h3")]);
+    s.human(rename("h3", "h4"));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let names = kept_targets(&u, Some(Source::Human));
+    for t in ["clips.h2", "clips.h3"] {
+        assert!(names.contains(&t.to_owned()), "{t}: {names:?}");
+    }
+    assert_eq!(s.text(), text);
+    assert_eq!(s.value("clips.h2"), Value::Null);
+}
