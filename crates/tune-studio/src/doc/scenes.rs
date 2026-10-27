@@ -67,6 +67,8 @@ impl SongDoc {
     /// insertion (see [`tune_song::move_scene`]). Its table, the tables
     /// under it and the comments above it move as they are.
     pub fn move_scene(&mut self, scene: &str, index: usize) -> Result<(), EditError> {
+        // The model first, so a missing scene is said before a form.
+        let edited = tune_song::move_scene(&self.song, scene, index)?;
         self.check_scenes_form("move_scene")?;
         if let Some(Item::Table(scenes)) = self.doc.as_table().get("scenes")
             && scenes
@@ -77,7 +79,6 @@ impl SongDoc {
                 action: "move_scene",
             });
         }
-        let edited = tune_song::move_scene(&self.song, scene, index)?;
         let expected = edited.arranged.song;
         // Scene equality ignores order, so a move is checked by the keys.
         let after: Vec<String> = expected.scenes.keys().cloned().collect();
@@ -182,16 +183,16 @@ fn move_table(
     for (i, rank) in moved.iter().enumerate() {
         order.insert(insert_at + i, *rank);
     }
+    let mut placed = true;
     walk_mut(doc.as_table_mut(), &mut |t| {
         if let Some(p) = t.position() {
-            let new = order
-                .iter()
-                .position(|r| *r == p)
-                .expect("every rank is placed");
-            t.set_position(Some(
-                isize::try_from(new).expect("fewer tables than isize::MAX"),
-            ));
+            let new = order.iter().position(|r| *r == p);
+            placed &= new.is_some();
+            if let Some(new) = new.and_then(|n| isize::try_from(n).ok()) {
+                t.set_position(Some(new));
+            }
         }
     });
-    Some(())
+    // A table the walk met but the first pass did not is a bug, not a panic.
+    placed.then_some(())
 }

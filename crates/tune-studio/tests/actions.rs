@@ -2409,11 +2409,18 @@ fn scene_edits_work_on_other_written_forms() {
     // Scene entries as inline tables under a `[scenes]` header.
     let inline = SESSION
         .replace("# jam rows\n[scenes.groove]\nslots = { kick = \"k4\", acid = \"a1\" }\n\n# hats alone\n[scenes.break]\nslots = { hat = \"h\" }\n",
-                 "[scenes]\ngroove = { slots = { kick = \"k4\", acid = \"a1\" } }\nbreak = { slots = { hat = \"h\" } }\n");
+                 "[scenes]\ngroove = { slots = { kick = \"k4\", acid = \"a1\" } }\n# hats alone\nbreak = { slots = { hat = \"h\" } }\n");
     assert_ne!(inline, SESSION);
     let s = song_with(&inline);
     s.ok(add_scene("jam", Some(1)));
     assert_eq!(scene_ids(&s.song()), ["groove", "jam", "break"]);
+    assert!(
+        s.text().contains(
+            "[scenes]\ngroove = { slots = { kick = \"k4\", acid = \"a1\" } }\njam = {}\n# hats alone\nbreak = { slots = { hat = \"h\" } }\n"
+        ),
+        "{}",
+        s.text()
+    );
     s.ok(Action::RenameScene {
         scene: "jam".into(),
         to: "fill".into(),
@@ -2422,10 +2429,19 @@ fn scene_edits_work_on_other_written_forms() {
         scene: "groove".into(),
     });
     assert_eq!(scene_ids(&s.song()), ["fill", "break"]);
+    assert!(
+        s.text()
+            .contains("[scenes]\nfill = {}\n# hats alone\nbreak = { slots = { hat = \"h\" } }\n"),
+        "{}",
+        s.text()
+    );
+    comments_kept(&inline, &s.text(), &[]);
     assert_eq!(
         s.refused(move_scene("break", 0)),
         "`move_scene` needs each scene as its own [scenes.<id>] table; edit this form by hand"
     );
+    // A scene that is not there is said first.
+    assert_eq!(s.refused(move_scene("nope", 0)), "there is no scene `nope`");
 
     // A root inline table cannot take a new scene or a move either.
     let root = SESSION
@@ -2453,4 +2469,23 @@ fn scene_edits_work_on_other_written_forms() {
         "{}",
         s.text()
     );
+}
+
+#[test]
+fn a_scene_move_is_one_undo_step() {
+    let s = session();
+    let mut core = tune_studio::StudioCore::open(&s.path).expect("opens");
+    let out = core
+        .apply_now(&[move_scene("break", 0)], &Origin::claude(None))
+        .expect("moves");
+    assert_eq!(out.changes.len(), 1);
+    assert_eq!(out.changes[0].path.to_string(), "scenes");
+    assert_ne!(s.text(), SESSION);
+    let log = tune_studio::EditLog::for_song(&s.path)
+        .read_since(None)
+        .expect("read log");
+    let paths: Vec<_> = log.iter().map(|e| e.path.to_string()).collect();
+    assert_eq!(paths, ["scenes"]);
+    core.undo(tune_studio::Source::Human).expect("undoes");
+    assert_eq!(s.text(), SESSION);
 }
