@@ -38,6 +38,8 @@ enum Command {
     Changes(ChangesArgs),
     /// List every instrument and effect parameter.
     Params(JsonArgs),
+    /// List every action the studio runs, with its arguments.
+    Actions(JsonArgs),
     /// Measure loudness, balance and brightness, and draw a spectrogram.
     Analyze(AnalyzeArgs),
     /// Compare a render or song against a reference track.
@@ -471,6 +473,7 @@ fn main() -> ExitCode {
         }),
         Command::Refs(a) => cmd::refs::run(a.json),
         Command::Params(a) => cmd::params::run(a.json),
+        Command::Actions(a) => cmd::actions::run(a.json),
         Command::Render303(a) => finish(a.json, run(&a)),
     }
 }

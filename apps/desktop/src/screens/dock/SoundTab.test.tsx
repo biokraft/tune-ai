@@ -83,7 +83,10 @@ describe("SoundTab", () => {
     const { fired } = setup();
     fireEvent.click(screen.getByRole("radio", { name: "Hard" }));
     expect(fired).toEqual([
-      { cmd: "set_fx_mode", args: { track: "acid", device: "dist", mode: "hard" } },
+      {
+        cmd: "set_device_setting",
+        args: { track: "acid", device: "dist", setting: "mode", value: "hard" },
+      },
     ]);
   });
 

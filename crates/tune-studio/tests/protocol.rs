@@ -6,8 +6,8 @@ use std::collections::HashSet;
 
 use serde_json::{Value, json};
 use tune_studio::{
-    Change, Command, DrumHitDto, ErrorView, Event, ExternalChange, SongPath, Source, StudioCore,
-    StudioState,
+    ACTIONS, Action, Change, Command, DrumHitDto, ErrorView, Event, ExternalChange, SongPath,
+    Source, StudioCommand, StudioCore, StudioState, action_from_cli, find_action,
 };
 
 const GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/protocol.json");
@@ -17,82 +17,122 @@ const COMMENTED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/com
 /// compile error here until it gets a golden sample.
 fn wire_name(c: &Command) -> &'static str {
     match c {
-        Command::ListSongs => "list_songs",
-        Command::GetState => "get_state",
-        Command::OpenSong { .. } => "open_song",
-        Command::Play { .. } => "play",
-        Command::Stop => "stop",
-        Command::SeekBar { .. } => "seek_bar",
-        Command::SetLoop { .. } => "set_loop",
-        Command::SetParam { .. } => "set_param",
-        Command::SetFxMode { .. } => "set_fx_mode",
-        Command::SetAcidStep { .. } => "set_acid_step",
-        Command::SetDrumStep { .. } => "set_drum_step",
-        Command::MoveSection { .. } => "move_section",
-        Command::ResizeSection { .. } => "resize_section",
-        Command::DuplicateSection { .. } => "duplicate_section",
-        Command::DeleteSection { .. } => "delete_section",
-        Command::SetSectionPlay { .. } => "set_section_play",
-        Command::SetTrackMix { .. } => "set_track_mix",
-        Command::Undo => "undo",
-        Command::Redo => "redo",
-        Command::ResolveOffered { .. } => "resolve_offered",
+        Command::Studio(s) => match s {
+            StudioCommand::ListSongs => "list_songs",
+            StudioCommand::GetState => "get_state",
+            StudioCommand::OpenSong { .. } => "open_song",
+            StudioCommand::ResolveOffered { .. } => "resolve_offered",
+        },
+        Command::Action(a) => match a {
+            Action::Play { .. } => "play",
+            Action::Stop => "stop",
+            Action::SeekBar { .. } => "seek_bar",
+            Action::SetLoop { .. } => "set_loop",
+            Action::Undo => "undo",
+            Action::Redo => "redo",
+            Action::SetValue { .. } => "set_value",
+            Action::SetParam { .. } => "set_param",
+            Action::SetDeviceSetting { .. } => "set_device_setting",
+            Action::SetAcidStep { .. } => "set_acid_step",
+            Action::SetDrumStep { .. } => "set_drum_step",
+            Action::MoveSection { .. } => "move_section",
+            Action::ResizeSection { .. } => "resize_section",
+            Action::DuplicateSection { .. } => "duplicate_section",
+            Action::DeleteSection { .. } => "delete_section",
+            Action::SetSectionPlay { .. } => "set_section_play",
+            Action::SetTrackMix { .. } => "set_track_mix",
+        },
     }
 }
 
+/// Why a command cannot be given to `tune do`, or `None` when it can. The
+/// exhaustive match names every exemption (spec §8.1); there are no others.
+fn exemption(c: &Command) -> Option<&'static str> {
+    match c {
+        Command::Studio(s) => Some(match s {
+            StudioCommand::GetState => "the CLI reads the file and `tune info`",
+            StudioCommand::ListSongs | StudioCommand::OpenSong { .. } => {
+                "the CLI names the song file"
+            }
+            StudioCommand::ResolveOffered { .. } => "the conflict prompt only a human sees",
+        }),
+        Command::Action(Action::SetParam { commit: false, .. }) => {
+            Some("a knob preview during a drag; the agent sets the final value")
+        }
+        Command::Action(_) => None,
+    }
+}
+
+/// One sample of every studio command, then one of every action in catalog
+/// order.
 fn sample_commands() -> Vec<Command> {
-    vec![
-        Command::ListSongs,
-        Command::GetState,
-        Command::OpenSong {
+    let studio = [
+        StudioCommand::ListSongs,
+        StudioCommand::GetState,
+        StudioCommand::OpenSong {
             path: "songs/mini/song.toml".into(),
         },
-        Command::Play { from_bar: Some(4) },
-        Command::Stop,
-        Command::SeekBar { bar: 8 },
-        Command::SetLoop { bars: Some([2, 6]) },
-        Command::SetParam {
+        StudioCommand::ResolveOffered { reapply: true },
+    ];
+    studio
+        .into_iter()
+        .map(Command::Studio)
+        .chain(sample_actions().into_iter().map(Command::Action))
+        .collect()
+}
+
+fn sample_actions() -> Vec<Action> {
+    vec![
+        Action::Play { from_bar: Some(4) },
+        Action::Stop,
+        Action::SeekBar { bar: 8 },
+        Action::SetLoop { bars: Some([2, 6]) },
+        Action::Undo,
+        Action::Redo,
+        Action::SetValue {
+            path: "tracks.acid.acid303.cutoff".parse().expect("sample path"),
+            value: json!(820),
+        },
+        Action::SetParam {
             track: "acid".into(),
             param: "acid303.cutoff".into(),
             value: 820.0,
             commit: true,
         },
-        Command::SetFxMode {
+        Action::SetDeviceSetting {
             track: "acid".into(),
             device: "dist".into(),
-            mode: "hard".into(),
+            setting: "mode".into(),
+            value: "hard".into(),
         },
-        Command::SetAcidStep {
-            pattern: "a1".into(),
+        Action::SetAcidStep {
+            clip: "a1".into(),
             index: 3,
             note: Some(36),
             accent: true,
             slide: false,
         },
-        Command::SetDrumStep {
-            pattern: "k4".into(),
+        Action::SetDrumStep {
+            clip: "k4".into(),
             index: 5,
             hit: DrumHitDto::Accent,
         },
-        Command::MoveSection { from: 0, to: 2 },
-        Command::ResizeSection { index: 1, bars: 4 },
-        Command::DuplicateSection { index: 1 },
-        Command::DeleteSection { index: 0 },
-        Command::SetSectionPlay {
+        Action::MoveSection { from: 0, to: 2 },
+        Action::ResizeSection { index: 1, bars: 4 },
+        Action::DuplicateSection { index: 1 },
+        Action::DeleteSection { index: 0 },
+        Action::SetSectionPlay {
             section: 1,
             track: "kick".into(),
-            pattern: None,
+            clip: None,
         },
-        Command::SetTrackMix {
+        Action::SetTrackMix {
             track: "hat".into(),
             gain_db: Some(-8.5),
             pan: None,
             mute: Some(true),
             solo: Some(false),
         },
-        Command::Undo,
-        Command::Redo,
-        Command::ResolveOffered { reapply: true },
     ]
 }
 
@@ -194,9 +234,11 @@ fn commands_round_trip() {
     let golden = read_golden();
     let commands = golden["commands"].as_array().expect("commands array");
     assert_eq!(commands.len(), sample_commands().len());
-    for raw in commands {
+    for (raw, sample) in commands.iter().zip(sample_commands()) {
         let cmd: Command = serde_json::from_value(raw.clone())
             .unwrap_or_else(|e| panic!("`{raw}` does not parse: {e}"));
+        // A studio command parses as one, an action as an action.
+        assert_eq!(cmd, sample);
         assert_eq!(&serde_json::to_value(&cmd).expect("reserialize"), raw);
     }
 }
@@ -217,4 +259,72 @@ fn every_event_has_a_distinct_tag() {
         .map(|e| serde_json::to_value(e).unwrap()["event"].to_string())
         .collect();
     assert_eq!(tags.len(), 5);
+}
+
+#[test]
+fn every_protocol_action_is_reachable_from_tune_do() {
+    let preview = Command::Action(Action::SetParam {
+        track: "acid".into(),
+        param: "acid303.cutoff".into(),
+        value: 640.0,
+        commit: false,
+    });
+    for cmd in sample_commands().into_iter().chain([preview.clone()]) {
+        if let Some(reason) = exemption(&cmd) {
+            assert!(!reason.is_empty());
+            continue;
+        }
+        let Command::Action(a) = &cmd else {
+            panic!("{cmd:?} is neither exempt nor an action");
+        };
+        let args = a.to_cli_args();
+        assert_eq!(
+            action_from_cli(a.name(), &args).as_ref(),
+            Ok(a),
+            "{} {args:?}",
+            a.name()
+        );
+    }
+    // The knob preview is exempt, and `tune do` refuses it.
+    assert!(exemption(&preview).is_some());
+    let Command::Action(a) = &preview else {
+        unreachable!()
+    };
+    assert!(action_from_cli(a.name(), &a.to_cli_args()).is_err());
+}
+
+#[test]
+fn the_catalog_matches_the_enum() {
+    let actions = sample_actions();
+    let names: Vec<&str> = ACTIONS.iter().map(|s| s.name).collect();
+    let samples: Vec<&str> = actions.iter().map(Action::name).collect();
+    assert_eq!(names, samples);
+    for a in &actions {
+        let spec = a.spec();
+        assert_eq!(spec.name, a.name());
+        assert_eq!(find_action(a.name()).map(|s| s.name), Some(a.name()));
+        let wire = serde_json::to_value(a).expect("serialize an action");
+        let keys: Vec<String> = wire
+            .get("args")
+            .and_then(Value::as_object)
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default();
+        let spec_names: Vec<&str> = spec.args.iter().map(|g| g.name).collect();
+        for k in &keys {
+            assert!(
+                spec_names.contains(&k.as_str()),
+                "`{}` sends `{k}`, which its spec lacks",
+                a.name()
+            );
+        }
+        for arg in spec.args.iter().filter(|g| g.required) {
+            assert!(
+                keys.iter().any(|k| k == arg.name),
+                "`{}` lacks its required `{}`",
+                a.name(),
+                arg.name
+            );
+        }
+    }
+    assert!(find_action("nope").is_none());
 }

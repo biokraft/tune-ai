@@ -356,7 +356,7 @@ describe("App", () => {
     expect(within(drums).getByRole("group", { name: "hat" })).toBeInTheDocument();
     fireEvent.click(within(drums).getByRole("button", { name: "kick step 2: rest" }));
     expect(client.named("set_drum_step")).toEqual([
-      { cmd: "set_drum_step", args: { pattern: "k4", index: 1, hit: "hit" } },
+      { cmd: "set_drum_step", args: { clip: "k4", index: 1, hit: "hit" } },
     ]);
   });
 

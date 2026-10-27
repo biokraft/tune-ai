@@ -1,4 +1,4 @@
-// Hand-written mirror of the studio wire protocol (crates/tune-studio: command.rs,
+// Hand-written mirror of the studio wire protocol (crates/tune-studio: command.rs, action/,
 // view.rs, studio.rs, core.rs). The golden file crates/tune-studio/tests/fixtures/protocol.json
 // pins the format for both sides; protocol.test.ts checks the names against it.
 import type { AcidStep, DrumHit, ParamSpecView, PlacementView, SectionView } from "@tune/ui";
@@ -6,6 +6,7 @@ import type { AcidStep, DrumHit, ParamSpecView, PlacementView, SectionView } fro
 // ---- Commands -------------------------------------------------------------------------------
 
 export type Command =
+  // Studio commands: only a studio client sends them.
   | { cmd: "list_songs" }
   /**
    * Resolves with the current `StudioState`; changes nothing. A migration the studio could not
@@ -13,34 +14,43 @@ export type Command =
    */
   | { cmd: "get_state" }
   | { cmd: "open_song"; args: { path: string } }
+  | { cmd: "resolve_offered"; args: { reapply: boolean } }
+  // Actions: `tune do` runs the same ones (`tune actions` lists them).
   /** `from_bar` is 0-based; null starts at the cursor. */
   | { cmd: "play"; args: { from_bar: number | null } }
   | { cmd: "stop" }
   | { cmd: "seek_bar"; args: { bar: number } }
   /** Half-open `[start, end)`, 0-based; null stops looping. */
   | { cmd: "set_loop"; args: { bars: [number, number] | null } }
+  | { cmd: "undo" }
+  | { cmd: "redo" }
+  /** Sets the value at an edit path (`tracks.acid.acid303.cutoff`), as `tune set` does. */
+  | { cmd: "set_value"; args: { path: string; value: Json } }
   | {
       cmd: "set_param";
       args: { track: string; param: string; value: number; commit: boolean };
     }
-  /** Sets the mode of the track's fx device `device` (its id, e.g. `dist`). */
-  | { cmd: "set_fx_mode"; args: { track: string; device: string; mode: string } }
+  /** Sets a setting (e.g. `mode`) of the track's device `device` (its id, e.g. `dist`). */
+  | {
+      cmd: "set_device_setting";
+      args: { track: string; device: string; setting: string; value: string };
+    }
   | {
       cmd: "set_acid_step";
       args: {
-        pattern: string;
+        clip: string;
         index: number;
         note: number | null;
         accent: boolean;
         slide: boolean;
       };
     }
-  | { cmd: "set_drum_step"; args: { pattern: string; index: number; hit: DrumHit } }
+  | { cmd: "set_drum_step"; args: { clip: string; index: number; hit: DrumHit } }
   | { cmd: "move_section"; args: { from: number; to: number } }
   | { cmd: "resize_section"; args: { index: number; bars: number } }
   | { cmd: "duplicate_section"; args: { index: number } }
   | { cmd: "delete_section"; args: { index: number } }
-  | { cmd: "set_section_play"; args: { section: number; track: string; pattern: string | null } }
+  | { cmd: "set_section_play"; args: { section: number; track: string; clip: string | null } }
   | {
       cmd: "set_track_mix";
       args: {
@@ -50,21 +60,22 @@ export type Command =
         mute: boolean | null;
         solo: boolean | null;
       };
-    }
-  | { cmd: "undo" }
-  | { cmd: "redo" }
-  | { cmd: "resolve_offered"; args: { reapply: boolean } };
+    };
 
 export const COMMAND_NAMES = [
   "list_songs",
   "get_state",
   "open_song",
+  "resolve_offered",
   "play",
   "stop",
   "seek_bar",
   "set_loop",
+  "undo",
+  "redo",
+  "set_value",
   "set_param",
-  "set_fx_mode",
+  "set_device_setting",
   "set_acid_step",
   "set_drum_step",
   "move_section",
@@ -73,9 +84,6 @@ export const COMMAND_NAMES = [
   "delete_section",
   "set_section_play",
   "set_track_mix",
-  "undo",
-  "redo",
-  "resolve_offered",
 ] as const satisfies readonly Command["cmd"][];
 
 // Compile-time check that COMMAND_NAMES covers every Command variant.

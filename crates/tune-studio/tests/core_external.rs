@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use serde_json::json;
 use tune_studio::{
-    Command, EditEntry, EditLog, SongPath, Source, StudioCore, StudioError, set_paths,
+    Action, EditEntry, EditLog, SongPath, Source, StudioCore, StudioError, set_paths,
 };
 
 const FIXTURE: &str = include_str!("fixtures/commented.toml");
@@ -42,8 +42,8 @@ fn log(s: &Song) -> Vec<EditEntry> {
         .expect("read log")
 }
 
-fn cutoff(value: f64) -> Command {
-    Command::SetParam {
+fn cutoff(value: f64) -> Action {
+    Action::SetParam {
         track: "acid".into(),
         param: "acid303.cutoff".into(),
         value,
@@ -136,11 +136,8 @@ fn resize_merges_with_an_edit_of_a_later_partial_placement() {
     let s = song();
     fs::write(&s.path, &partial).unwrap();
     let mut core = open(&s);
-    core.apply_edit(
-        &Command::ResizeSection { index: 0, bars: 6 },
-        Instant::now(),
-    )
-    .unwrap();
+    core.apply_edit(&Action::ResizeSection { index: 0, bars: 6 }, Instant::now())
+        .unwrap();
     let text = partial.replacen("bars = 1, offset = 1 }", "bars = 1 }", 1);
     fs::write(&s.path, &text).unwrap();
 
@@ -296,7 +293,7 @@ fn merge_keeps_both_sides() {
 fn pending_section_move_merges() {
     let s = song();
     let mut core = open(&s);
-    core.apply_edit(&Command::MoveSection { from: 1, to: 0 }, Instant::now())
+    core.apply_edit(&Action::MoveSection { from: 1, to: 0 }, Instant::now())
         .unwrap();
     let text = bpm_121(FIXTURE);
     fs::write(&s.path, &text).unwrap();
@@ -346,7 +343,7 @@ fn conflict_and_merge_together() {
     let mut core = open(&s);
     let t0 = Instant::now();
     core.apply_edit(&cutoff(820.0), t0).unwrap();
-    core.apply_edit(&Command::ResizeSection { index: 0, bars: 4 }, t0)
+    core.apply_edit(&Action::ResizeSection { index: 0, bars: 4 }, t0)
         .unwrap();
     let text = FIXTURE.replace(CUTOFF_500, "\"acid303.cutoff\" = 700");
     fs::write(&s.path, &text).unwrap();

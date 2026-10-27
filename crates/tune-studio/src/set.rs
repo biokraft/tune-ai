@@ -7,6 +7,7 @@ use std::path::Path;
 use serde_json::Value;
 use tune_song::{FORMAT_VERSION, Migration};
 
+use crate::action::parse_value;
 use crate::diff::{Change, diff_songs, version_change};
 use crate::doc::SongDoc;
 use crate::error::{ErrorView, StudioError};
@@ -42,33 +43,6 @@ fn looks_like_track_field(path: &str) -> bool {
         .is_some_and(|(track, field)| {
             !track.is_empty() && !field.is_empty() && !field.contains('.')
         })
-}
-
-fn parse_value(text: &str) -> Value {
-    if text.is_empty() {
-        return Value::Null;
-    }
-    text.parse::<toml_edit::Value>()
-        .ok()
-        .and_then(|v| from_toml(&v))
-        .unwrap_or_else(|| Value::String(text.to_owned()))
-}
-
-fn from_toml(v: &toml_edit::Value) -> Option<Value> {
-    use toml_edit::Value as T;
-    Some(match v {
-        T::String(s) => Value::String(s.value().clone()),
-        T::Integer(i) => Value::from(*i.value()),
-        T::Float(f) => serde_json::Number::from_f64(*f.value())?.into(),
-        T::Boolean(b) => Value::Bool(*b.value()),
-        T::Array(a) => Value::Array(a.iter().map(from_toml).collect::<Option<_>>()?),
-        T::InlineTable(t) => Value::Object(
-            t.iter()
-                .map(|(k, v)| Some((k.to_owned(), from_toml(v)?)))
-                .collect::<Option<_>>()?,
-        ),
-        T::Datetime(_) => return None,
-    })
 }
 
 /// What a [`set_paths`] call changed.

@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tune_studio::{
-    Command, DrumHitDto, EditEntry, EditError, EditLog, Source, StudioCore, StudioError, text_hash,
+    Action, Command, DrumHitDto, EditEntry, EditError, EditLog, Source, StudioCommand, StudioCore,
+    StudioError, text_hash,
 };
 
 const FIXTURE: &str = include_str!("fixtures/commented.toml");
@@ -41,8 +42,8 @@ fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
 }
 
-fn cutoff(value: f64) -> Command {
-    Command::SetParam {
+fn cutoff(value: f64) -> Action {
+    Action::SetParam {
         track: "acid".into(),
         param: "acid303.cutoff".into(),
         value,
@@ -50,9 +51,9 @@ fn cutoff(value: f64) -> Command {
     }
 }
 
-fn drum_step(index: usize, hit: DrumHitDto) -> Command {
-    Command::SetDrumStep {
-        pattern: "h".into(),
+fn drum_step(index: usize, hit: DrumHitDto) -> Action {
+    Action::SetDrumStep {
+        clip: "h".into(),
         index,
         hit,
     }
@@ -71,7 +72,7 @@ fn edit_pending_until_debounce() {
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].path.to_string(), "tracks.acid.acid303.cutoff");
     assert_eq!(core.pending().len(), 1);
-    assert_eq!(core.pending()[0].command, cutoff(820.0));
+    assert_eq!(core.pending()[0].action, cutoff(820.0));
     assert_eq!(core.pending()[0].changes, changes);
 
     assert_eq!(disk(&s), FIXTURE, "nothing is written before the flush");
@@ -245,7 +246,7 @@ fn knob_value_rounded() {
 fn mix_numbers_rounded() {
     let s = song();
     let mut core = open(&s);
-    let cmd = Command::SetTrackMix {
+    let cmd = Action::SetTrackMix {
         track: "hat".into(),
         gain_db: Some(-6.123456),
         pan: Some(-0.333333),
@@ -261,28 +262,36 @@ fn mix_numbers_rounded() {
 
 #[test]
 fn commands_map_to_paths() {
-    let set_param = |param: &str, value: f64| Command::SetParam {
+    let set_param = |param: &str, value: f64| Action::SetParam {
         track: "acid".into(),
         param: param.into(),
         value,
         commit: true,
     };
-    let cases: Vec<(Command, Vec<&str>)> = vec![
+    let cases: Vec<(Action, Vec<&str>)> = vec![
         (
             set_param("acid303.resonance", 80.0),
             vec!["tracks.acid.acid303.resonance"],
         ),
         (
-            Command::SetFxMode {
+            Action::SetValue {
+                path: "tracks.acid.dist.drive".parse().unwrap(),
+                value: json!(18),
+            },
+            vec!["tracks.acid.dist.drive"],
+        ),
+        (
+            Action::SetDeviceSetting {
                 track: "acid".into(),
                 device: "dist".into(),
-                mode: "hard".into(),
+                setting: "mode".into(),
+                value: "hard".into(),
             },
             vec!["tracks.acid.dist.mode"],
         ),
         (
-            Command::SetAcidStep {
-                pattern: "a1".into(),
+            Action::SetAcidStep {
+                clip: "a1".into(),
                 index: 0,
                 note: Some(48),
                 accent: true,
@@ -291,24 +300,24 @@ fn commands_map_to_paths() {
             vec!["clips.a1.steps"],
         ),
         (drum_step(0, DrumHitDto::Accent), vec!["clips.h.steps"]),
-        (Command::MoveSection { from: 1, to: 0 }, vec!["sections"]),
-        (Command::DuplicateSection { index: 0 }, vec!["sections"]),
-        (Command::DeleteSection { index: 0 }, vec!["sections"]),
+        (Action::MoveSection { from: 1, to: 0 }, vec!["sections"]),
+        (Action::DuplicateSection { index: 0 }, vec!["sections"]),
+        (Action::DeleteSection { index: 0 }, vec!["sections"]),
         (
             // Section `b`'s lane stretch moves with it, unchanged within `b`.
-            Command::ResizeSection { index: 0, bars: 8 },
+            Action::ResizeSection { index: 0, bars: 8 },
             vec!["sections[0].bars"],
         ),
         (
-            Command::SetSectionPlay {
+            Action::SetSectionPlay {
                 section: 0,
                 track: "acid".into(),
-                pattern: Some("a1".into()),
+                clip: Some("a1".into()),
             },
             vec!["sections[0].play.acid"],
         ),
         (
-            Command::SetTrackMix {
+            Action::SetTrackMix {
                 track: "hat".into(),
                 gain_db: Some(-6.0),
                 pan: None,
@@ -327,11 +336,11 @@ fn commands_map_to_paths() {
         let paths: Vec<String> = changes.iter().map(|c| c.path.to_string()).collect();
         assert_eq!(paths, expected, "{cmd:?}");
         match &cmd {
-            Command::SetAcidStep { .. } => {
+            Action::SetAcidStep { .. } => {
                 let new = changes[0].new.as_str().unwrap();
                 assert!(new.starts_with("C3! "), "{new}");
             }
-            Command::SetDrumStep { .. } => {
+            Action::SetDrumStep { .. } => {
                 let new = changes[0].new.as_str().unwrap();
                 assert!(new.starts_with("X.x."), "{new}");
             }
@@ -356,10 +365,11 @@ fn set_fx_mode_reaches_the_named_device() {
     );
     let s = song_with(&text);
     let mut core = open(&s);
-    let mode = |device: &str| Command::SetFxMode {
+    let mode = |device: &str| Action::SetDeviceSetting {
         track: "acid".into(),
         device: device.into(),
-        mode: "hard".into(),
+        setting: "mode".into(),
+        value: "hard".into(),
     };
     let changes = core.apply_edit(&mode("dist2"), Instant::now()).unwrap();
     let paths: Vec<String> = changes.iter().map(|c| c.path.to_string()).collect();
@@ -377,23 +387,22 @@ fn set_fx_mode_reaches_the_named_device() {
 fn non_edits_are_refused() {
     let s = song();
     let mut core = open(&s);
-    let live_drag = Command::SetParam {
+    let live_drag = Action::SetParam {
         track: "acid".into(),
         param: "acid303.cutoff".into(),
         value: 900.0,
         commit: false,
     };
+    // Studio commands (song choice, conflict prompt) are no actions at
+    // all, so they cannot reach `apply_edit`.
     for cmd in [
         live_drag,
-        Command::ListSongs,
-        Command::OpenSong { path: "x".into() },
-        Command::Play { from_bar: None },
-        Command::Stop,
-        Command::SeekBar { bar: 1 },
-        Command::SetLoop { bars: None },
-        Command::Undo,
-        Command::Redo,
-        Command::ResolveOffered { reapply: true },
+        Action::Play { from_bar: None },
+        Action::Stop,
+        Action::SeekBar { bar: 1 },
+        Action::SetLoop { bars: None },
+        Action::Undo,
+        Action::Redo,
     ] {
         assert_eq!(
             core.apply_edit(&cmd, Instant::now()),
@@ -415,8 +424,8 @@ fn step_index_out_of_range() {
             len: 16
         }))
     );
-    let acid = Command::SetAcidStep {
-        pattern: "a1".into(),
+    let acid = Action::SetAcidStep {
+        clip: "a1".into(),
         index: 8,
         note: None,
         accent: false,
@@ -438,7 +447,7 @@ fn failed_mix_edit_changes_nothing() {
     let s = song();
     let mut core = open(&s);
     // The gain is fine, the pan is out of range: neither is applied.
-    let cmd = Command::SetTrackMix {
+    let cmd = Action::SetTrackMix {
         track: "hat".into(),
         gain_db: Some(-6.0),
         pan: Some(5.0),
@@ -585,34 +594,44 @@ fn view_describes_the_song() {
 fn command_serde_form() {
     let cmd = cutoff(820.0);
     assert_eq!(
-        serde_json::to_value(&cmd).unwrap(),
+        serde_json::to_value(Command::from(cmd)).unwrap(),
         json!({"cmd": "set_param", "args": {"track": "acid", "param": "acid303.cutoff", "value": 820.0, "commit": true}})
     );
     assert_eq!(
-        serde_json::to_value(Command::ListSongs).unwrap(),
+        serde_json::to_value(Command::Studio(StudioCommand::ListSongs)).unwrap(),
         json!({"cmd": "list_songs"})
     );
     let parsed: Command = serde_json::from_value(
-        json!({"cmd": "set_drum_step", "args": {"pattern": "h", "index": 3, "hit": "accent"}}),
+        json!({"cmd": "set_drum_step", "args": {"clip": "h", "index": 3, "hit": "accent"}}),
     )
     .unwrap();
-    assert_eq!(parsed, drum_step(3, DrumHitDto::Accent));
+    assert_eq!(parsed, Command::Action(drum_step(3, DrumHitDto::Accent)));
     let mix: Command = serde_json::from_value(
         json!({"cmd": "set_track_mix", "args": {"track": "hat", "mute": true}}),
     )
     .unwrap();
     assert_eq!(
         mix,
-        Command::SetTrackMix {
+        Command::Action(Action::SetTrackMix {
             track: "hat".into(),
             gain_db: None,
             pan: None,
             mute: Some(true),
             solo: None
-        }
+        })
     );
     let undo: Command = serde_json::from_value(json!({"cmd": "undo"})).unwrap();
-    assert_eq!(undo, Command::Undo);
+    assert_eq!(undo, Command::Action(Action::Undo));
+    let list: Command = serde_json::from_value(json!({"cmd": "list_songs"})).unwrap();
+    assert_eq!(list, Command::Studio(StudioCommand::ListSongs));
+    // A knob value without `commit` commits.
+    let knob: Command = serde_json::from_value(
+        json!({"cmd": "set_param", "args": {"track": "acid", "param": "acid303.cutoff", "value": 820.0}}),
+    )
+    .unwrap();
+    assert_eq!(knob, Command::Action(cutoff(820.0)));
+    let unknown = serde_json::from_value::<Command>(json!({"cmd": "set_fx_mode"})).unwrap_err();
+    assert!(unknown.to_string().contains("unknown variant"), "{unknown}");
 }
 
 // ----- the mixer -----
@@ -632,7 +651,7 @@ fn set_param_on_mix_commits() {
     let s = song();
     let mut core = open(&s);
     let t0 = Instant::now();
-    let reverb = Command::SetParam {
+    let reverb = Action::SetParam {
         track: "mix".into(),
         param: "reverb.size".into(),
         value: 42.0,
@@ -662,7 +681,7 @@ fn set_param_on_mix_commits() {
     );
 
     // A strip knob on a track goes to the track's params.
-    let send = Command::SetParam {
+    let send = Action::SetParam {
         track: "hat".into(),
         param: "send.reverb".into(),
         value: -20.0,
@@ -673,7 +692,7 @@ fn set_param_on_mix_commits() {
     assert_eq!(core.song().tracks["hat"].strip["send.reverb"], -20.0);
 
     // An unknown mix id is refused.
-    let bad = Command::SetParam {
+    let bad = Action::SetParam {
         track: "mix".into(),
         param: "reverb.sise".into(),
         value: 1.0,
@@ -931,7 +950,7 @@ fn resize_out_of_range_is_refused() {
     let mut core = open(&s);
     for bars in [0, 2000] {
         let err = core
-            .apply_edit(&Command::ResizeSection { index: 0, bars }, Instant::now())
+            .apply_edit(&Action::ResizeSection { index: 0, bars }, Instant::now())
             .unwrap_err();
         assert_eq!(
             err,

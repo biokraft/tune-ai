@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+mod action;
 mod command;
 mod core;
 mod diff;
@@ -20,7 +21,11 @@ mod set;
 mod studio;
 mod view;
 
-pub use command::{Command, DrumHitDto};
+pub use action::{
+    ACTIONS, Action, ActionKind, ActionSpec, ArgSpec, ArgType, DrumHitDto, action_from_cli,
+    find_action, parse_value,
+};
+pub use command::{Command, StudioCommand};
 pub use core::{
     ExternalChange, OWN_WRITE_RING, PendingEdit, StudioCore, UNDO_DEPTH, UndoEntry, WRITE_DEBOUNCE,
 };

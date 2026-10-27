@@ -167,7 +167,7 @@ function TrackHeader({ song, track, tab, section, fire, onAction, onClose }: Tra
             track={track.id}
             section={section}
             onPick={(p) =>
-              fire({ cmd: "set_section_play", args: { section, track: track.id, pattern: p } })
+              fire({ cmd: "set_section_play", args: { section, track: track.id, clip: p } })
             }
           />
           {uses > 1 && <span className="badge flex-none">×{uses}</span>}

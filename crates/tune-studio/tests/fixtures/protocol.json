@@ -13,6 +13,12 @@
       }
     },
     {
+      "cmd": "resolve_offered",
+      "args": {
+        "reapply": true
+      }
+    },
+    {
       "cmd": "play",
       "args": {
         "from_bar": 4
@@ -37,6 +43,19 @@
       }
     },
     {
+      "cmd": "undo"
+    },
+    {
+      "cmd": "redo"
+    },
+    {
+      "cmd": "set_value",
+      "args": {
+        "path": "tracks.acid.acid303.cutoff",
+        "value": 820
+      }
+    },
+    {
       "cmd": "set_param",
       "args": {
         "track": "acid",
@@ -46,17 +65,18 @@
       }
     },
     {
-      "cmd": "set_fx_mode",
+      "cmd": "set_device_setting",
       "args": {
         "track": "acid",
         "device": "dist",
-        "mode": "hard"
+        "setting": "mode",
+        "value": "hard"
       }
     },
     {
       "cmd": "set_acid_step",
       "args": {
-        "pattern": "a1",
+        "clip": "a1",
         "index": 3,
         "note": 36,
         "accent": true,
@@ -66,7 +86,7 @@
     {
       "cmd": "set_drum_step",
       "args": {
-        "pattern": "k4",
+        "clip": "k4",
         "index": 5,
         "hit": "accent"
       }
@@ -102,7 +122,7 @@
       "args": {
         "section": 1,
         "track": "kick",
-        "pattern": null
+        "clip": null
       }
     },
     {
@@ -113,18 +133,6 @@
         "pan": null,
         "mute": true,
         "solo": false
-      }
-    },
-    {
-      "cmd": "undo"
-    },
-    {
-      "cmd": "redo"
-    },
-    {
-      "cmd": "resolve_offered",
-      "args": {
-        "reapply": true
       }
     }
   ],
