@@ -7,15 +7,17 @@
 //! the other `fx` entries keep their bytes.
 
 use serde_json::Value as Json;
-use toml_edit::{Decor, DocumentMut, InlineTable, Item, Key, Table, Value};
+use toml_edit::{ArrayOfTables, Decor, DocumentMut, InlineTable, Item, Key, Table, Value};
 use tune_song::toml_doc::{Slot, normalize_positions, reshape, root_child, walk, walk_mut};
 use tune_song::{
-    Clip, ClipKind, Device, EditOpError, Edited, Lane, LaneOrigin, Placement, Registry, Removed,
-    Track, clip_table_toml, fx_entry_toml, parse, track_table_toml,
+    Arranged, Clip, ClipKind, Device, EditOpError, Edited, Lane, LaneOrigin, Placement, Registry,
+    Removed, Section, Song, Track, clip_table_toml, fx_entry_toml, parse, track_table_toml,
 };
 
 use super::arrange::{block_start, rerank, write_automation, write_plays};
-use super::{EditError, SongDoc, fx_table, notes_value, put_instrument_setting, track_table};
+use super::{
+    EditError, SongDoc, fx_table, notes_value, put_instrument_setting, toml_number, track_table,
+};
 
 impl SongDoc {
     /// Appends track `track` playing a new `module` instrument (see
@@ -163,7 +165,8 @@ impl SongDoc {
         let mut trial = self.doc.clone();
         let broken =
             || EditError::Internal("the edit could not be written into the file".to_owned());
-        insert_table(&mut trial, "clips", clip, &text, None, CLIP_ANCHORS).ok_or_else(broken)?;
+        insert_table(&mut trial, "clips", clip, &text, Place::Last, CLIP_ANCHORS)
+            .ok_or_else(broken)?;
         let made = parse(&trial.to_string())
             .map_err(EditError::Invalid)?
             .song
@@ -173,7 +176,7 @@ impl SongDoc {
             .ok_or_else(broken)?;
         let edited = tune_song::add_clip(&self.song, clip, made)?;
         self.write_edited(edited, |doc| {
-            insert_table(doc, "clips", clip, &text, None, CLIP_ANCHORS)
+            insert_table(doc, "clips", clip, &text, Place::Last, CLIP_ANCHORS)
         })?;
         Ok(())
     }
@@ -231,7 +234,7 @@ impl SongDoc {
             ),
         };
         self.write_edited(edited, |doc| {
-            insert_table(doc, "clips", to, &text, Some(clip), CLIP_ANCHORS)
+            insert_table(doc, "clips", to, &text, Place::After(clip), CLIP_ANCHORS)
         })?;
         Ok(())
     }
@@ -359,6 +362,20 @@ impl SongDoc {
         edited: Edited,
         write: impl FnOnce(&mut DocumentMut) -> Option<()>,
     ) -> Result<Removed, EditError> {
+        // A new stretch is laid out among the section tables, as a section
+        // operation lays out its own.
+        let relayout = edited.arranged.lanes.contains(&LaneOrigin::New);
+        self.write_laid_out(edited, relayout, write)
+    }
+
+    /// [`write_edited`](Self::write_edited), laying the stretch tables out
+    /// among the section tables again when `relayout`.
+    fn write_laid_out(
+        &mut self,
+        edited: Edited,
+        relayout: bool,
+        write: impl FnOnce(&mut DocumentMut) -> Option<()>,
+    ) -> Result<Removed, EditError> {
         let Edited { arranged, removed } = edited;
         if arranged.song == self.song {
             return Ok(removed);
@@ -368,10 +385,7 @@ impl SongDoc {
         let mut doc = self.doc.clone();
         write(&mut doc).ok_or_else(broken)?;
         if arranged.song.automation != self.song.automation {
-            // A new stretch is laid out among the section tables, as a
-            // section operation lays out its own.
-            let new_tables = arranged.lanes.contains(&LaneOrigin::New);
-            let start = if new_tables {
+            let start = if relayout {
                 normalize_positions(&mut doc);
                 block_start(&doc)
             } else {
@@ -385,6 +399,339 @@ impl SongDoc {
         self.commit_as(doc, Some(&arranged.song))?;
         Ok(removed)
     }
+}
+
+/// A clip as [`SongDoc::put`] writes it: its kind, then `steps`, `bars`
+/// and `notes` as [`new_clip_table`] takes them.
+pub(crate) type ClipSpec<'a> = (ClipKind, Option<&'a str>, Option<u32>, Option<&'a Json>);
+
+/// The writers of [`SongDoc::put`]: each builds the song with one target
+/// replaced, writes that into the text with the writers above and commits
+/// it through [`write_edited`](SongDoc::write_edited), with none of the
+/// clean-up the edit actions do.
+impl SongDoc {
+    /// Removes track `id`'s table (`None`), or writes `track` as track `id`
+    /// at `index` of the tracks (replacing the one there), in the minimal
+    /// layout.
+    pub(crate) fn put_track(
+        &mut self,
+        id: &str,
+        track: Option<(usize, Track)>,
+    ) -> Result<(), EditError> {
+        let mut song = self.song.clone();
+        let existed = song.tracks.shift_remove(id).is_some();
+        let Some((index, track)) = track else {
+            if !existed {
+                return Ok(());
+            }
+            return self
+                .write_edited(untouched(song), |doc| remove_track_table(doc, id))
+                .map(drop);
+        };
+        let at = index.min(song.tracks.len());
+        let next = song.tracks.get_index(at).map(|(k, _)| k.clone());
+        let before = at.checked_sub(1).and_then(|i| song.tracks.get_index(i));
+        let before = before.map(|(k, _)| k.clone());
+        song.tracks.shift_insert(at, id.to_owned(), track.clone());
+        let place = match (&before, &next) {
+            (Some(before), _) => Place::After(before),
+            (None, Some(next)) => Place::Before(next),
+            (None, None) => Place::Last,
+        };
+        let text = track_table_toml(id, &track);
+        self.write_edited(untouched(song), |doc| {
+            if existed {
+                remove_track_table(doc, id)?;
+            }
+            insert_table(doc, "tracks", id, &text, place, &["song", "mix"])
+        })
+        .map(drop)
+    }
+
+    /// Makes `device` the instrument of `track`: the `instrument` value and
+    /// the instrument's params in the track's `params` table.
+    pub(crate) fn put_instrument(&mut self, track: &str, device: Device) -> Result<(), EditError> {
+        let mut song = self.song.clone();
+        let t = song
+            .tracks
+            .get_mut(track)
+            .ok_or_else(|| EditError::NoSuchTarget(format!("tracks.{track}")))?;
+        let old = std::mem::replace(&mut t.instrument, device.clone());
+        self.write_edited(untouched(song), |doc| {
+            track_table(doc, track)?.put("instrument", instrument_value(&device)?);
+            remove_params(doc, track, &format!("{}.", old.id))?;
+            if device.params.is_empty() {
+                return Some(());
+            }
+            let fresh = track_table(doc, track)?.child("params").is_none();
+            let mut slot = track_table(doc, track)?;
+            if fresh && let Slot::Table(t) = &mut slot {
+                // A new `params` goes before `fx` and `play`.
+                t.insert("params", Item::Value(InlineTable::new().into()));
+                for key in ["fx", "play"] {
+                    if let Some((key, item)) = t.remove_entry(key) {
+                        t.insert_formatted(&key, item);
+                    }
+                }
+            }
+            let mut params = slot.child_or_new("params")?;
+            for (local, value) in &device.params {
+                params.put(&device.param_id(local), toml_number(*value));
+            }
+            Some(())
+        })
+        .map(drop)
+    }
+
+    /// Sets the effect chain of `track` to `chain`, in its order: an effect
+    /// the chain has now (same id and module) keeps its entry, the others
+    /// are written from `chain`; effects not in `chain` go.
+    pub(crate) fn put_fx(&mut self, track: &str, chain: Vec<Device>) -> Result<(), EditError> {
+        let mut song = self.song.clone();
+        let t = song
+            .tracks
+            .get_mut(track)
+            .ok_or_else(|| EditError::NoSuchTarget(format!("tracks.{track}")))?;
+        let same = |a: &Device, b: &Device| a.id == b.id && a.module.name == b.module.name;
+        let sources: Vec<Option<usize>> = chain
+            .iter()
+            .map(|d| t.fx.iter().position(|c| same(c, d)))
+            .collect();
+        let fx: Vec<Device> = chain
+            .into_iter()
+            .zip(&sources)
+            .map(|(d, source)| source.map_or(d, |i| t.fx[i].clone()))
+            .collect();
+        t.fx.clone_from(&fx);
+        self.write_edited(untouched(song), |doc| {
+            if fx.is_empty() {
+                track_table(doc, track)?.remove("fx");
+                return Some(());
+            }
+            let Some(array) = fx_array(doc, track) else {
+                // No `fx` yet: the first effect makes the list.
+                insert_fx(doc, track, 0, &fx[0])?;
+                let array = fx_array(doc, track)?;
+                let entries = fx[1..].iter().map(|d| fx_entry_toml(d).parse().ok());
+                let entries: Vec<Value> = entries.collect::<Option<_>>()?;
+                reshape(array, |values| values.extend(entries));
+                return Some(());
+            };
+            let current: Vec<Value> = array.iter().cloned().collect();
+            let entries = fx.iter().zip(&sources).map(|(d, source)| match source {
+                Some(i) => current.get(*i).cloned(),
+                None => fx_entry_toml(d).parse().ok(),
+            });
+            let entries: Vec<Value> = entries.collect::<Option<_>>()?;
+            reshape(array, |values| *values = entries);
+            Some(())
+        })
+        .map(drop)
+    }
+
+    /// Removes clip `id`'s table (`None`), or writes the clip `spec` gives
+    /// as clip `id`, after the last clip (replacing the one there).
+    pub(crate) fn put_clip(
+        &mut self,
+        id: &str,
+        spec: Option<ClipSpec<'_>>,
+    ) -> Result<(), EditError> {
+        let mut song = self.song.clone();
+        let existed = song.clips.shift_remove(id).is_some();
+        let remove = |doc: &mut DocumentMut| match doc.as_table_mut().get_mut("clips")? {
+            Item::Table(clips) => clips.remove(id).map(drop),
+            _ => None,
+        };
+        let Some((kind, steps, bars, notes)) = spec else {
+            if !existed {
+                return Ok(());
+            }
+            return self.write_edited(untouched(song), remove).map(drop);
+        };
+        let text = new_clip_table(id, kind, steps, bars, notes)?;
+        let write = |doc: &mut DocumentMut| {
+            if existed {
+                remove(doc)?;
+            }
+            insert_table(doc, "clips", id, &text, Place::Last, CLIP_ANCHORS)
+        };
+        // As for `add_clip`: the validator reads the clip from its table.
+        let mut trial = self.doc.clone();
+        let broken =
+            || EditError::Internal("the edit could not be written into the file".to_owned());
+        write(&mut trial).ok_or_else(broken)?;
+        let parsed = parse(&trial.to_string()).map_err(EditError::Invalid)?;
+        let clip = parsed.song.clips.get(id).cloned().ok_or_else(broken)?;
+        song.clips.insert(id.to_owned(), clip);
+        self.write_edited(untouched(song), write).map(drop)
+    }
+
+    /// Makes `play` the placements of `track`.
+    pub(crate) fn put_play(&mut self, track: &str, play: Vec<Placement>) -> Result<(), EditError> {
+        let old = self.song.clone();
+        let mut song = old.clone();
+        song.tracks
+            .get_mut(track)
+            .ok_or_else(|| EditError::NoSuchTarget(format!("tracks.{track}")))?
+            .play = play;
+        let new = song.clone();
+        self.write_edited(untouched(song), |doc| write_plays(doc, &old, &new))
+            .map(drop)
+    }
+
+    /// Makes `lanes` every stretch of `track`'s `param`, in one write. A
+    /// stretch is written into the table of one there now, so its comments
+    /// stay: the one that starts at the same bar, else the next one left
+    /// (as after a section operation moved it); the rest get new tables.
+    /// The tables are laid out again among the section tables, as
+    /// [`add_lane`](Self::add_lane) lays them out, when a stretch gets a
+    /// new table or another section. A stretch that went and comes back
+    /// gets no comments: its value holds none.
+    pub(crate) fn put_lanes(
+        &mut self,
+        track: &str,
+        param: &str,
+        lanes: Vec<Lane>,
+    ) -> Result<(), EditError> {
+        let mut song = self.song.clone();
+        let old = &self.song.automation;
+        let mine: Vec<usize> = (0..old.len())
+            .filter(|&i| old[i].track == track && old[i].param == param)
+            .collect();
+        let mut fresh = lanes;
+        fresh.sort_by_key(|l| l.start_bar);
+        let mut into: Vec<Option<Lane>> = vec![None; old.len()];
+        for &i in &mine {
+            if let Some(at) = fresh.iter().position(|l| l.start_bar == old[i].start_bar) {
+                into[i] = Some(fresh.remove(at));
+            }
+        }
+        for &i in &mine {
+            if into[i].is_none() && !fresh.is_empty() {
+                into[i] = Some(fresh.remove(0));
+            }
+        }
+        let starts = song.section_start_bars();
+        let section = |l: &Lane| starts.partition_point(|&s| s <= l.start_bar);
+        let mut relayout = !fresh.is_empty();
+        let mut list: Vec<(Lane, LaneOrigin)> = Vec::new();
+        for (i, (lane, new)) in old.iter().zip(into).enumerate() {
+            match new {
+                Some(new) => {
+                    relayout |= section(&new) != section(lane);
+                    list.push((new, LaneOrigin::Kept(i)));
+                }
+                None if !mine.contains(&i) => list.push((lane.clone(), LaneOrigin::Kept(i))),
+                None => {}
+            }
+        }
+        list.extend(fresh.into_iter().map(|l| (l, LaneOrigin::New)));
+        if relayout {
+            list.sort_by_key(|(l, _)| section(l));
+        }
+        let (automation, lanes) = list.into_iter().unzip();
+        song.automation = automation;
+        let edited = Edited {
+            arranged: Arranged { song, lanes },
+            removed: Removed::default(),
+        };
+        self.write_laid_out(edited, relayout, |_| Some(()))
+            .map(drop)
+    }
+
+    /// Makes `sections` the section list, in its order: each one is
+    /// written into the first table of that name not taken yet (its
+    /// comments kept, `bars` set), else into a new table.
+    pub(crate) fn put_sections(&mut self, sections: Vec<Section>) -> Result<(), EditError> {
+        let mut song = self.song.clone();
+        let old = std::mem::replace(&mut song.sections, sections);
+        let new = song.clone();
+        let mut taken = vec![false; old.len()];
+        let sources: Vec<Option<usize>> = new
+            .sections
+            .iter()
+            .map(|s| {
+                let i = (0..old.len()).find(|&i| !taken[i] && old[i].name == s.name)?;
+                taken[i] = true;
+                Some(i)
+            })
+            .collect();
+        self.write_edited(untouched(song), |doc| {
+            normalize_positions(doc);
+            let start = block_start(doc);
+            let bars = |s: &Section| toml_edit::Value::from(i64::from(s.bars));
+            match doc.as_table_mut().get_mut("sections")? {
+                Item::ArrayOfTables(aot) => {
+                    let mut tables = ArrayOfTables::new();
+                    for (s, source) in new.sections.iter().zip(&sources) {
+                        let mut table = match source {
+                            Some(i) => aot.get(*i)?.clone(),
+                            None => {
+                                let mut table = Table::new();
+                                table.decor_mut().set_prefix("\n");
+                                table.insert("name", toml_edit::value(s.name.as_str()));
+                                table
+                            }
+                        };
+                        Slot::Table(&mut table).put("bars", bars(s));
+                        tables.push(table);
+                    }
+                    *aot = tables;
+                }
+                Item::Value(Value::Array(array)) => {
+                    let current: Vec<Value> = array.iter().cloned().collect();
+                    let mut values = Vec::new();
+                    for (s, source) in new.sections.iter().zip(&sources) {
+                        let mut value = match source {
+                            Some(i) => current.get(*i)?.clone(),
+                            None => {
+                                let mut t = InlineTable::new();
+                                t.insert("name", Value::from(s.name.as_str()));
+                                t.into()
+                            }
+                        };
+                        let table = value.as_inline_table_mut()?;
+                        Slot::Inline(table).put("bars", bars(s));
+                        if source.is_none() {
+                            table.fmt();
+                        }
+                        values.push(value);
+                    }
+                    reshape(array, |v| *v = values);
+                }
+                _ => return None,
+            }
+            if let Some(start) = start {
+                rerank(doc, &new, start);
+            }
+            Some(())
+        })
+        .map(drop)
+    }
+}
+
+/// `song` with every stretch still the old one, in the old order.
+fn untouched(song: Song) -> Edited {
+    let lanes = (0..song.automation.len()).map(LaneOrigin::Kept).collect();
+    Edited {
+        arranged: Arranged { song, lanes },
+        removed: Removed::default(),
+    }
+}
+
+/// A track's `instrument` value for `device`, as the song writer writes
+/// it: the module name when that says it all, else a table.
+fn instrument_value(device: &Device) -> Option<Value> {
+    let module = device.module;
+    if device.id == module.prefix && module.settings.is_empty() {
+        return Some(Value::from(module.name));
+    }
+    // An effect entry without params is the instrument's table.
+    let bare = Device {
+        params: Default::default(),
+        ..device.clone()
+    };
+    fx_entry_toml(&bare).parse().ok()
 }
 
 /// Splits a lane's `param` as the file spells it, `<track>.<param id>`, at
@@ -447,14 +794,24 @@ fn new_clip_table(
 /// no tracks gets `[tracks.<id>]` after `[song]` and `[mix]`.
 pub(super) fn insert_track(doc: &mut DocumentMut, id: &str, track: &Track) -> Option<()> {
     let text = track_table_toml(id, track);
-    insert_table(doc, "tracks", id, &text, None, &["song", "mix"])
+    insert_table(doc, "tracks", id, &text, Place::Last, &["song", "mix"])
+}
+
+/// Where [`insert_table`] puts a table among its container's.
+#[derive(Clone, Copy)]
+enum Place<'a> {
+    /// Right after this sibling's table.
+    After(&'a str),
+    /// Right before this sibling's table (and the comments above it).
+    Before(&'a str),
+    /// After the container's last table.
+    Last,
 }
 
 /// Adds the table `text` (`[<container>.<id>]` and its keys, as
 /// [`track_table_toml`] writes them) to the
-/// `container` tables, with one blank line before it. It goes right after
-/// the table of `sibling` when that is given, else after the container's
-/// last table; a container with no table yet is created after the last
+/// `container` tables, with one blank line before it, at `place`; a
+/// container with no table yet is created after the last
 /// table of the first of `anchors` that has one (in the file's order). A
 /// container written as inline entries gets an inline entry.
 fn insert_table(
@@ -462,7 +819,7 @@ fn insert_table(
     container: &str,
     id: &str,
     text: &str,
-    sibling: Option<&str>,
+    place: Place<'_>,
     anchors: &[&str],
 ) -> Option<()> {
     normalize_positions(doc);
@@ -485,17 +842,15 @@ fn insert_table(
         };
         let mut entry = table.into_inline_table();
         entry.fmt();
-        // Behind the sibling when there is one: the entries after it move
-        // behind the new one.
-        let later: Vec<String> = match sibling {
-            Some(sibling) => holder
-                .iter()
-                .map(|(k, _)| k.to_owned())
-                .skip_while(|k| k != sibling)
-                .skip(1)
-                .collect(),
-            None => Vec::new(),
+        // The entries that go behind the new one move behind it.
+        let keys: Vec<String> = holder.iter().map(|(k, _)| k.to_owned()).collect();
+        let from = |sibling: &str| keys.iter().position(|k| k == sibling);
+        let later = match place {
+            Place::After(sibling) => from(sibling).map_or(keys.len(), |i| i + 1),
+            Place::Before(sibling) => from(sibling).unwrap_or(keys.len()),
+            Place::Last => keys.len(),
         };
+        let later = &keys[later..];
         let moved: Vec<(Key, Item)> = later
             .iter()
             .filter_map(|k| holder.remove_entry(k))
@@ -507,12 +862,17 @@ fn insert_table(
         return Some(());
     }
     let last = match root.get(container) {
-        Some(Item::Table(t)) => match sibling {
-            Some(sibling) => match t.get(sibling) {
+        Some(Item::Table(t)) => match place {
+            Place::After(sibling) => match t.get(sibling) {
                 Some(Item::Table(s)) => max_position(s),
                 _ => return None,
             },
-            None => max_position(t),
+            // Ranks are distinct: the table before the sibling's is one up.
+            Place::Before(sibling) => match t.get(sibling) {
+                Some(Item::Table(s)) => Some(s.position()? - 1),
+                _ => return None,
+            },
+            Place::Last => max_position(t),
         },
         _ => None,
     };
