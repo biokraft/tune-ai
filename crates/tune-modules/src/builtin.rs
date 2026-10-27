@@ -8,7 +8,7 @@ use tune_dsp::{
 };
 
 use crate::descriptor::{ClipKind, ModuleDescriptor, Role, SettingSpec};
-use crate::instrument::{Effect, EventCtx, Instrument, NoteEvent, NoteId};
+use crate::instrument::{Effect, EventCtx, Instrument, NoteEvent, NoteId, copy_state};
 
 /// An [`Acid303`] played by note events.
 ///
@@ -136,6 +136,9 @@ impl Effect for Distortion {
     fn reset(&mut self) {
         Distortion::reset(self);
     }
+    fn copy_state_to(&self, to: &mut dyn Effect) -> bool {
+        copy_state(self, to)
+    }
 }
 
 impl Effect for Equalizer {
@@ -150,6 +153,9 @@ impl Effect for Equalizer {
     }
     fn reset(&mut self) {
         Equalizer::reset(self);
+    }
+    fn copy_state_to(&self, to: &mut dyn Effect) -> bool {
+        copy_state(self, to)
     }
 }
 
