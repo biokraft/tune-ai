@@ -776,8 +776,8 @@ fn lane_from(v: &Value, track: &str, param: &str) -> Result<Lane, Bad> {
     })
 }
 
-/// `v` without its `index` key, as a scene is compared.
-fn without_index(v: &Value) -> Value {
+/// `v` without its `index` key, as a track or scene is compared.
+pub(crate) fn without_index(v: &Value) -> Value {
     let mut v = v.clone();
     if let Some(map) = v.as_object_mut() {
         map.remove("index");

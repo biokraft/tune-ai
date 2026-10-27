@@ -24,7 +24,7 @@ use crate::doc::{EditError, SongDoc};
 use crate::error::StudioError;
 use crate::log::{ActionRecord, Source};
 use crate::path::SongPath;
-use crate::target::{Target, TargetChange, target_value};
+use crate::target::{Target, TargetChange, target_value, without_index};
 
 /// What undoing a run did.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
@@ -872,14 +872,6 @@ fn approx(p: &Plan, x: &Value, y: &Value) -> bool {
         }
         _ => x == y,
     }
-}
-
-fn without_index(v: &Value) -> Value {
-    let mut v = v.clone();
-    if let Some(map) = v.as_object_mut() {
-        map.remove("index");
-    }
-    v
 }
 
 /// A device value's (id, module).
