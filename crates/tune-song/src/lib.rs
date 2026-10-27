@@ -30,7 +30,7 @@ pub use error::{LoadError, SongError};
 pub use migrate::{Migration, migrate};
 pub use model::{
     Clip, Device, Lane, MIX_TRACK_ID, MasterMode, Mix, MixUnit, Placement, SECTION_BARS, Section,
-    SectionPlay, Song, Track, find_mix_param, lane_value, section_bars_error,
+    SectionPlay, Song, Track, find_mix_param, lane_value, round_split_value, section_bars_error,
 };
 pub use tune_modules::{ClipKind, ModuleDescriptor, Registry, SettingSpec};
 pub use watch::{RawReload, Reload, SongWatcher};
