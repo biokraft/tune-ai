@@ -30,9 +30,10 @@ pub use arrange::{
     move_section, resize_section, set_section_play,
 };
 pub use edit::{
-    EditOpError, Edited, Removed, add_clip, add_effect, add_placement, add_track, check_new_clip,
-    duplicate_clip, move_effect, move_placement, remove_clip, remove_effect, remove_placement,
-    remove_track, rename_clip, rename_device, rename_track, resize_placement, set_instrument,
+    EditOpError, Edited, Removed, add_clip, add_effect, add_lane, add_placement, add_track,
+    check_new_clip, duplicate_clip, move_effect, move_placement, remove_clip, remove_effect,
+    remove_lane, remove_placement, remove_track, rename_clip, rename_device, rename_track,
+    resize_placement, set_instrument, set_lane_points,
 };
 pub use error::{LoadError, SongError};
 pub use migrate::{Migration, migrate};

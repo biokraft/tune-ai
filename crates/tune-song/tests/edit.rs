@@ -3,10 +3,11 @@
 
 use tune_dsp::DrumPattern;
 use tune_song::{
-    Clip, EditOpError, LaneOrigin, Placement, Registry, Song, add_clip, add_effect, add_placement,
-    add_track, clip_table_toml, duplicate_clip, move_effect, move_placement, parse_song,
-    remove_clip, remove_effect, remove_placement, remove_track, rename_clip, rename_device,
-    rename_track, resize_placement, set_instrument, track_table_toml,
+    Clip, EditOpError, Lane, LaneOrigin, Placement, Registry, Song, add_clip, add_effect, add_lane,
+    add_placement, add_track, clip_table_toml, duplicate_clip, move_effect, move_placement,
+    parse_song, remove_clip, remove_effect, remove_lane, remove_placement, remove_track,
+    rename_clip, rename_device, rename_track, resize_placement, set_instrument, set_lane_points,
+    track_table_toml,
 };
 
 const SONG: &str = r#"
@@ -710,4 +711,204 @@ fn a_missing_placement_is_named_one_based() {
         remove_placement(&s, "bass", 0).unwrap_err(),
         EditOpError::NoSuchTrack("bass".into())
     );
+}
+
+const LANED: &str = r#"
+[song]
+version = 2
+name = "t"
+bpm = 120
+
+[tracks.kick]
+instrument = "kick"
+
+[tracks.acid]
+instrument = "acid303"
+
+[clips.k4]
+kind = "drum"
+steps = "x...x...x...X..."
+
+[[sections]]
+name = "a"
+bars = 2
+
+[[sections]]
+name = "b"
+bars = 2
+
+[[sections]]
+name = "c"
+bars = 2
+
+[[automation]]
+param = "acid.acid303.cutoff"
+at = 1
+bars = 2
+points = [[0, 0.1], [2, 0.8]]
+
+[[automation]]
+param = "acid.acid303.resonance"
+at = 3
+bars = 2
+points = [[0, 0.2], [2, 0.4]]
+
+[[automation]]
+param = "acid.acid303.cutoff"
+at = 5
+bars = 2
+points = [[0, 0.5], [2, 0.6]]
+"#;
+
+fn laned() -> Song {
+    parse_song(LANED).expect("the song parses")
+}
+
+fn reverb_lane(start_bar: u32) -> Lane {
+    Lane {
+        track: "mix".into(),
+        param: "reverb.size".into(),
+        start_bar,
+        bars: 1,
+        points: vec![(0.0, 0.2), (1.0, 0.6)],
+    }
+}
+
+/// `(param, 0-based start bar)` of each stretch, in order.
+fn stretches(song: &Song) -> Vec<(String, u32)> {
+    song.automation
+        .iter()
+        .map(|l| (format!("{}.{}", l.track, l.param), l.start_bar))
+        .collect()
+}
+
+#[test]
+fn a_new_stretch_goes_after_the_ones_of_its_section() {
+    let s = laned();
+    // Bar index 1 is in section a, 2 is the first bar of section b (the
+    // exact boundary), 4 the first of section c.
+    for (start, at) in [(1, 1), (2, 2), (3, 2), (4, 3), (5, 3)] {
+        let edited = add_lane(&s, reverb_lane(start)).unwrap();
+        let mut want: Vec<LaneOrigin> = (0..3).map(LaneOrigin::Kept).collect();
+        want.insert(at, LaneOrigin::New);
+        assert_eq!(edited.arranged.lanes, want, "start {start}");
+        assert_eq!(edited.arranged.song.automation[at], reverb_lane(start));
+        assert_eq!(edited.removed, Default::default());
+    }
+    let edited = add_lane(&s, reverb_lane(2)).unwrap();
+    assert_eq!(
+        stretches(&edited.arranged.song),
+        [
+            ("acid.acid303.cutoff".to_owned(), 0),
+            ("acid.acid303.resonance".to_owned(), 2),
+            ("mix.reverb.size".to_owned(), 2),
+            ("acid.acid303.cutoff".to_owned(), 4),
+        ]
+    );
+}
+
+#[test]
+fn the_first_stretch_of_a_song_is_new() {
+    let mut s = laned();
+    s.automation.clear();
+    let edited = add_lane(&s, reverb_lane(0)).unwrap();
+    assert_eq!(edited.arranged.lanes, [LaneOrigin::New]);
+    assert_eq!(edited.arranged.song.automation, [reverb_lane(0)]);
+}
+
+#[test]
+fn a_new_stretch_is_not_checked_here() {
+    // Overlaps, unknown params and points out of range are the validator's.
+    let s = laned();
+    let mut lane = reverb_lane(0);
+    lane.track = "acid".into();
+    lane.param = "acid303.cutoff".into();
+    lane.points = vec![(0.0, 7.0)];
+    let edited = add_lane(&s, lane.clone()).unwrap();
+    assert_eq!(edited.arranged.song.automation.len(), 4);
+    assert!(edited.arranged.song.automation.contains(&lane));
+}
+
+#[test]
+fn removing_a_stretch_lists_it_and_keeps_the_others() {
+    let s = laned();
+    let edited = remove_lane(&s, "acid", "acid303.cutoff", 0).unwrap();
+    assert_eq!(
+        stretches(&edited.arranged.song),
+        [
+            ("acid.acid303.resonance".to_owned(), 2),
+            ("acid.acid303.cutoff".to_owned(), 4)
+        ]
+    );
+    assert_eq!(
+        edited.arranged.lanes,
+        [LaneOrigin::Kept(1), LaneOrigin::Kept(2)]
+    );
+    assert_eq!(edited.removed.lanes, [s.automation[0].clone()]);
+    assert_eq!(edited.removed.placements, []);
+    // The other stretch of the same param is picked by its start.
+    let edited = remove_lane(&s, "acid", "acid303.cutoff", 4).unwrap();
+    assert_eq!(edited.removed.lanes, [s.automation[2].clone()]);
+    assert_eq!(
+        edited.arranged.lanes,
+        [LaneOrigin::Kept(0), LaneOrigin::Kept(1)]
+    );
+}
+
+#[test]
+fn a_stretch_is_found_only_by_its_exact_start() {
+    let s = laned();
+    // The first cutoff stretch covers bar indices 0 and 1 and ends where
+    // bar index 2 begins: neither the bar inside it nor the one at its end
+    // is its start.
+    for (bar, shown) in [(1, 2), (2, 3), (3, 4)] {
+        let message = format!("there is no lane `acid.acid303.cutoff` at bar {shown}");
+        assert_eq!(
+            remove_lane(&s, "acid", "acid303.cutoff", bar)
+                .unwrap_err()
+                .to_string(),
+            message
+        );
+        assert_eq!(
+            set_lane_points(&s, "acid", "acid303.cutoff", bar, vec![(0.0, 0.5)])
+                .unwrap_err()
+                .to_string(),
+            message
+        );
+    }
+    assert_eq!(
+        remove_lane(&s, "acid", "acid303.nope", 0).unwrap_err(),
+        EditOpError::NoSuchLane {
+            track: "acid".into(),
+            param: "acid303.nope".into(),
+            bar: 0
+        }
+    );
+}
+
+#[test]
+fn new_points_replace_only_the_points() {
+    let s = laned();
+    let points = vec![(0.0, 0.3), (1.0, 0.9), (1.0, 0.1), (2.0, 0.5)];
+    let edited = set_lane_points(&s, "acid", "acid303.cutoff", 4, points.clone()).unwrap();
+    let song = &edited.arranged.song;
+    assert_eq!(song.automation[2].points, points);
+    assert_eq!(
+        Lane {
+            points: s.automation[2].points.clone(),
+            ..song.automation[2].clone()
+        },
+        s.automation[2]
+    );
+    assert_eq!(song.automation[..2], s.automation[..2]);
+    assert_eq!(
+        edited.arranged.lanes,
+        [
+            LaneOrigin::Kept(0),
+            LaneOrigin::Kept(1),
+            LaneOrigin::Kept(2)
+        ]
+    );
+    assert_eq!(edited.removed, Default::default());
+    assert_eq!(song.tracks, s.tracks);
 }

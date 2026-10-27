@@ -1,7 +1,7 @@
 //! Structural edits of a song's tracks, devices and clips: add, remove or
 //! rename a track, add, remove, move or rename an effect, rename a device,
 //! swap an instrument, add, remove, rename or duplicate a clip, add, move,
-//! resize or remove a placement.
+//! resize or remove a placement, add, remove or reshape a lane stretch.
 //!
 //! Like the section operations, these do not validate their result (the
 //! caller re-parses it, and so gets the validator's positioned messages for
@@ -82,6 +82,13 @@ pub enum EditOpError {
     /// from 1.
     #[error("track `{track}` has no placement at bar {}", .bar + 1)]
     NoSuchPlacement { track: String, bar: u32 },
+    /// `bar` is 0-based, as the lane edits take it; the message counts from 1.
+    #[error("there is no lane `{track}.{param}` at bar {}", .bar + 1)]
+    NoSuchLane {
+        track: String,
+        param: String,
+        bar: u32,
+    },
     #[error("index {index} is out of bounds (the chain has {len})")]
     IndexOutOfBounds { index: usize, len: usize },
 }
@@ -449,6 +456,77 @@ pub fn remove_placement(song: &Song, track: &str, start_bar: u32) -> Result<Edit
         ..Removed::default()
     };
     Ok(untouched_lanes(song, removed))
+}
+
+/// Adds stretch `lane`, after the stretches that start in the same section
+/// or earlier (the order the file keeps them in). It is a new stretch with
+/// no old table. Overlaps, params that do not exist and points out of range
+/// are for the validator.
+pub fn add_lane(song: &Song, lane: Lane) -> Result<Edited, EditOpError> {
+    let mut song = song.clone();
+    let mut lanes: Vec<(Lane, LaneOrigin)> = std::mem::take(&mut song.automation)
+        .into_iter()
+        .enumerate()
+        .map(|(i, l)| (l, LaneOrigin::Kept(i)))
+        .collect();
+    lanes.push((lane, LaneOrigin::New));
+    let starts = song.section_start_bars();
+    lanes.sort_by_key(|(l, _)| starts.partition_point(|&s| s <= l.start_bar));
+    let (automation, origins) = lanes.into_iter().unzip();
+    song.automation = automation;
+    Ok(Edited {
+        arranged: Arranged {
+            song,
+            lanes: origins,
+        },
+        removed: Removed::default(),
+    })
+}
+
+/// Removes the stretch of `track`'s `param` that starts at 0-based bar
+/// `start_bar`, and lists it in `removed.lanes`. `track` is `mix` for a mix
+/// param.
+pub fn remove_lane(
+    song: &Song,
+    track: &str,
+    param: &str,
+    start_bar: u32,
+) -> Result<Edited, EditOpError> {
+    let at = lane_at(song, track, param, start_bar)?;
+    let mut song = song.clone();
+    let mut removed = Removed::default();
+    // A valid song has no two equal stretches (they would overlap).
+    let gone = song.automation[at].clone();
+    let kept = take_lanes(&mut song, &mut removed, |l| *l == gone);
+    Ok(edited(song, kept, removed))
+}
+
+/// Replaces the points of the stretch of `track`'s `param` that starts at
+/// 0-based bar `start_bar`. Whether the points are in range is for the
+/// validator.
+pub fn set_lane_points(
+    song: &Song,
+    track: &str,
+    param: &str,
+    start_bar: u32,
+    points: Vec<(f64, f64)>,
+) -> Result<Edited, EditOpError> {
+    let at = lane_at(song, track, param, start_bar)?;
+    let mut song = song.clone();
+    song.automation[at].points = points;
+    Ok(untouched_lanes(song, Removed::default()))
+}
+
+/// The index of the stretch of `param` that starts at `start_bar`.
+fn lane_at(song: &Song, track: &str, param: &str, start_bar: u32) -> Result<usize, EditOpError> {
+    song.automation
+        .iter()
+        .position(|l| l.track == track && l.param == param && l.start_bar == start_bar)
+        .ok_or_else(|| EditOpError::NoSuchLane {
+            track: track.to_owned(),
+            param: param.to_owned(),
+            bar: start_bar,
+        })
 }
 
 fn no_track(id: &str) -> EditOpError {
