@@ -20,7 +20,7 @@ use crate::diff::Change;
 use crate::log::Source;
 use crate::path::{SongPath, TrackField};
 
-pub(crate) use apply::{ApplyCtx, apply_action};
+pub(crate) use apply::{ApplyCtx, apply_action, apply_all};
 pub use catalog::{ACTIONS, find_action};
 pub use cli::{action_from_cli, parse_value};
 
