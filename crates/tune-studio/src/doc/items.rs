@@ -161,39 +161,64 @@ impl SongDoc {
 /// tables (`[tracks]` with `kick = { … }`) gets an inline entry; a file with
 /// no tracks gets `[tracks.<id>]` after `[song]` and `[mix]`.
 pub(super) fn insert_track(doc: &mut DocumentMut, id: &str, track: &Track) -> Option<()> {
+    let text = track_table_toml(id, track);
+    insert_table(doc, "tracks", id, &text, None, &["song", "mix"])
+}
+
+/// Adds the table `text` (`[<container>.<id>]` and its keys, as
+/// [`track_table_toml`] writes them) to the
+/// `container` tables, with one blank line before it. It goes right after
+/// the table of `sibling` when that is given, else after the container's
+/// last table; a container with no table yet is created after the last
+/// table of the first of `anchors` that has one (in the file's order). A
+/// container written as inline entries gets an inline entry.
+fn insert_table(
+    doc: &mut DocumentMut,
+    container: &str,
+    id: &str,
+    text: &str,
+    sibling: Option<&str>,
+    anchors: &[&str],
+) -> Option<()> {
     normalize_positions(doc);
-    let mut parsed: DocumentMut = track_table_toml(id, track).parse().ok()?;
-    let Item::Table(mut tracks) = parsed.as_table_mut().remove("tracks")? else {
+    let mut parsed: DocumentMut = text.parse().ok()?;
+    let Item::Table(mut tables) = parsed.as_table_mut().remove(container)? else {
         return None;
     };
-    let Item::Table(mut table) = tracks.remove(id)? else {
+    let Item::Table(mut table) = tables.remove(id)? else {
         return None;
     };
     let root = doc.as_table_mut();
-    let inline = match root.get("tracks") {
+    let inline = match root.get(container) {
         Some(Item::Table(t)) => t.iter().any(|(_, item)| item.is_value()),
         Some(_) => return None,
         None => false,
     };
     if inline {
-        let Some(Item::Table(container)) = root.get_mut("tracks") else {
+        let Some(Item::Table(holder)) = root.get_mut(container) else {
             return None;
         };
         let mut entry = table.into_inline_table();
         entry.fmt();
-        container.insert(id, Item::Value(Value::InlineTable(entry)));
+        holder.insert(id, Item::Value(Value::InlineTable(entry)));
         return Some(());
     }
-    let last = match root.get("tracks") {
-        Some(Item::Table(t)) => max_position(t),
+    let last = match root.get(container) {
+        Some(Item::Table(t)) => match sibling {
+            Some(sibling) => match t.get(sibling) {
+                Some(Item::Table(s)) => max_position(s),
+                _ => return None,
+            },
+            None => max_position(t),
+        },
         _ => None,
     };
-    // Where the new tables go: after the last track table, else after
-    // `[song]` and `[mix]`.
+    // Where the new table goes: after `last`, else after the last table of
+    // the anchors.
     let after = match last {
         Some(last) => last,
-        None => ["song", "mix"]
-            .into_iter()
+        None => anchors
+            .iter()
             .filter_map(|key| match root.get(key) {
                 Some(Item::Table(t)) => max_position(t),
                 _ => None,
@@ -211,15 +236,15 @@ pub(super) fn insert_track(doc: &mut DocumentMut, id: &str, track: &Track) -> Op
     table.set_position(Some(after + new));
     table.decor_mut().set_prefix("\n");
     if created {
-        let mut container = Table::new();
-        container.set_implicit(true);
-        container.set_position(Some(after + 1));
-        root.insert("tracks", Item::Table(container));
+        let mut holder = Table::new();
+        holder.set_implicit(true);
+        holder.set_position(Some(after + 1));
+        root.insert(container, Item::Table(holder));
     }
-    let Some(Item::Table(container)) = root.get_mut("tracks") else {
+    let Some(Item::Table(holder)) = root.get_mut(container) else {
         return None;
     };
-    container.insert(id, Item::Table(table));
+    holder.insert(id, Item::Table(table));
     Some(())
 }
 
