@@ -1200,3 +1200,50 @@ fn a_section_edit_is_kept_with_a_track_it_moved_that_was_kept() {
     assert!(u.kept.iter().any(|k| k.target == Target::Sections));
     assert_eq!(s.text(), text);
 }
+
+fn add_break(s: &mut S) {
+    s.agent(
+        "r1",
+        &[Action::AddSection {
+            name: "break".into(),
+            bars: 2,
+            index: Some(1),
+        }],
+    );
+}
+
+/// q4: the producer put a lane stretch in the run's new section: taking
+/// the section out would leave it under the placements that move back.
+#[test]
+fn a_section_edit_is_kept_after_a_later_lane_edit() {
+    let mut s = open();
+    add_break(&mut s);
+    s.human(Action::AddLane {
+        param: "mix.reverb.size".into(),
+        at: 3,
+        bars: 2,
+        points: vec![[0.0, 0.2], [2.0, 0.6]],
+    });
+    let text = s.text();
+    let u = s.undo_run("r1");
+    all_kept_by_human(&u);
+    assert!(u.kept.iter().any(|k| k.target == Target::Sections));
+    assert_eq!(s.text(), text);
+}
+
+/// q4b: the same for a placement on a track the section edit did not move.
+#[test]
+fn a_section_edit_is_kept_after_a_later_placement_elsewhere() {
+    let mut s = open();
+    s.human(Action::AddTrack {
+        track: "x".into(),
+        instrument: "acid303".into(),
+    });
+    add_break(&mut s);
+    s.human(place("x", "a1", 3, 2));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    all_kept_by_human(&u);
+    assert!(u.kept.iter().any(|k| k.target == Target::Sections));
+    assert_eq!(s.text(), text);
+}

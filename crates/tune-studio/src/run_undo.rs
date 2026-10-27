@@ -140,12 +140,14 @@ pub fn undo_run(
     // Each unit is one target, or the section edit's group; newest first
     // (a group by its newest member), within one record last change first.
     let group = section_group(&plans, records, &mine);
+    let rearranged = rearranged_since(records, &mine, run);
+    let in_group = |unit: &[usize]| unit.iter().any(|k| group.contains(k));
     let mut units: Vec<Vec<usize>> = (0..plans.len())
         .filter(|k| !group.contains(k))
         .map(|k| vec![k])
         .collect();
     if !group.is_empty() {
-        units.push(group);
+        units.push(group.clone());
     }
     for unit in &mut units {
         unit.sort_by_key(|&k| std::cmp::Reverse(key(k)));
@@ -179,14 +181,18 @@ pub fn undo_run(
             Decision::Already => None,
             Decision::Kept(kept) | Decision::Revert { kept, .. } => kept.first(),
         });
-        let whole = cause.is_none();
-        let cause_by = cause.and_then(|k| k.by);
+        // A section edit is also kept when anyone has changed the
+        // arrangement since: what they placed sits where the section put it.
+        let grouped = in_group(&unit);
+        let forced = rearranged.filter(|_| grouped);
+        let whole = cause.is_none() && forced.is_none();
+        let cause_by = cause.map_or(forced, |k| k.by);
         let mut puts = Vec::new();
         for (p, decision) in decided {
             match decision {
                 Decision::Already => out.already.push(p.target.clone()),
                 Decision::Kept(kept) => out.kept.extend(kept),
-                Decision::Revert { value, items, kept } if whole || unit.len() == 1 => {
+                Decision::Revert { value, items, kept } if whole || !grouped => {
                     out.kept.extend(kept);
                     puts.push((p.target.clone(), value, items));
                 }
@@ -257,6 +263,22 @@ fn other_writes(p: &Plan, records: &[ActionRecord], run: &str) -> (Vec<usize>, V
         })
         .collect();
     (others, foreign)
+}
+
+/// The source of the first other write, after the run's first section
+/// edit, that changed any placements, lane stretches or sections; `None`
+/// when there is none (or the run changed no section).
+fn rearranged_since(records: &[ActionRecord], mine: &[usize], run: &str) -> Option<Source> {
+    let changes_sections = |i: usize| {
+        let mut targets = records[i].targets.iter();
+        targets.any(|c| c.target == Target::Sections)
+    };
+    let first = mine.iter().copied().find(|&i| changes_sections(i))?;
+    let arrangement = |c: &TargetChange| is_list(&c.target) || c.target == Target::Sections;
+    (first + 1..records.len())
+        .filter(|&j| records[j].run.as_deref() != Some(run))
+        .find(|&j| records[j].targets.iter().any(arrangement))
+        .map(|j| records[j].source)
 }
 
 /// The plans of the run's section edit: the sections, every placement
