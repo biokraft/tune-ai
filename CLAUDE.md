@@ -265,7 +265,7 @@ The producer may have the studio (app or browser) open on the same song.
   | `mix.master` | `clip` or `limit` |
   | `mix.duck_source` | track id; empty = first kick |
   | `clips.<c>.steps` | the clip in notation, quoted (`patterns.<c>.steps` is still accepted) |
-  | `clips.<c>.notes` | a notes clip's notes as a TOML array of `{ start, pitch, len, vel }`, quoted, e.g. `clips.lead.notes='[{ start = 0, pitch = "C3", len = 2 }]'` |
+  | `clips.<c>.notes` | a notes clip's notes as a TOML array of `{ start, pitch, len, vel }`, quoted, e.g. `clips.lead.notes='[{ start = 0, pitch = "C3", len = 2 }]'`; rewrites the whole array and drops the comments inside it (those around it stay) |
   | `clips.<c>.bars` | a notes clip's length in bars, 1 to 64 |
   | `sections[<i>].name` | string; `<i>` is 0-based |
   | `sections[<i>].bars` | integer, 1 to 1024; resizes the section: placements and stretches that ran to its end run to the new end (grow) or are cut at it (shrink), later ones move |
