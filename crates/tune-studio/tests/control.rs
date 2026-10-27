@@ -335,6 +335,37 @@ fn a_wrong_secret_or_http_is_refused() {
     assert!(f.log().is_empty());
 }
 
+/// With the right secret, only `claude` may act: `external` and `human`
+/// are bad requests and change nothing.
+#[test]
+fn only_claude_acts_through_the_endpoint() {
+    let f = fixture(COMMENTED);
+    let port = f.server.as_ref().unwrap().port();
+    let file: Value =
+        serde_json::from_str(&fs::read_to_string(&f.endpoint_files()[0]).unwrap()).unwrap();
+    let song = fs::canonicalize(&f.path).unwrap();
+    for source in ["external", "human"] {
+        let request = json!({
+            "secret": file["secret"],
+            "op": "do",
+            "song": song,
+            "actions": [set("song.bpm", json!(130))],
+            "source": source,
+            "run": null,
+        });
+        let reply: Value =
+            serde_json::from_str(&raw(port, format!("{request}\n").as_bytes())).unwrap();
+        assert_eq!(reply["ok"], false);
+        assert_eq!(
+            reply["error"], "bad request: the control endpoint acts only as `claude`",
+            "{source}"
+        );
+    }
+    sleep(Duration::from_millis(300));
+    assert_eq!(f.disk(), COMMENTED);
+    assert!(f.log().is_empty());
+}
+
 #[test]
 fn stale_endpoint_files_are_removed() {
     let endpoints = tempfile::tempdir().unwrap();

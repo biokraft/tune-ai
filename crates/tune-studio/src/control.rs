@@ -11,6 +11,7 @@
 //!
 //! - `{"secret": "…", "op": "song"}` → `{"ok": true, "song": "<canonical path>" | null}`
 //! - `{"secret": "…", "op": "do", "song": "<canonical path>", "actions": [Action…], "source": "claude", "run": RunTag | null}`
+//!   (`source` is always `claude`; any other is a bad request)
 //!   → `{"ok": true, "outcome": ActionsOutcome}` or `{"ok": false, "error": "<message>"}`;
 //!   the studio checks `song` against its open song as it runs the actions,
 //!   so a song switch since `op: song` refuses the request instead of
@@ -299,8 +300,10 @@ fn answer(line: &[u8], handle: &StudioHandle, secret: &Secret) -> Value {
             source,
             run,
         } => {
-            if source == Source::Human {
-                return failed("the control endpoint does not act as `human`");
+            // Only an agent acts here: never the producer, and not as
+            // `external`, which the log keeps for changes on disk.
+            if source != Source::Claude {
+                return failed("bad request: the control endpoint acts only as `claude`");
             }
             // The wire skips `RunTag::new`'s checks; run them here.
             let run = match run
