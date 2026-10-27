@@ -87,8 +87,14 @@ Notation:
   (`16 * bars` steps). Keep the notes in time order (`start` never
   decreases); overlaps and chords are fine. `pitch` is a note name as in an
   acid pattern, without `!` or `~` (`C3` = MIDI 48, `Bb1`, `C-1` to `G9`).
-  A note with `vel` 110 or more is accented. A notes clip has no `steps`; an
-  acid or drum clip has no `bars` or `notes`. The engine plays each note at
+  A note with `vel` 110 or more is accented. On acid303 a note slides into
+  a later note that starts before it ends (the slide holds to that note's
+  end); notes that only touch, one ending where the next starts, retrigger.
+  acid303 plays one note at a time, so a chord (notes with the same
+  `start`) starts on its first note and slides straight to its last. On
+  a drum voice each note is a hit: its pitch and length do nothing, its
+  `vel` still accents. A notes clip has no `steps`; an acid or drum clip
+  has no `bars` or `notes`. The engine plays each note at
   its own sample; a note cut by a placement's end, a loop wrap or a seek
   stops there. A placement that picks up where the one before it stopped
   (the same clip, its offset lining up, as when a section operation splits
