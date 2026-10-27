@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
-import { FakeClient, goldenExternal, stateEvent } from "./client/fakeClient";
+import { FakeClient, goldenExternal, migratedStateEvent, stateEvent } from "./client/fakeClient";
 import type { StateEvent } from "./client/protocol";
 import { createStudioStore } from "./store/studioStore";
 
@@ -199,10 +199,9 @@ describe("App", () => {
 
   it("says a song was upgraded on open, with an Undo that reverts it", () => {
     const { client } = setup(
-      stateEvent((s) => {
+      migratedStateEvent((s) => {
         s.offered = [];
         s.file_errors = [];
-        s.migrated_from = 1;
       }),
     );
     const notice = screen.getByRole("status", { name: "Song file change" });
@@ -215,7 +214,7 @@ describe("App", () => {
   });
 
   it("shows an error from the studio, such as a migration it could not save", () => {
-    const { client } = setup(stateEvent((s) => (s.migrated_from = null)));
+    const { client } = setup(stateEvent());
     const message =
       "the song was upgraded to the new file format in memory but not saved: cannot write song.toml";
     act(() => client.emit({ event: "error", message }));

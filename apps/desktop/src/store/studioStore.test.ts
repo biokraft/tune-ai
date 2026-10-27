@@ -1,4 +1,4 @@
-import { FakeClient, goldenExternal, stateEvent } from "../client/fakeClient";
+import { FakeClient, goldenExternal, migratedStateEvent, stateEvent } from "../client/fakeClient";
 import type { ExternalChangeEvent } from "../client/protocol";
 import { createStudioStore } from "./studioStore";
 
@@ -98,8 +98,7 @@ describe("createStudioStore", () => {
   it("an applied edit from a human sets nothing", () => {
     const client = new FakeClient();
     const store = createStudioStore(client);
-    // Not migrated on open: no notice whose Undo the edit would take back.
-    client.emit(stateEvent((s) => (s.migrated_from = null)));
+    client.emit(stateEvent());
     const before = store.get();
     client.emit({
       event: "applied",
@@ -156,9 +155,8 @@ describe("createStudioStore", () => {
     const client = new FakeClient();
     const store = createStudioStore(client);
     const opened = (path: string, from: number | null) =>
-      stateEvent((s) => {
+      (from === null ? stateEvent : migratedStateEvent)((s) => {
         s.path = path;
-        s.migrated_from = from;
       });
     client.emit(opened("songs/a/song.toml", 1));
     expect(store.get().notice).toEqual({
@@ -189,7 +187,7 @@ describe("createStudioStore", () => {
   it("a migration turning null leaves another notice's Undo alone", () => {
     const client = new FakeClient();
     const store = createStudioStore(client);
-    client.emit(stateEvent((s) => (s.migrated_from = 1)));
+    client.emit(migratedStateEvent());
     client.emit(external({ merged: [] }));
     expect(store.get().notice?.source).toBe("claude");
     client.emit(stateEvent((s) => (s.migrated_from = null)));
@@ -199,7 +197,7 @@ describe("createStudioStore", () => {
   it("shows an error event, such as a migration that could not be saved", () => {
     const client = new FakeClient();
     const store = createStudioStore(client);
-    client.emit(stateEvent((s) => (s.migrated_from = null)));
+    client.emit(stateEvent());
     const message =
       "the song was upgraded to the new file format in memory but not saved: cannot write song.toml";
     client.emit({ event: "error", message });
