@@ -117,9 +117,9 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
                 match clip {
                     Clip::Notes(n) => {
                         clip_texts.push(format!(
-                            "{id} {kind} {} bars {} notes",
-                            n.bars,
-                            n.notes.len()
+                            "{id} {kind} {} {}",
+                            counted(u64::from(n.bars), "bar"),
+                            counted(n.notes.len() as u64, "note")
                         ));
                         clips.push(json!({
                             "id": id,
@@ -130,7 +130,7 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
                         }));
                     }
                     _ => {
-                        clip_texts.push(format!("{id} {kind} {steps} steps"));
+                        clip_texts.push(format!("{id} {kind} {}", counted(steps.into(), "step")));
                         clips.push(json!({ "id": id, "kind": kind, "steps": steps }));
                     }
                 }
@@ -204,4 +204,13 @@ fn section_play(song: &Song, section: usize) -> (Vec<String>, Map<String, Value>
         }
     }
     (text, json)
+}
+
+/// `n` and `word`, plural unless `n` is 1: `1 bar`, `2 bars`, `0 notes`.
+fn counted(n: u64, word: &str) -> String {
+    if n == 1 {
+        format!("{n} {word}")
+    } else {
+        format!("{n} {word}s")
+    }
 }
