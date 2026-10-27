@@ -911,6 +911,25 @@ fn track_lines(text: &str, id: &str) -> Vec<String> {
         .collect()
 }
 
+/// m19: the swap is checked like any edit: taking the song's only kick
+/// away while another track ducks to it is refused with the validator's
+/// message, and the file is left as it was.
+#[test]
+fn a_swap_the_validator_refuses_writes_nothing() {
+    let text = FIXTURE.replace(
+        "\"acid303.accent\" = 55 }",
+        "\"acid303.accent\" = 55, \"duck.depth\" = 6 }",
+    );
+    let s = song_with(&text);
+    assert_eq!(s.song().tracks["acid"].strip["duck.depth"], 6.0);
+    let err = s.refused(set_instrument("kick", "acid303"));
+    assert!(
+        err.starts_with("the edit would make the song invalid"),
+        "{err}"
+    );
+    assert!(err.contains("`duck.depth` needs a kick to follow"), "{err}");
+}
+
 #[test]
 fn swap_cleans_up_and_lists_it() {
     let s = fixture();
