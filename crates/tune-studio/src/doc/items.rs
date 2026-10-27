@@ -841,12 +841,12 @@ enum Place<'a> {
     Last,
 }
 
-/// Adds the table `text` (`[<container>.<id>]` and its keys, as
-/// [`track_table_toml`] writes them) to the
-/// `container` tables, with one blank line before it, at `place`; a
-/// container with no table yet is created after the last
-/// table of the first of `anchors` that has one (in the file's order). A
-/// container written as inline entries gets an inline entry.
+/// Adds the table `text` (`[<container>.<id>]` and its keys, such as
+/// [`track_table_toml`] or [`clip_table_toml`] write) to the `container`
+/// tables, with one blank line before it, at `place`. A container with no
+/// table yet is created after the last table, in the file's order, of any
+/// of `anchors`. A container written as inline entries gets an inline
+/// entry.
 fn insert_table(
     doc: &mut DocumentMut,
     container: &str,
