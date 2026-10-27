@@ -964,3 +964,33 @@ fn resize_out_of_range_is_refused() {
     core.flush().unwrap();
     assert_eq!(disk(&s), FIXTURE);
 }
+
+/// Each entry the studio logs names the action that made its change: the
+/// burst's own actions, then `undo` and `redo`.
+#[test]
+fn the_log_names_each_change_s_action() {
+    let s = song();
+    let mut core = open(&s);
+    let t0 = Instant::now();
+    core.apply_edit(&cutoff(820.0), t0).unwrap();
+    core.apply_edit(&drum_step(0, DrumHitDto::Hit), t0).unwrap();
+    core.flush().unwrap();
+    core.undo().unwrap();
+    core.redo().unwrap();
+    let named: Vec<(String, Option<String>, Option<String>)> = log(&s)
+        .iter()
+        .map(|e| (e.path.clone(), e.action.clone(), e.run.clone()))
+        .collect();
+    let row = |path: &str, action: &str| (path.to_owned(), Some(action.to_owned()), None);
+    assert_eq!(
+        named,
+        vec![
+            row("tracks.acid.acid303.cutoff", "set_param"),
+            row("clips.h.steps", "set_drum_step"),
+            row("tracks.acid.acid303.cutoff", "undo"),
+            row("clips.h.steps", "undo"),
+            row("tracks.acid.acid303.cutoff", "redo"),
+            row("clips.h.steps", "redo"),
+        ]
+    );
+}

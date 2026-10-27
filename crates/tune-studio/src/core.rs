@@ -5,7 +5,8 @@
 //! edit of the burst. Each write is one undo step holding the whole text
 //! before and after, so undo restores the file byte for byte, comments
 //! included. Every write, undo and redo appends `human` entries to the edit
-//! log, one per changed path.
+//! log, one per changed path, each naming the action that made it (`undo`
+//! and `redo` for those).
 //!
 //! The file also changes from outside: Claude through `tune set` or by
 //! editing it, an editor, git. [`StudioCore::on_disk_text`] takes each new
@@ -28,16 +29,18 @@
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::slice;
 use std::time::{Duration, Instant};
 
+use jiff::Timestamp;
 use serde::Serialize;
 use tune_song::{FORMAT_VERSION, Song};
 
-use crate::action::{Action, ApplyCtx, apply_action};
+use crate::action::{Action, ApplyCtx, RunTag, apply_action};
 use crate::diff::{Change, diff_files, diff_songs, is_whole_replace, version_change};
 use crate::doc::SongDoc;
 use crate::error::{ErrorView, StudioError};
-use crate::log::{EditLog, Source, text_hash};
+use crate::log::{EditLog, Source, entries_for, text_hash};
 use crate::path::SongPath;
 use crate::set::write_atomic;
 use crate::view::SongView;
@@ -302,13 +305,18 @@ impl StudioCore {
             return Ok(Vec::new());
         }
         let hash = self.write(&text)?;
-        self.clear_pending();
         let changes = diff_files(
             self.disk_version,
             &self.disk_song,
             FORMAT_VERSION,
             self.doc.song(),
         );
+        // Each change is logged under the pending action that made it last.
+        let names: Vec<Option<&'static str>> = changes
+            .iter()
+            .map(|c| self.pending_action_name(&c.path))
+            .collect();
+        self.clear_pending();
         let before = std::mem::replace(&mut self.disk_text, text.clone());
         self.disk_version = FORMAT_VERSION;
         self.disk_song = self.doc.song().clone();
@@ -319,8 +327,17 @@ impl StudioCore {
             changes: changes.clone(),
         });
         self.redo.clear();
-        self.log_human(&changes, &hash)?;
+        self.log_changes(Source::Human, &changes, &hash, |i| names[i], None)?;
         Ok(changes)
+    }
+
+    /// The name of the pending action that last changed `path`, if any.
+    fn pending_action_name(&self, path: &SongPath) -> Option<&'static str> {
+        self.pending
+            .iter()
+            .rev()
+            .find(|e| e.changes.iter().any(|c| c.path == *path))
+            .map(|e| e.action.name())
     }
 
     /// Takes a new text of the song file (from the watcher, or read by
@@ -367,7 +384,7 @@ impl StudioCore {
         if source == Source::External {
             // Best effort: the change is adopted even if the log is not
             // writable, as it is already on disk.
-            let _ = self.log_changes(Source::External, &changes, &hash);
+            let _ = self.log_changes(Source::External, &changes, &hash, |_| None, None);
         }
         let replaced = is_whole_replace(&self.disk_text, &text);
         let before = std::mem::replace(&mut self.disk_text, text.clone());
@@ -535,7 +552,7 @@ impl StudioCore {
         match self.restore(&entry.before) {
             Ok((changes, hash)) => {
                 self.redo.push(entry);
-                self.log_human(&changes, &hash)?;
+                self.log_changes(Source::Human, &changes, &hash, |_| Some("undo"), None)?;
                 Ok(changes)
             }
             Err(e) => {
@@ -557,7 +574,7 @@ impl StudioCore {
         match self.restore(&entry.after) {
             Ok((changes, hash)) => {
                 self.push_undo(entry);
-                self.log_human(&changes, &hash)?;
+                self.log_changes(Source::Human, &changes, &hash, |_| Some("redo"), None)?;
                 Ok(changes)
             }
             Err(e) => {
@@ -674,23 +691,27 @@ impl StudioCore {
         }
     }
 
-    fn log_human(&self, changes: &[Change], hash: &str) -> Result<(), StudioError> {
-        self.log_changes(Source::Human, changes, hash)
-    }
-
+    /// Logs one entry per change, all from `source` and in `run`, each under
+    /// the action name `action` gives for its index, in one append.
     fn log_changes(
         &self,
         source: Source,
         changes: &[Change],
         hash: &str,
+        action: impl Fn(usize) -> Option<&'static str>,
+        run: Option<&RunTag>,
     ) -> Result<(), StudioError> {
-        self.log
-            .append_changes(source, changes, hash, None, None)
-            .map_err(|e| {
-                StudioError::Io(format!(
-                    "the song was written, but the edit log failed: {e}"
-                ))
-            })
+        let ts = Timestamp::now();
+        let entries: Vec<_> = changes
+            .iter()
+            .enumerate()
+            .flat_map(|(i, c)| entries_for(ts, source, slice::from_ref(c), hash, action(i), run))
+            .collect();
+        self.log.append(&entries).map_err(|e| {
+            StudioError::Io(format!(
+                "the song was written, but the edit log failed: {e}"
+            ))
+        })
     }
 }
 
