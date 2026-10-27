@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use common::{MINI, MIXED, SESSION, bits, compile_song, compiled, drop_lane, song, variant_of};
 use tune_engine::{
-    CellSource, CompiledScene, CompiledSong, Cued, Engine, RenderOptions, SessionCue, TrackPlay,
+    CellSource, CompiledScene, CompiledSong, Cued, Engine, RenderOptions, SessionCue, SongUpdate,
+    TrackPlay,
 };
 use tune_song::{Clip, ClipKind, Note, NoteClip, Placement, Scene, Song};
 
@@ -456,4 +457,302 @@ fn a_finished_engine_lands_cues_at_the_seek_bar() {
     e.seek(1);
     render(&mut e, 1);
     assert_eq!(e.session(ACID).map(|s| s.0), Some(clip(A1, 16, 0)));
+}
+
+// Session state across hot reloads.
+
+const H: usize = 2;
+const STEP: u64 = 6000;
+
+/// Queues a swap to `to` on `e` and plays up to the next step boundary,
+/// where it lands.
+fn swap_at_next_step(e: &mut Engine, to: Arc<CompiledSong>) {
+    let swaps = e.swaps_applied();
+    assert!(e.queue_swap(SongUpdate::new(to)).is_none());
+    let into_step = e.position() % STEP;
+    render(
+        e,
+        if into_step == 0 {
+            1
+        } else {
+            STEP - into_step + 1
+        },
+    );
+    assert_eq!(e.swaps_applied(), swaps + 1, "the swap landed");
+}
+
+/// `mini` with one launch of `a1` on the acid playing from step 0 and
+/// another waiting for bar 1.
+fn a1_launched_and_cued(s: &Arc<CompiledSong>) -> Engine {
+    let launch = SessionCue::Launch {
+        track: ACID,
+        clip: A1,
+    };
+    let mut e = Engine::new(s.clone());
+    e.cue(launch);
+    render(&mut e, 1);
+    e.cue(launch);
+    assert_eq!(
+        e.session(ACID),
+        Some((clip(A1, 0, 0), Some(Cued::Clip(A1))))
+    );
+    e
+}
+
+/// The first frame where two mixes differ, bit for bit.
+fn first_difference(a: &[f32], b: &[f32]) -> Option<usize> {
+    a.iter()
+        .zip(b)
+        .position(|(x, y)| x.to_bits() != y.to_bits())
+        .map(|i| i / 2)
+}
+
+/// `src` plus the notes clip `pad`: one C2 over its 4 bars.
+fn with_pad(src: &str, edit: impl FnOnce(&mut Song)) -> Song {
+    variant_of(src, |s| {
+        let c2 = Note {
+            start: 0,
+            len: 64 * 24,
+            pitch: 36,
+            velocity: 100,
+        };
+        s.clips.insert(
+            "pad".into(),
+            Clip::Notes(NoteClip {
+                bars: 4,
+                notes: vec![c2],
+            }),
+        );
+        edit(s);
+    })
+}
+
+#[test]
+fn a_launched_clip_follows_its_id() {
+    let mut e = a1_launched_and_cued(&compiled(MINI));
+    let edited = compile_song(&variant_of(MINI, |s| {
+        let z = tune_dsp::DrumPattern::parse("x...............").expect("a pattern");
+        s.clips.shift_insert(0, "z".into(), Clip::Drum(z));
+        let a1 = tune_dsp::acid303::AcidPattern::parse("C3 . . . . . . .").expect("a pattern");
+        s.clips["a1"] = Clip::Acid(a1);
+    }));
+    assert_eq!(edited.clip_index("a1"), Some(2));
+    swap_at_next_step(&mut e, edited);
+    assert_eq!(e.session(ACID), Some((clip(2, 0, 0), Some(Cued::Clip(2)))));
+}
+
+#[test]
+fn a_clip_that_goes_stops_the_track() {
+    let mut e = a1_launched_and_cued(&compiled(MINI));
+    let gone = compile_song(&variant_of(MINI, |s| {
+        common::unplay(s, "acid");
+        s.clips.shift_remove("a1");
+    }));
+    swap_at_next_step(&mut e, gone);
+    assert_eq!(
+        e.session(ACID),
+        Some((TrackPlay::Stopped, Some(Cued::Stop)))
+    );
+}
+
+#[test]
+fn an_instrument_swap_stops_a_clip_it_cannot_play() {
+    let padded = with_pad(MINI, |_| {});
+    let kicked = compile_song(&variant_of(&padded.to_toml(), |s| {
+        let edited = tune_song::set_instrument(s, tune_song::Registry::builtin(), "acid", "kick")
+            .expect("a kick");
+        *s = edited.arranged.song;
+    }));
+    let s = compile_song(&padded);
+    let pad = s.clip_index("pad").expect("the pad");
+    assert_eq!(kicked.clip_index("pad"), Some(pad));
+
+    let mut e = Engine::new(s.clone());
+    e.cue(SessionCue::Launch {
+        track: ACID,
+        clip: A1,
+    });
+    render(&mut e, 1);
+    swap_at_next_step(&mut e, kicked.clone());
+    assert_eq!(e.session(ACID), Some((TrackPlay::Stopped, None)));
+
+    // Any instrument plays a notes clip.
+    let mut e = Engine::new(s);
+    e.cue(SessionCue::Launch {
+        track: ACID,
+        clip: pad,
+    });
+    render(&mut e, 1);
+    swap_at_next_step(&mut e, kicked);
+    assert_eq!(e.session(ACID), Some((clip(pad, 0, 0), None)));
+}
+
+#[test]
+fn a_renamed_track_follows_the_arrangement() {
+    let mut e = a1_launched_and_cued(&compiled(MINI));
+    let renamed = compile_song(&variant_of(MINI, |s| {
+        *s = tune_song::rename_track(s, "acid", "bass")
+            .expect("a rename")
+            .arranged
+            .song;
+    }));
+    swap_at_next_step(&mut e, renamed);
+    assert_eq!(e.song().tracks[ACID].id, "bass");
+    assert_eq!(e.session(ACID), Some((TrackPlay::Arrangement, None)));
+}
+
+#[test]
+fn a_value_swap_keeps_a_session_notes_clip_sounding() {
+    // `process_stems` refuses a swap, so the muting stands in for an acid
+    // stem.
+    let padded = with_pad(MINI, |s| {
+        common::unplay(s, "acid");
+        s.tracks.get_mut("kick").expect("a kick").mute = true;
+        s.tracks.get_mut("hat").expect("a hat").mute = true;
+    });
+    let s = compile_song(&padded);
+    let pad = s.clip_index("pad").expect("the pad");
+    let louder_hat = compile_song(&variant_of(&padded.to_toml(), |s| {
+        s.tracks.get_mut("hat").expect("a hat").gain_db = -4.0;
+    }));
+    let run = |swap: bool| {
+        let mut e = Engine::new(s.clone());
+        e.cue(SessionCue::Launch {
+            track: ACID,
+            clip: pad,
+        });
+        let mut out = render(&mut e, 3 * BAR / 2);
+        if swap {
+            assert!(e.queue_swap(SongUpdate::new(louder_hat.clone())).is_none());
+        }
+        out.extend(render(&mut e, SONG - 3 * BAR / 2));
+        if swap {
+            assert_eq!(e.swaps_applied(), 1);
+            assert!(!e.swap_fading());
+        }
+        out
+    };
+    let (swapped, plain) = (run(true), run(false));
+    assert_eq!(swapped.len(), plain.len());
+    assert_eq!(
+        first_difference(&swapped, &plain),
+        None,
+        "the first frame that differs"
+    );
+}
+
+#[test]
+fn a_swap_that_moves_the_playhead_keeps_a_session_clips_phase() {
+    let launch = SessionCue::Launch {
+        track: HAT,
+        clip: H,
+    };
+    let two_bars = compile_song(&variant_of(MINI, |s| common::keep_sections(s, 1)));
+    assert_eq!(two_bars.clip_index("h"), Some(H));
+    // `h` launched at bar 3 (step 48); the swap lands at step 50, past the
+    // new end.
+    let launched = |looping: bool| {
+        let mut e = Engine::new(compiled(MINI));
+        if looping {
+            e.set_loop(Some(0..4));
+        }
+        render(&mut e, 3 * BAR - 1000);
+        e.cue(launch);
+        render(&mut e, 1000 + 2 * STEP - 1);
+        assert_eq!(e.session(HAT).map(|s| s.0), Some(clip(H, 48, 0)));
+        e
+    };
+
+    // To the loop start: step 0 plays clip step 2, as step 50 would have.
+    let mut e = launched(true);
+    swap_at_next_step(&mut e, two_bars.clone());
+    assert_eq!(e.session(HAT).map(|s| s.0), Some(clip(H, 0, 2)));
+    render(&mut e, 2 * BAR);
+    assert_eq!(e.session(HAT).map(|s| s.0), Some(clip(H, 0, 2)));
+
+    // To the end: finished, and a seek plays on from the same clip step.
+    let mut e = launched(false);
+    swap_at_next_step(&mut e, two_bars);
+    assert!(e.finished());
+    assert_eq!(e.session(HAT).map(|s| s.0), Some(clip(H, 32, 2)));
+    e.seek(1);
+    assert_eq!(e.session(HAT).map(|s| s.0), Some(clip(H, 16, 2)));
+    render(&mut e, BAR);
+}
+
+#[test]
+fn a_swap_to_fewer_clips_remaps_before_a_wrap_and_a_seek() {
+    let fewer = compile_song(&variant_of(MINI, |s| {
+        common::unplay(s, "acid");
+        s.clips.shift_remove("a1");
+    }));
+    assert_eq!(fewer.clip_index("h"), Some(1));
+    let mut e = Engine::new(compiled(MINI));
+    e.set_loop(Some(0..1));
+    e.cue(SessionCue::Launch {
+        track: HAT,
+        clip: H,
+    });
+    render(&mut e, 1);
+    swap_at_next_step(&mut e, fewer);
+    // Through the wrap at step 16.
+    render(&mut e, BAR - STEP);
+    assert_eq!(e.position(), 1, "the loop wrapped");
+    assert_eq!(e.session(HAT).map(|s| s.0), Some(clip(1, 0, 0)));
+    // A seek from step 4 to bar 3.
+    render(&mut e, 4 * STEP - 1);
+    e.seek(3);
+    assert_eq!(e.session(HAT).map(|s| s.0), Some(clip(1, 48, 4)));
+    e.set_loop(None);
+    render(&mut e, BAR + 1);
+    assert!(e.finished());
+}
+
+// Session cues from the live controller.
+
+/// Pulls `frames` frames from `p` in 512-frame blocks.
+fn pull(p: &mut tune_engine::LiveProcessor, frames: u64) -> Vec<f32> {
+    let mut out = vec![0.0f32; 2 * frames as usize];
+    for chunk in out.chunks_mut(2 * 512) {
+        p.process(chunk);
+    }
+    out
+}
+
+#[test]
+fn live_cues_reach_the_engine() {
+    let s = compile_song(&variant_of(MINI, |s| common::unplay(s, "acid")));
+    let launch = SessionCue::Launch {
+        track: ACID,
+        clip: A1,
+    };
+    let (mut ctl, mut p) = tune_engine::live(s.clone(), 0, None);
+    let mut session = pull(&mut p, 100_000);
+    ctl.cue(launch).unwrap();
+    session.extend(pull(&mut p, SONG - 100_000));
+    let arranged = plain(&variant_of(MINI, |s| {
+        drop_lane(s, "acid", "acid303.cutoff");
+    }));
+    assert_eq!(session.len(), arranged.len());
+    assert_eq!(
+        first_difference(&session, &arranged),
+        None,
+        "the first frame that differs"
+    );
+
+    // Sent after a swap and before it lands: meant for the swapped-in song,
+    // so dropped.
+    let (mut ctl, mut p) = tune_engine::live(s.clone(), 0, None);
+    pull(&mut p, 1000);
+    ctl.swap(s).unwrap();
+    assert_eq!(ctl.cue(launch), Ok(()));
+    for _ in 0..3 {
+        pull(&mut p, BAR / 2);
+        assert_eq!(p.session(ACID), Some((TrackPlay::Arrangement, None)));
+    }
+    assert_eq!(ctl.swaps_applied(), 1);
+    // Once the swap plays, the next one lands.
+    ctl.cue(launch).unwrap();
+    pull(&mut p, BAR);
+    assert_eq!(p.session(ACID), Some((clip(A1, 32, 0), None)));
 }

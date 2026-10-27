@@ -337,10 +337,11 @@ impl Sequencer {
     }
 
     /// On a swap from `old` to `new` at step boundary `step`, for a track
-    /// whose instrument (and so this sequencer) the swap keeps, as track
-    /// `t` of `new`: held note-clip notes may play on only when the last
-    /// step played a notes clip and the new song plays, at `step`, a clip
-    /// with the same events (id, events and length; compared by content,
+    /// whose instrument (and so this sequencer) the swap keeps, playing
+    /// `src` of `new` at `step` (its placement, or its session clip once
+    /// remapped, see [`TrackRuntime::remap`]): held note-clip notes may play
+    /// on only when the last step played a notes clip and `src` plays a
+    /// clip with the same events (id, events and length; compared by content,
     /// since clip indices of two songs say nothing about each other). Then
     /// `last` and the cursor point into the new song's clip, and the cut at
     /// `step` decides as inside one song: the notes play on when the new
@@ -350,10 +351,13 @@ impl Sequencer {
     /// cut sends `AllOff` if a note may sound, and the cursor is cleared,
     /// so it never reads the new song through an index into the old one.
     /// Comparisons only: never allocates.
-    fn carry_over(&mut self, old: &CompiledSong, new: &CompiledSong, t: usize, step: u64) {
-        let src = (step < 16 * u64::from(new.total_bars))
-            .then(|| new.regions[region_of(new, step)].cells[t])
-            .flatten();
+    fn carry_over(
+        &mut self,
+        old: &CompiledSong,
+        new: &CompiledSong,
+        step: u64,
+        src: Option<CellSource>,
+    ) {
         fn notes(song: &CompiledSong, clip: usize) -> Option<&NoteClipEvents> {
             match song.clips.get(clip) {
                 Some(CompiledClip::Notes(clip)) => Some(clip),
@@ -604,6 +608,32 @@ impl TrackRuntime {
         }
     }
 
+    /// Carries what this runtime plays in live play from `old` to `new`,
+    /// where it is track `t`: a session clip, launched or cued, follows its
+    /// clip id (keeping its start and phase), and one that is gone, or that
+    /// the track's new instrument cannot play, stops the track (a waiting
+    /// launch becomes a waiting stop). String comparisons only: never
+    /// allocates.
+    fn remap(&mut self, old: &CompiledSong, new: &CompiledSong, t: usize) {
+        let follow = |clip: usize| {
+            let k = new.clip_index(old.clip_ids.get(clip)?)?;
+            new.tracks[t]
+                .instrument
+                .module
+                .plays(new.clip_kinds[k])
+                .then_some(k)
+        };
+        if let TrackPlay::Clip(src) = self.play {
+            self.play = match follow(src.clip) {
+                Some(clip) => TrackPlay::Clip(CellSource { clip, ..src }),
+                None => TrackPlay::Stopped,
+            };
+        }
+        if let Some(Cued::Clip(clip)) = self.cue {
+            self.cue = Some(follow(clip).map_or(Cued::Stop, Cued::Clip));
+        }
+    }
+
     /// A silent stand-in left behind when a swap moves a runtime out of the
     /// old list. Neither building nor dropping it touches the heap: the
     /// instrument is zero-sized, the fx chain is empty and the strip holds
@@ -780,11 +810,17 @@ impl Engine {
     ///   goes, and a master-mode switch crossfades between the clipper and
     ///   the limiter without a silent frame (see
     ///   [`MixRuntime::take_units`]);
+    /// - session state travels with the kept runtime and follows clip ids: a
+    ///   launched or cued clip becomes the new song's clip with the same id,
+    ///   keeping its start and phase, and one that is gone, or that the
+    ///   track's new instrument cannot play, stops the track (a waiting
+    ///   launch becomes a waiting stop); a new or renamed track plays the
+    ///   arrangement with nothing cued (see `TrackRuntime::remap`);
     /// - a track that keeps its instrument keeps its held note-clip notes
-    ///   only when it plays at `k` a clip with the same events, at the clip
-    ///   step the old song led to (whichever placement plays it, so a split
-    ///   placement plays on); otherwise they get `AllOff` at `k` (see
-    ///   `Sequencer::carry_over`);
+    ///   only when it plays at `k` (from its placement or its session clip)
+    ///   a clip with the same events, at the clip step the old song led to
+    ///   (whichever placement plays it, so a split placement plays on);
+    ///   otherwise they get `AllOff` at `k` (see `Sequencer::carry_over`);
     /// - a swap that changes a track's signal path (a device added, removed,
     ///   reordered or rebuilt, the instrument swapped, the track added or
     ///   removed) crossfades that track over [`SWAP_FADE_MS`]: the old path
@@ -806,7 +842,8 @@ impl Engine {
     /// - the loop is clamped to the new end, and dropped when it starts at
     ///   or past it;
     /// - if `k` lies at or past the new end, playback jumps to the loop start
-    ///   when a loop remains and finishes otherwise.
+    ///   when a loop remains and finishes otherwise; session clips keep their
+    ///   phase across the jump, as across a loop wrap.
     ///
     /// A finished engine applies a swap at once and stays finished at the
     /// new end; [`seek`](Self::seek) restarts it.
@@ -1025,7 +1062,8 @@ impl Engine {
 
     /// Moves every session clip from song step `from` to `to`, keeping its
     /// phase: at `to` it plays the clip step it would have played at
-    /// `from`. Called where the playhead jumps (a loop wrap, a seek). Every
+    /// `from`. Called where the playhead jumps (a loop wrap, a seek, a swap
+    /// that moves it), with every session clip an index into `song`. Every
     /// session source starts at or before `from`, so nothing underflows.
     fn rebase(song: &CompiledSong, tracks: &mut [TrackRuntime], from: u64, to: u64) {
         for rt in tracks {
@@ -1369,6 +1407,8 @@ impl Engine {
                     let old = &self.song.tracks[i];
                     let mut kept =
                         std::mem::replace(&mut self.tracks[i], TrackRuntime::placeholder());
+                    // Session state follows clip ids into the new song.
+                    kept.remap(&self.song, &u.song, j);
                     let mut unused = fresh;
                     let own_instrument = !same_device(&old.instrument, &new.instrument);
                     if own_instrument {
@@ -1377,7 +1417,10 @@ impl Engine {
                         std::mem::swap(&mut kept.seq, &mut unused.seq);
                     } else {
                         // Held note-clip notes play on or end here.
-                        kept.seq.carry_over(&self.song, &u.song, j, self.step);
+                        let src = (self.step < 16 * u64::from(u.song.total_bars))
+                            .then(|| source(&u.song, kept.play, region_of(&u.song, self.step), j))
+                            .flatten();
+                        kept.seq.carry_over(&self.song, &u.song, self.step, src);
                     }
                     let path_changed = own_instrument
                         || old.fx.len() != new.fx.len()
@@ -1451,6 +1494,7 @@ impl Engine {
             .looping
             .and_then(|(start, end)| (start < total_steps).then(|| (start, end.min(total_steps))));
         self.needs_static = true;
+        let from = self.step;
         if self.finished || self.step >= total_steps {
             match self.looping {
                 Some((start, _)) if !self.finished => self.step = start,
@@ -1459,6 +1503,11 @@ impl Engine {
                     self.step = total_steps;
                 }
             }
+        }
+        if self.step != from {
+            // Session clips (remapped above) keep their phase across the
+            // jump, measured in the new song's clips.
+            Self::rebase(song, &mut self.tracks, from, self.step);
         }
         self.pos = song.clock.step_start(self.step);
         self.region = region_of(song, self.step);

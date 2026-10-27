@@ -8,7 +8,8 @@
 //! a seek, a loop wrap, the song
 //! end and knob overrides on tracks, strips and the mix; and that
 //! `Engine::cue` and session play (cues landing, session clips across a
-//! loop wrap and a seek) never allocate either.
+//! loop wrap and a seek) never allocate either, nor do session cues from
+//! the controller and swaps that remap or drop a launched clip.
 //!
 //! A counting global allocator counts every allocation, reallocation and
 //! deallocation made while the thread-local "audio" flag is set. The flag is
@@ -245,7 +246,102 @@ fn process_never_allocates_or_frees() {
     assert_eq!(ctl.swaps_applied(), 9);
     assert_eq!(ctl.collect_garbage(), 1);
 
+    // Session play from the controller, on `mini` plus the scene `drop`
+    // (the acid plays a1, the hat h, the kick stops).
+    let jam = |edit: fn(&mut tune_song::Song)| {
+        compile_song(&variant_of(MINI, |s| {
+            s.scenes.insert("drop".into(), drop_scene());
+            edit(s);
+        }))
+    };
+    let swap = |ctl: &mut tune_engine::LiveController,
+                p: &mut LiveProcessor,
+                out: &mut [f32],
+                to: Arc<CompiledSong>,
+                n: u64| {
+        ctl.swap(to).unwrap();
+        audio(p, out, STEP, 512);
+        assert_eq!(ctl.swaps_applied(), n);
+        assert_eq!(ctl.collect_garbage(), 1);
+    };
+    let is_clip = |p: &LiveProcessor, t: usize, clip: usize| matches!(p.session(t), Some((TrackPlay::Clip(src), _)) if src.clip == clip);
+    let plays = |p: &LiveProcessor, t: usize| p.session(t).map(|s| s.0);
+    swap(&mut ctl, &mut p, &mut out, jam(|_| {}), 10);
+
+    // Cues of each kind: a launch landing at step 0, the scene at bar 1, a
+    // stop and a return at bar 2, a launch at bar 3.
+    ctl.seek(0).unwrap();
+    ctl.cue(SessionCue::Launch { track: 1, clip: 1 }).unwrap();
+    audio(&mut p, &mut out, 1000, 512);
+    assert!(is_clip(&p, 1, 1));
+    ctl.cue(SessionCue::Scene(0)).unwrap();
+    audio(&mut p, &mut out, BAR, 333);
+    assert!(is_clip(&p, 2, 2));
+    assert_eq!(plays(&p, 0), Some(TrackPlay::Stopped));
+    ctl.cue(SessionCue::Stop(1)).unwrap();
+    ctl.cue(SessionCue::Back(Some(0))).unwrap();
+    audio(&mut p, &mut out, BAR, 4096);
+    assert_eq!(plays(&p, 1), Some(TrackPlay::Stopped));
+    assert_eq!(plays(&p, 0), Some(TrackPlay::Arrangement));
+    ctl.cue(SessionCue::Launch { track: 1, clip: 1 }).unwrap();
+    audio(&mut p, &mut out, BAR, 512);
+    assert!(is_clip(&p, 1, 1));
+
+    // A swap that remaps the launched a1 (a clip inserted before it), then
+    // one that removes it (the hat's h moves down to index 1).
+    swap(
+        &mut ctl,
+        &mut p,
+        &mut out,
+        jam(|s| {
+            let z = tune_dsp::DrumPattern::parse("x...............").unwrap();
+            s.clips
+                .shift_insert(0, "z".into(), tune_song::Clip::Drum(z));
+        }),
+        11,
+    );
+    assert!(is_clip(&p, 1, 2));
+    assert!(is_clip(&p, 2, 3));
+    swap(
+        &mut ctl,
+        &mut p,
+        &mut out,
+        jam(|s| {
+            s.tracks.get_mut("acid").unwrap().play.clear();
+            s.clips.shift_remove("a1");
+            s.scenes.get_mut("drop").unwrap().slots.shift_remove("acid");
+        }),
+        12,
+    );
+    assert_eq!(plays(&p, 1), Some(TrackPlay::Stopped));
+    assert!(is_clip(&p, 2, 1));
+
+    // A seek and a loop wrap with the hat's session clip playing, then
+    // every track back to the arrangement.
+    ctl.seek(1).unwrap();
+    ctl.set_loop(Some(1..2)).unwrap();
+    audio(&mut p, &mut out, BAR + 100, 4096);
+    assert_eq!(ctl.position(), BAR + 100);
+    assert!(is_clip(&p, 2, 1));
+    ctl.cue(SessionCue::Back(None)).unwrap();
+    ctl.set_loop(None).unwrap();
+    audio(&mut p, &mut out, BAR, 512);
+    for t in 0..3 {
+        assert_eq!(p.session(t), Some((TrackPlay::Arrangement, None)));
+    }
+
     assert_no_alloc();
+}
+
+/// The scene `drop`: the acid plays a1, the hat h; the kick's slot is
+/// empty.
+fn drop_scene() -> Scene {
+    Scene {
+        slots: [("acid", "a1"), ("hat", "h")]
+            .into_iter()
+            .map(|(t, c)| (t.to_owned(), c.to_owned()))
+            .collect(),
+    }
 }
 
 /// Track 1 of `mixed` is `acid`.
