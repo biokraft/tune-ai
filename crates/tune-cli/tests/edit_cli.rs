@@ -47,7 +47,7 @@ fn set_writes_and_logs_claude() {
         "--json",
     ]));
     assert_eq!(v["ok"], true);
-    assert_eq!(v["migrated_from"], Value::Null);
+    assert!(v.get("migrated_from").is_none(), "{v}");
     assert_eq!(v["changes"][0]["old"], 500);
     assert_eq!(v["changes"][0]["new"], 820);
     let text = fs::read_to_string(&song).unwrap();
@@ -240,7 +240,7 @@ fn set_noop_on_v1_writes_nothing() {
         "--json",
     ]));
     assert_eq!(v["changes"], serde_json::json!([]));
-    assert_eq!(v["migrated_from"], Value::Null);
+    assert!(v.get("migrated_from").is_none(), "{v}");
     assert_eq!(
         v["file_hash"],
         text_hash(&String::from_utf8(before.clone()).unwrap())
