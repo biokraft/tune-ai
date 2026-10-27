@@ -23,6 +23,7 @@
 //! its request starts with an HTTP request line, never with JSON. The secret
 //! is never printed: neither handle's `Debug` shows it and no error names it.
 
+use std::ffi::OsString;
 use std::fmt;
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, ErrorKind, Read, Write};
@@ -57,12 +58,27 @@ const MAX_CONNECTIONS: usize = 16;
 const REFUSED: &str = "refused";
 
 /// The endpoint directory: `$TUNE_STUDIO_DIR`, else `$HOME/.tune/studios`.
-pub fn studio_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os(STUDIO_DIR_ENV).filter(|d| !d.is_empty()) {
-        return PathBuf::from(dir);
+/// Never a relative path, which the CLI and the studio (each in its own
+/// working directory) would read differently: a relative
+/// `TUNE_STUDIO_DIR`, or no `TUNE_STUDIO_DIR` and no absolute `HOME`, is an
+/// error.
+pub fn studio_dir() -> io::Result<PathBuf> {
+    studio_dir_from(std::env::var_os(STUDIO_DIR_ENV), std::env::var_os("HOME"))
+}
+
+fn studio_dir_from(env_dir: Option<OsString>, home: Option<OsString>) -> io::Result<PathBuf> {
+    let invalid = |m: &str| io::Error::new(ErrorKind::InvalidInput, m);
+    if let Some(dir) = env_dir.filter(|d| !d.is_empty()).map(PathBuf::from) {
+        return if dir.is_absolute() {
+            Ok(dir)
+        } else {
+            Err(invalid("TUNE_STUDIO_DIR must be an absolute path"))
+        };
     }
-    let home = std::env::var_os("HOME").map_or_else(PathBuf::new, PathBuf::from);
-    home.join(".tune").join("studios")
+    match home.filter(|h| !h.is_empty()).map(PathBuf::from) {
+        Some(home) if home.is_absolute() => Ok(home.join(".tune").join("studios")),
+        _ => Err(invalid("HOME is not set; set TUNE_STUDIO_DIR")),
+    }
 }
 
 /// The secret: 64 lowercase hex digits. Its `Debug` hides it.
@@ -124,8 +140,15 @@ impl fmt::Debug for ControlServer {
 
 impl ControlServer {
     /// Listens on `127.0.0.1` for the studio behind `handle` and writes the
-    /// endpoint file into `dir`, which is created (or set) `0700`.
+    /// endpoint file into `dir`, which is created (or set) `0700`. A
+    /// relative `dir` is an error.
     pub fn start(handle: StudioHandle, dir: &Path) -> io::Result<Self> {
+        if !dir.is_absolute() {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("the endpoint directory {} is not absolute", dir.display()),
+            ));
+        }
         DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
         // An existing directory is made private too (failing, say, on a
         // directory of another user's).
@@ -161,7 +184,8 @@ impl ControlServer {
     /// failure, the warning to print (`warning: CLI edits will write the
     /// file directly: <why>`); the host goes on without the endpoint.
     pub fn start_or_warn(handle: StudioHandle) -> Result<Self, String> {
-        Self::start(handle, &studio_dir())
+        studio_dir()
+            .and_then(|dir| Self::start(handle, &dir))
             .map_err(|e| format!("warning: CLI edits will write the file directly: {e}"))
     }
 
@@ -631,12 +655,22 @@ mod tests {
     }
 
     #[test]
-    fn studio_dir_follows_the_variable() {
-        // Read only: the variable is set by the test runner or not at all.
-        let dir = studio_dir();
-        match std::env::var_os(STUDIO_DIR_ENV).filter(|d| !d.is_empty()) {
-            Some(d) => assert_eq!(dir, PathBuf::from(d)),
-            None => assert!(dir.ends_with(".tune/studios")),
-        }
+    fn the_studio_dir_is_always_absolute() {
+        let os = |s: &str| Some(OsString::from(s));
+        let dir = |e, h| studio_dir_from(e, h).map_err(|e| e.to_string());
+        assert_eq!(
+            dir(os("/x/studios"), os("/h")),
+            Ok(PathBuf::from("/x/studios"))
+        );
+        assert_eq!(dir(None, os("/h")), Ok(PathBuf::from("/h/.tune/studios")));
+        assert_eq!(dir(os(""), os("/h")), Ok(PathBuf::from("/h/.tune/studios")));
+        let no_home = Err("HOME is not set; set TUNE_STUDIO_DIR".to_owned());
+        assert_eq!(dir(None, None), no_home);
+        assert_eq!(dir(None, os("")), no_home);
+        assert_eq!(dir(None, os("home")), no_home);
+        assert_eq!(
+            dir(os("studios"), os("/h")),
+            Err("TUNE_STUDIO_DIR must be an absolute path".to_owned())
+        );
     }
 }

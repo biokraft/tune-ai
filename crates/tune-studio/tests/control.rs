@@ -296,6 +296,17 @@ fn the_endpoint_directory_is_created_private() {
 }
 
 #[test]
+fn a_relative_endpoint_directory_is_refused() {
+    let f = fixture(COMMENTED);
+    let err = ControlServer::start(f.studio.clone(), Path::new("studios")).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "the endpoint directory studios is not absolute"
+    );
+    assert!(!Path::new("studios").exists());
+}
+
+#[test]
 fn find_studio_matches_the_open_song() {
     let f = fixture(COMMENTED);
     assert!(find_studio(f.endpoints.path(), &f.path).is_some());
