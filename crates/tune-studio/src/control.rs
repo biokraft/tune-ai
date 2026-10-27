@@ -10,8 +10,11 @@
 //! most 4 MiB and the whole request must arrive within 5 s:
 //!
 //! - `{"secret": "…", "op": "song"}` → `{"ok": true, "song": "<canonical path>" | null}`
-//! - `{"secret": "…", "op": "do", "actions": [Action…], "source": "claude", "run": RunTag | null}`
-//!   → `{"ok": true, "outcome": ActionsOutcome}` or `{"ok": false, "error": "<message>"}`
+//! - `{"secret": "…", "op": "do", "song": "<canonical path>", "actions": [Action…], "source": "claude", "run": RunTag | null}`
+//!   → `{"ok": true, "outcome": ActionsOutcome}` or `{"ok": false, "error": "<message>"}`;
+//!   the studio checks `song` against its open song as it runs the actions,
+//!   so a song switch since `op: song` refuses the request instead of
+//!   editing the other song.
 //!
 //! A first line that is not JSON, lacks `secret`, or carries another one
 //! (compared in constant time) gets `{"ok": false, "error": "refused"}` and
@@ -236,6 +239,8 @@ fn serve(listener: &TcpListener, handle: &StudioHandle, secret: &Secret, stop: &
 enum Request {
     Song,
     Do {
+        /// The song the client found the studio for (canonical).
+        song: PathBuf,
         actions: Vec<Action>,
         source: Source,
         #[serde(default)]
@@ -289,6 +294,7 @@ fn answer(line: &[u8], handle: &StudioHandle, secret: &Secret) -> Value {
             Err(e) => failed(e),
         },
         Request::Do {
+            song,
             actions,
             source,
             run,
@@ -304,7 +310,7 @@ fn answer(line: &[u8], handle: &StudioHandle, secret: &Secret) -> Value {
                 Ok(run) => run,
                 Err(e) => return failed(e),
             };
-            match handle.run_actions(actions, Origin { source, run }) {
+            match handle.run_actions_on(Some(song), actions, Origin { source, run }) {
                 Ok(outcome) => json!({ "ok": true, "outcome": outcome }),
                 Err(e) => failed(e),
             }
@@ -347,12 +353,15 @@ fn read_line(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
 pub struct StudioLink {
     port: u16,
     secret: Secret,
+    /// The song it was found for (canonical); every `do` names it.
+    song: PathBuf,
 }
 
 impl fmt::Debug for StudioLink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StudioLink")
             .field("port", &self.port)
+            .field("song", &self.song)
             .finish_non_exhaustive()
     }
 }
@@ -370,6 +379,7 @@ pub fn find_studio(dir: &Path, song: &Path) -> Option<StudioLink> {
             .map(|e| StudioLink {
                 port: e.port,
                 secret: Secret(e.secret),
+                song: song.clone(),
             })
         else {
             continue;
@@ -418,7 +428,9 @@ fn endpoint_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 impl StudioLink {
-    /// Runs `actions` in the studio as `origin`. Once the request is sent,
+    /// Runs `actions` in the studio as `origin`, if it still has the song
+    /// open that it was found for (else the studio refuses with
+    /// [`StudioError::SongChanged`]'s message). Once the request is sent,
     /// no answer within 5 s is [`StudioError::NoAnswer`], and the studio's
     /// refusal is its message; neither may be retried against the file.
     pub fn run(&self, actions: &[Action], origin: &Origin) -> Result<ActionsOutcome, StudioError> {
@@ -426,6 +438,7 @@ impl StudioLink {
             .map_err(|e| StudioError::Io(format!("cannot reach the studio: {e}")))?;
         let request = json!({
             "op": "do",
+            "song": self.song,
             "actions": actions,
             "source": origin.source,
             "run": origin.run,

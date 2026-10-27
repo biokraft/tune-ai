@@ -200,10 +200,28 @@ impl StudioHandle {
         actions: Vec<Action>,
         origin: Origin,
     ) -> Result<ActionsOutcome, StudioError> {
+        self.run_actions_on(None, actions, origin)
+    }
+
+    /// [`run_actions`](Self::run_actions), only while `song` (canonical)
+    /// is the open song: checked in the actor, together with the run, so a
+    /// song switch cannot slip in between. Another song (or none) gives
+    /// [`StudioError::SongChanged`] and changes nothing.
+    pub(crate) fn run_actions_on(
+        &self,
+        song: Option<PathBuf>,
+        actions: Vec<Action>,
+        origin: Origin,
+    ) -> Result<ActionsOutcome, StudioError> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.inner
             .tx
-            .send(Msg::Actions(actions, origin, reply_tx))
+            .send(Msg::Actions {
+                song,
+                actions,
+                origin,
+                reply: reply_tx,
+            })
             .map_err(|_| StudioError::Closed)?;
         match reply_rx.recv_timeout(CALL_TIMEOUT) {
             Ok(result) => result,
@@ -245,12 +263,13 @@ impl StudioHandle {
 
 enum Msg {
     Call(Command, Sender<Result<Value, StudioError>>),
-    /// An agent's actions (see [`StudioHandle::run_actions`]).
-    Actions(
-        Vec<Action>,
-        Origin,
-        Sender<Result<ActionsOutcome, StudioError>>,
-    ),
+    /// An agent's actions (see [`StudioHandle::run_actions_on`]).
+    Actions {
+        song: Option<PathBuf>,
+        actions: Vec<Action>,
+        origin: Origin,
+        reply: Sender<Result<ActionsOutcome, StudioError>>,
+    },
     SongPath(Sender<Option<PathBuf>>),
     Subscribe(Sender<Event>),
     /// A change of the song file; `epoch` names the watcher that saw it,
@@ -418,8 +437,16 @@ impl Actor {
                         self.emit(Event::Error { message });
                     }
                 }
-                Ok(Msg::Actions(actions, origin, reply)) => {
-                    let result = self.run_actions(&actions, &origin);
+                Ok(Msg::Actions {
+                    song,
+                    actions,
+                    origin,
+                    reply,
+                }) => {
+                    let result = match song {
+                        Some(want) if !self.has_open(&want) => Err(StudioError::SongChanged),
+                        _ => self.run_actions(&actions, &origin),
+                    };
                     self.publish_if_stale();
                     let _ = reply.send(result);
                 }
@@ -503,6 +530,14 @@ impl Actor {
             action @ Action::SetParam { commit: true, .. } => self.release(&action),
             edit => self.edit(&edit),
         }
+    }
+
+    /// Whether the open song is `song` (canonical).
+    fn has_open(&self, song: &Path) -> bool {
+        self.song
+            .as_ref()
+            .and_then(|s| fs::canonicalize(s.core.path()).ok())
+            .is_some_and(|open| open == song)
     }
 
     /// An agent's actions: one live or history action runs as the UI's
