@@ -28,6 +28,8 @@ and lock-free live playback) driven through the `tune` CLI.
   (default device) and `NullOut`. `cpal` lives only here.
 - `apps/desktop` - the studio app (React + Vite in `src/`, Tauri host in
   `src-tauri/`). `tune serve` serves its built `dist/` to a browser.
+  `src/client/generated.ts` is generated from `tune-studio`; regenerate with
+  `UPDATE_GOLDEN=1 cargo test -p tune-studio --test wire_types`.
 - `packages/ui` - `@tune/ui`: the studio's components (Knob, sequencers,
   arrangement, mixer, transport) and theme tokens.
 - `songs/<name>/song.toml` - committed songs. Renders go to `scratch/` or

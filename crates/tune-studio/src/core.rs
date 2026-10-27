@@ -70,7 +70,7 @@ pub struct PendingEdit {
 }
 
 /// What a change on disk did to the open song.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
 pub struct ExternalChange {
     /// `claude` when the edit log holds a `claude` entry with the file's
     /// hash, otherwise `external`.

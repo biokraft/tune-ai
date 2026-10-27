@@ -6,7 +6,7 @@ use tune_song::SongError;
 use crate::doc::EditError;
 
 /// A problem in the song file, with its position when it has one.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
 pub struct ErrorView {
     pub line: Option<usize>,
     pub column: Option<usize>,
