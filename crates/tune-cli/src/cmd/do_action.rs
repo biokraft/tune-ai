@@ -11,8 +11,8 @@ use std::process::ExitCode;
 
 use serde_json::{Value, json};
 use tune_studio::{
-    Action, ActionKind, ActionsOutcome, KeptReason, KeptTarget, Origin, RunUndo, Source,
-    StudioError, action_from_cli, apply_to_file, find_studio, studio_dir,
+    Action, ActionKind, ActionsOutcome, KeptReason, KeptTarget, Origin, RunUndo, STUDIO_DIR_ENV,
+    Source, StudioError, action_from_cli, apply_to_file, find_studio, studio_dir,
 };
 
 use super::set::{RunFlags, change_lines, failures, file_hash};
@@ -81,13 +81,27 @@ fn do_actions(a: &Args) -> Result<Success, Vec<Failure>> {
 /// the file (live and history actions then give
 /// [`StudioError::NeedsStudio`]). An error once the studio has the request
 /// (no answer, or its refusal) is the result: the file is never tried after.
+///
+/// A `TUNE_STUDIO_DIR` that cannot be used (a relative path) is an error:
+/// a studio started with a good one may have the song open. With no
+/// `TUNE_STUDIO_DIR` and no `HOME` there is no endpoint directory, so no
+/// studio can be found: the file is edited, with a warning.
 pub(crate) fn run_actions(
     song: &Path,
     actions: &[Action],
     origin: &Origin,
 ) -> Result<ActionsOutcome, StudioError> {
-    // No endpoint directory: no studio can have written one there.
-    match studio_dir().ok().and_then(|dir| find_studio(&dir, song)) {
+    let dir = match studio_dir() {
+        Ok(dir) => Some(dir),
+        Err(e) if std::env::var_os(STUDIO_DIR_ENV).is_some_and(|d| !d.is_empty()) => {
+            return Err(StudioError::Io(e.to_string()));
+        }
+        Err(_) => {
+            eprintln!("warning: HOME is not set; a running studio cannot be found");
+            None
+        }
+    };
+    match dir.and_then(|dir| find_studio(&dir, song)) {
         Some(link) => link.run(actions, origin),
         None => apply_to_file(song, actions, origin),
     }
