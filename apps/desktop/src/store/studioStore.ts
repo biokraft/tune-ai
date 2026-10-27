@@ -240,6 +240,9 @@ export function createStudioStore(client: StudioClient): StudioStore {
     if (state && stateEvents === seenBefore) adopt(state);
   }, report);
 
+  /** Runs whose undo is in flight. */
+  const undoing = new Set<string>();
+
   const send = (cmd: Command) => {
     const p = client.call(cmd);
     p.catch(report);
@@ -257,7 +260,15 @@ export function createStudioStore(client: StudioClient): StudioStore {
       set({ selectedSection: view.state ? clampSelection(view.state, i) : i });
     },
     async undoRun(run) {
-      const result = await send({ cmd: "undo_run", args: { run } });
+      // A second click before the first answer would only report "nothing to undo" over it.
+      if (undoing.has(run)) return null;
+      undoing.add(run);
+      let result: unknown;
+      try {
+        result = await send({ cmd: "undo_run", args: { run } });
+      } finally {
+        undoing.delete(run);
+      }
       // Only a toast still about this run takes the answer.
       if (view.notice?.run?.id === run) set({ runUndo: result as RunUndo, noticeUndoable: false });
       return result;
