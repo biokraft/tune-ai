@@ -375,6 +375,37 @@ The producer may have the studio (app or browser) open on the same song.
   | `move_scene` | `tune do <song> move_scene scene=break index=0` removes the scene and inserts it at `index`; its comments travel with it |
   | `set_slot` | `tune do <song> set_slot scene=groove track=acid clip=a1` puts the clip in the slot (a clip the track's instrument can play); `clip=` empties the slot |
 
+  The session ones are live, like `play`: they need the studio open, a
+  `--batch` refuses them, and they write nothing, are not undoable, are never
+  logged or part of a run, return `null` and print nothing in text mode. Each
+  lands at the next bar line, and an unknown track or scene, or a launch of an
+  empty slot, is refused with a plain message ("scene `break` has no clip for
+  track `acid`"):
+
+  | Action | Example |
+  | --- | --- |
+  | `launch_clip` | `tune do <song> launch_clip track=acid scene=groove` plays the clip in the scene's slot for the track from its start, looping; the track leaves the arrangement until it is sent back, so its lanes no longer drive it and a knob released on it is written |
+  | `launch_scene` | `tune do <song> launch_scene scene=groove` launches the row: each track whose slot holds a clip plays it, and each track with an empty slot stops |
+  | `stop_clip` | `tune do <song> stop_clip track=hat` silences the track (one playing the arrangement too) until it is sent back |
+  | `back_to_arrangement` | `tune do <song> back_to_arrangement track=acid` sends the track back to the arrangement; without `track`, every track |
+
+  With the transport stopped, a launch starts playback at the cursor (a bar
+  line, so it lands at once), and `stop_clip` and `back_to_arrangement`
+  change nothing. Stopping ends the session: the next playback starts with
+  every track on the arrangement. What plays is the launched clip, not the
+  slot, so `set_slot`, `rename_scene` or `remove_scene` change nothing until
+  the next launch. A hot reload keeps the session by id: an edited clip plays
+  its new content, a track whose clip is gone (or that its new instrument
+  cannot play) stops, and a renamed or new track follows the arrangement. A
+  launch sent right after an edit waits until the engine plays the edit, so
+  it can land one bar later; one whose scene or track an edit took away in
+  the meantime is dropped with an error event. Session clips do not make the
+  song longer: it still ends where the arrangement ends, so loop to jam on. A
+  `~` on the last step before the bar line still slides into the launched
+  clip's first note when the old clip or arrangement has a note next, because
+  the slide reads what the track was playing and ignores cues; the samples
+  depend only on the bar the launch lands at.
+
 - Undo a whole run: `tune do <song> undo_run <run id> --json` (the studio
   open or closed; the app's "Undo this run" does the same). It reads the
   run's action records in `edits.jsonl` and puts back every target the run
