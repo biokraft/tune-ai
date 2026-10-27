@@ -265,17 +265,19 @@ impl Sequencer {
     /// or a swap that ended the notes (see [`carry_over`](Self::carry_over)).
     /// Then remembers where placement `src` plays at this step and returns
     /// it, `None` unless `src` plays a notes clip. A track with no `last`
-    /// never plays on. Events of the step before still in the cursor (none:
-    /// every tick of a step starts before the next step) go first when due;
-    /// the rest are dropped.
+    /// never plays on. Events of the step before still in the cursor go
+    /// first when due; the rest are dropped. In a valid song there are none
+    /// (a step is at least 400 samples, so all 24 of its ticks start before
+    /// the next step), but a step under 24 samples can leave one; the
+    /// returned flag says whether an On went out here, so it still ducks.
     fn cut(
         &mut self,
         instrument: &mut dyn Instrument,
         song: &CompiledSong,
         src: Option<CellSource>,
         ctx: &EventCtx,
-    ) -> Option<NotePos> {
-        self.deliver_notes(instrument, song, ctx.pos);
+    ) -> (Option<NotePos>, bool) {
+        let on = self.deliver_notes(instrument, song, ctx.pos);
         self.cursor = None;
         let now = NotePos::of(song, src, ctx.step);
         let continuous = matches!((now, self.last), (Some(now), Some(was)) if now.follows(was));
@@ -284,7 +286,7 @@ impl Sequencer {
             self.notes_live = false;
         }
         self.last = now;
-        now
+        (now, on)
     }
 
     /// On a swap from `old` to `new` at step boundary `step`, for a track
@@ -1053,12 +1055,13 @@ impl Engine {
                 rt.seq
                     .deliver_off(instrument, self.pos, step, track.seed, true);
                 let src = song.regions[region].cells[t];
-                let at = rt.seq.cut(instrument, song, src, &ctx);
+                let (at, late_on) = rt.seq.cut(instrument, song, src, &ctx);
                 // A notes clip's cell is `Rest`, so a step note before it
                 // does not slide into it.
                 let cell = cell_at(song, region, t, step);
                 let next = cell_at(song, next_region, t, next_step);
                 let mut on = rt.seq.step(instrument, cell, next, &ctx, self.gate_samples);
+                on |= late_on;
                 if let Some(at) = at {
                     on |= rt
                         .seq
