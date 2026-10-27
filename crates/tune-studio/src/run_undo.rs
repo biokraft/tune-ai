@@ -186,6 +186,12 @@ pub fn undo_run(
                 } else {
                     decide(doc, p, &foreign, records)
                 };
+                let decision = match track_kept(doc, &plans, &unit, p, records, run) {
+                    Some(by) if !matches!(decision, Decision::Kept(_)) => {
+                        Decision::Kept(kept_whole(p, by))
+                    }
+                    _ => decision,
+                };
                 let by = foreign.last().map(|&j| records[j].source);
                 (p, decision, by)
             })
@@ -287,6 +293,51 @@ pub fn undo_run(
         }
     }
     Ok(out)
+}
+
+/// For a part of a track (a lane param's stretches) outside the unit of
+/// the run's plan of that whole track: `Some` with its `by` when that
+/// plan is kept. A track the run removed that someone made again (by hand
+/// too) is kept, and what the run took with it must not come back onto
+/// theirs. The track's plan is decided now: the reverts before its turn
+/// (its parts, in the same write) do not change its value.
+fn track_kept(
+    doc: &SongDoc,
+    plans: &[Plan],
+    unit: &[usize],
+    p: &Plan,
+    records: &[ActionRecord],
+    run: &str,
+) -> Option<Option<Source>> {
+    let Target::Lanes { track, .. } = &p.target else {
+        return None;
+    };
+    let k = plans
+        .iter()
+        .position(|t| matches!(&t.target, Target::Track(u) if u == track))?;
+    if unit.contains(&k) {
+        return None;
+    }
+    let (_, foreign) = other_writes(&plans[k], records, run);
+    match decide(doc, &plans[k], &foreign, records) {
+        Decision::Kept(kept) => Some(kept.first().and_then(|k| k.by)),
+        _ => None,
+    }
+}
+
+/// `p` kept whole, changed later by `by`: each element the run added or
+/// removed for a list, else the target.
+fn kept_whole(p: &Plan, by: Option<Source>) -> Vec<KeptTarget> {
+    changed_items(p)
+        .into_iter()
+        .map(|item| KeptTarget {
+            target: p.target.clone(),
+            item,
+            reason: KeptReason::ChangedLater,
+            by,
+            message: None,
+        })
+        .collect()
 }
 
 /// Whether the run changed `p`'s target: its value after the run's last
