@@ -149,7 +149,9 @@ gain/pan -> sends -> delay and reverb buses -> master gain -> clip or limit.
 - A hot reload keeps the reverb tail and the limiter. Only a bpm change or a
   delay bus appearing or going restarts the delay (its echoes stop). A
   master-mode switch crossfades clipper and limiter over 10 ms, with no silent
-  frames.
+  frames. A swap that adds, removes, reorders or rebuilds a device, swaps the
+  instrument, or adds or removes a track crossfades that track over 10 ms;
+  value, step and clip edits switch at the step.
 
 Every command takes `--json`; exit code 2 means failure. `tune play` is for the
 producer: it plays through the speakers and reloads the file when it changes.
