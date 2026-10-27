@@ -26,6 +26,7 @@ fn json_of(out: &[u8]) -> Value {
     serde_json::from_slice(out).expect("stdout is JSON")
 }
 
+/// Every line of the edit log, entries and action records.
 fn log_lines(dir: &Path) -> Vec<Value> {
     fs::read_to_string(dir.join("edits.jsonl"))
         .unwrap_or_default()
@@ -54,12 +55,17 @@ fn migrate_rewrites_a_v1_copy_and_logs_it() {
         fs::read_to_string(fixtures().join("v2/mini.toml")).unwrap()
     );
     let log = log_lines(dir.path());
-    let last = log.last().expect("one log entry");
-    assert_eq!(last["path"], "song.version");
-    assert_eq!(last["source"], "claude");
-    assert_eq!(last["old"], 1);
-    assert_eq!(last["new"], 2);
-    assert_eq!(last["file_hash"], hash);
+    let [entry, record] = log.as_slice() else {
+        panic!("one entry and its record: {log:?}");
+    };
+    assert_eq!(entry["path"], "song.version");
+    assert_eq!(entry["source"], "claude");
+    assert_eq!(entry["old"], 1);
+    assert_eq!(entry["new"], 2);
+    assert_eq!(entry["file_hash"], hash);
+    assert_eq!(record["record"], "action");
+    assert_eq!(record["actions"], serde_json::json!(["migrate"]));
+    assert_eq!(record["file_hash"], hash);
 }
 
 #[test]

@@ -6,7 +6,7 @@
 //! before and after, so undo restores the file byte for byte, comments
 //! included. Every write, undo and redo appends `human` entries to the edit
 //! log, one per changed path, each naming the action that made it (`undo`
-//! and `redo` for those).
+//! and `redo` for those), then the write's action record.
 //!
 //! The file also changes from outside: Claude through `tune set` or by
 //! editing it, an editor, git. [`StudioCore::on_disk_text`] takes each new
@@ -38,14 +38,15 @@ use serde_json::Value;
 use tune_song::{FORMAT_VERSION, Song};
 
 use crate::action::{
-    Action, ActionKind, ActionsOutcome, ApplyCtx, Origin, RunTag, Via, apply_action, apply_all,
+    Action, ActionKind, ActionsOutcome, ApplyCtx, Origin, Via, apply_action, apply_all,
 };
 use crate::diff::{Change, diff_files, diff_songs, is_whole_replace, version_change};
 use crate::doc::SongDoc;
 use crate::error::{ErrorView, StudioError};
-use crate::log::{EditEntry, EditLog, Source, entries_for, text_hash};
+use crate::log::{ActionRecord, EditEntry, EditLog, Source, entries_for, text_hash};
 use crate::path::SongPath;
 use crate::set::write_atomic;
+use crate::target::{TargetChange, target_changes};
 use crate::view::SongView;
 
 /// Quiet time after the last edit of a burst before it is written.
@@ -183,8 +184,9 @@ impl StudioCore {
 
     /// Writes the document, migrated from format `from` in memory, over the
     /// older text as one of the studio's own writes, logs it as one
-    /// `external` `song.version` change and makes it one undo step. When the
-    /// write fails, nothing is logged or pushed and the reason is kept.
+    /// `external` `song.version` change (a `migrate` record) and makes it
+    /// one undo step. When the write fails, nothing is logged or pushed and
+    /// the reason is kept.
     fn write_migration(&mut self, from: u32) {
         let text = self.doc.text();
         let hash = match self.write(&text) {
@@ -197,10 +199,12 @@ impl StudioCore {
             }
         };
         let changes: Vec<Change> = version_change(from, FORMAT_VERSION).into_iter().collect();
-        if let Err(e) = self
-            .log
-            .append_changes(Source::External, &changes, &hash, None, None)
-        {
+        let ts = Timestamp::now();
+        let entries = entries_for(ts, Source::External, &changes, &hash, None, None);
+        // The format changes, not the song.
+        let targets = target_changes(&self.disk_song, self.doc.song());
+        let record = ActionRecord::new(ts, Source::External, ["migrate"], None, targets, &hash);
+        if let Err(e) = self.log.append_logged(&entries, &record) {
             // The file is migrated either way; say that the log missed it.
             self.migration_error = Some(format!(
                 "the song was upgraded and saved, but the edit log could not be written: {e}"
@@ -319,6 +323,8 @@ impl StudioCore {
             .iter()
             .map(|c| self.pending_action_name(&c.path))
             .collect();
+        let actions: Vec<&'static str> = self.pending.iter().map(|e| e.action.name()).collect();
+        let targets = target_changes(&self.disk_song, self.doc.song());
         self.clear_pending();
         let before = std::mem::replace(&mut self.disk_text, text.clone());
         self.disk_version = FORMAT_VERSION;
@@ -330,7 +336,14 @@ impl StudioCore {
             changes: changes.clone(),
         });
         self.redo.clear();
-        self.log_changes(Source::Human, &changes, &hash, |i| names[i], None)?;
+        self.log_changes(
+            Source::Human,
+            &changes,
+            &hash,
+            |i| names[i],
+            &actions,
+            targets,
+        )?;
         Ok(changes)
     }
 
@@ -387,7 +400,8 @@ impl StudioCore {
         if source == Source::External {
             // Best effort: the change is adopted even if the log is not
             // writable, as it is already on disk.
-            let _ = self.log_changes(Source::External, &changes, &hash, |_| None, None);
+            let targets = target_changes(&self.disk_song, doc.song());
+            let _ = self.log_changes(Source::External, &changes, &hash, |_| None, &[], targets);
         }
         let replaced = is_whole_replace(&self.disk_text, &text);
         let before = std::mem::replace(&mut self.disk_text, text.clone());
@@ -553,9 +567,10 @@ impl StudioCore {
             return Ok(Vec::new());
         };
         match self.restore(&entry.before) {
-            Ok((changes, hash)) => {
+            Ok((changes, targets, hash)) => {
                 self.redo.push(entry);
-                self.log_changes(source, &changes, &hash, |_| Some("undo"), None)?;
+                let undo = |_| Some("undo");
+                self.log_changes(source, &changes, &hash, undo, &["undo"], targets)?;
                 Ok(changes)
             }
             Err(e) => {
@@ -576,9 +591,10 @@ impl StudioCore {
             return Ok(Vec::new());
         };
         match self.restore(&entry.after) {
-            Ok((changes, hash)) => {
+            Ok((changes, targets, hash)) => {
                 self.push_undo(entry);
-                self.log_changes(source, &changes, &hash, |_| Some("redo"), None)?;
+                let redo = |_| Some("redo");
+                self.log_changes(source, &changes, &hash, redo, &["redo"], targets)?;
                 Ok(changes)
             }
             Err(e) => {
@@ -596,9 +612,10 @@ impl StudioCore {
     /// action's name and the run. A `set_param` here is a plain write: no
     /// automation check. A file in an older format (adopted from disk and
     /// not written since) is written in the newest, with a `song.version`
-    /// change first. Changing nothing writes nothing. A live or history
-    /// action gives [`StudioError::EditsOnly`]; while the file does not
-    /// parse, [`StudioError::FileInvalid`].
+    /// change first, and the write's record lists the actions, the run and
+    /// the targets they changed. Changing nothing writes nothing. A live or
+    /// history action gives [`StudioError::EditsOnly`]; while the file does
+    /// not parse, [`StudioError::FileInvalid`].
     pub fn apply_now(
         &mut self,
         actions: &[Action],
@@ -632,6 +649,7 @@ impl StudioCore {
             });
         }
         let hash = self.write(&text)?;
+        let targets = target_changes(self.doc.song(), doc.song());
         let migrated_from = (self.disk_version != FORMAT_VERSION).then_some(self.disk_version);
         let before = std::mem::replace(&mut self.disk_text, text.clone());
         self.disk_version = FORMAT_VERSION;
@@ -644,8 +662,12 @@ impl StudioCore {
             changes: applied.changes.clone(),
         });
         self.redo.clear();
-        let entries = applied.entries(Timestamp::now(), origin.source, &hash, origin.run.as_ref());
-        self.append_log(&entries)?;
+        let ts = Timestamp::now();
+        let run = origin.run.as_ref();
+        let entries = applied.entries(ts, origin.source, &hash, run);
+        let names = actions.iter().map(Action::name);
+        let record = ActionRecord::new(ts, origin.source, names, run, targets, &hash);
+        self.append_log(&entries, &record)?;
         Ok(ActionsOutcome {
             via: Via::Studio,
             changes: applied.changes,
@@ -750,19 +772,24 @@ impl StudioCore {
 
     /// Writes a snapshot and adopts it as both the document and the disk
     /// text, dropping pending edits (there are none: callers flush first).
-    /// Returns the changes from the previous disk text and the new hash.
-    fn restore(&mut self, text: &str) -> Result<(Vec<Change>, String), StudioError> {
+    /// Returns the changes and the target changes from the previous disk
+    /// text, and the new hash.
+    fn restore(
+        &mut self,
+        text: &str,
+    ) -> Result<(Vec<Change>, Vec<TargetChange>, String), StudioError> {
         let doc = SongDoc::parse(text)
             .map_err(|errs| StudioError::Load(errs.iter().map(ErrorView::from).collect()))?;
         let hash = self.write(text)?;
         let version = text_version(&doc);
         let changes = diff_files(self.disk_version, &self.disk_song, version, doc.song());
+        let targets = target_changes(&self.disk_song, doc.song());
         self.disk_song = doc.song().clone();
         self.disk_text = text.to_owned();
         self.disk_version = version;
         self.doc = doc;
         self.clear_pending();
-        Ok((changes, hash))
+        Ok((changes, targets, hash))
     }
 
     fn push_undo(&mut self, entry: UndoEntry) {
@@ -772,27 +799,30 @@ impl StudioCore {
         }
     }
 
-    /// Logs one entry per change, all from `source` and in `run`, each under
-    /// the action name `action` gives for its index, in one append.
+    /// Logs one entry per change, all from `source`, each under the action
+    /// name `action` gives for its index, then the write's record of
+    /// `actions` and `targets`, in one append. These writes are in no run.
     fn log_changes(
         &self,
         source: Source,
         changes: &[Change],
         hash: &str,
         action: impl Fn(usize) -> Option<&'static str>,
-        run: Option<&RunTag>,
+        actions: &[&str],
+        targets: Vec<TargetChange>,
     ) -> Result<(), StudioError> {
         let ts = Timestamp::now();
         let entries: Vec<_> = changes
             .iter()
             .enumerate()
-            .flat_map(|(i, c)| entries_for(ts, source, slice::from_ref(c), hash, action(i), run))
+            .flat_map(|(i, c)| entries_for(ts, source, slice::from_ref(c), hash, action(i), None))
             .collect();
-        self.append_log(&entries)
+        let record = ActionRecord::new(ts, source, actions.iter().copied(), None, targets, hash);
+        self.append_log(&entries, &record)
     }
 
-    fn append_log(&self, entries: &[EditEntry]) -> Result<(), StudioError> {
-        self.log.append(entries).map_err(|e| {
+    fn append_log(&self, entries: &[EditEntry], record: &ActionRecord) -> Result<(), StudioError> {
+        self.log.append_logged(entries, record).map_err(|e| {
             StudioError::Io(format!(
                 "the song was written, but the edit log failed: {e}"
             ))

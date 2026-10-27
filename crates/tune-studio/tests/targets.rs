@@ -1,10 +1,15 @@
-//! Undo targets: the song as targets, the changes between two songs, and
-//! `put` writing a target back.
+//! Undo targets: the song as targets, the changes between two songs, `put`
+//! writing a target back, and the one action record each write logs.
+
+use std::fs;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tune_dsp::acid303::ACID303_PARAMS;
 use tune_studio::{
-    EditError, SongDoc, SongPath, Target, TargetChange, target_changes, target_value,
+    Action, ActionRecord, EditEntry, EditError, EditLog, Origin, RunTag, SongDoc, SongPath, Source,
+    StudioCore, Target, TargetChange, apply_to_file, target_changes, target_value,
 };
 
 const FIXTURE: &str = include_str!("fixtures/commented.toml");
@@ -373,4 +378,291 @@ fn put_of_the_current_value_changes_nothing() {
         doc.put(&t, &value).unwrap_or_else(|e| panic!("{t}: {e}"));
         assert_eq!(doc.text(), FIXTURE, "{t}");
     }
+}
+
+/// A temp dir holding a copy of the commented fixture as `song.toml`.
+struct Song {
+    _dir: tempfile::TempDir,
+    path: PathBuf,
+}
+
+fn song() -> Song {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.toml");
+    fs::write(&path, FIXTURE).unwrap();
+    Song { _dir: dir, path }
+}
+
+fn records(s: &Song) -> Vec<ActionRecord> {
+    EditLog::for_song(&s.path).read_records().unwrap()
+}
+
+fn entries(s: &Song) -> Vec<EditEntry> {
+    EditLog::for_song(&s.path).read_since(None).unwrap()
+}
+
+/// The log's lines that are entries (not records), parsed.
+fn entry_lines(s: &Song) -> Vec<EditEntry> {
+    let text = fs::read_to_string(s.path.with_file_name("edits.jsonl")).unwrap();
+    text.lines()
+        .filter(|l| !l.contains("\"record\":\"action\""))
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+fn summary(r: &ActionRecord) -> (Source, Vec<String>, Option<String>, Vec<String>) {
+    (
+        r.source,
+        r.actions.clone(),
+        r.run.clone(),
+        names(&r.targets),
+    )
+}
+
+fn cutoff(value: f64) -> Action {
+    Action::SetParam {
+        track: "acid".into(),
+        param: "acid303.cutoff".into(),
+        value,
+        commit: true,
+    }
+}
+
+fn set_value(path: &str, value: Value) -> Action {
+    Action::SetValue {
+        path: path.parse().unwrap(),
+        value,
+    }
+}
+
+#[test]
+fn every_write_appends_a_record() {
+    let s = song();
+    let mut core = StudioCore::open(&s.path).unwrap();
+    let t0 = Instant::now();
+
+    // A knob burst: one record for the write.
+    core.apply_edit(&cutoff(700.0), t0).unwrap();
+    core.apply_edit(&cutoff(820.0), t0 + Duration::from_millis(10))
+        .unwrap();
+    let pan = Action::SetTrackMix {
+        track: "hat".into(),
+        gain_db: None,
+        pan: Some(0.5),
+        mute: None,
+        solo: None,
+    };
+    core.apply_edit(&pan, t0 + Duration::from_millis(20))
+        .unwrap();
+    core.flush().unwrap();
+    let r = records(&s);
+    assert_eq!(r.len(), 1);
+    assert_eq!(
+        summary(&r[0]),
+        (
+            Source::Human,
+            vec!["set_param".into(), "set_track_mix".into()],
+            None,
+            vec!["tracks.acid.acid303.cutoff".into(), "tracks.hat.pan".into()],
+        )
+    );
+    assert_eq!(
+        (&r[0].targets[0].old, &r[0].targets[0].new),
+        (&json!(500), &json!(820))
+    );
+    let text = fs::read_to_string(&s.path).unwrap();
+    assert_eq!(
+        r[0].file_hash.as_deref(),
+        Some(tune_studio::text_hash(&text).as_str())
+    );
+
+    // An external edit the studio logs.
+    let edited = text.replace("bpm = 120", "bpm = 121");
+    fs::write(&s.path, &edited).unwrap();
+    core.on_disk_text(edited).expect("an external change");
+    let r = records(&s);
+    assert_eq!(r.len(), 2);
+    assert_eq!(
+        summary(&r[1]),
+        (Source::External, vec![], None, vec!["song.bpm".into()])
+    );
+
+    // An undo, with the asker's source.
+    core.undo(Source::Claude).unwrap();
+    let r = records(&s);
+    assert_eq!(r.len(), 3);
+    assert_eq!(
+        summary(&r[2]),
+        (
+            Source::Claude,
+            vec!["undo".into()],
+            None,
+            vec!["song.bpm".into()]
+        )
+    );
+    assert_eq!(
+        (&r[2].targets[0].old, &r[2].targets[0].new),
+        (&json!(121), &json!(120))
+    );
+
+    // An agent's actions in a run.
+    let run = RunTag::new("r1", Some("open the filter")).unwrap();
+    core.apply_now(
+        &[set_value("tracks.acid.acid303.cutoff", json!(900))],
+        &Origin::claude(Some(run)),
+    )
+    .unwrap();
+    let r = records(&s);
+    assert_eq!(r.len(), 4);
+    assert_eq!(
+        summary(&r[3]),
+        (
+            Source::Claude,
+            vec!["set_value".into()],
+            Some("r1".into()),
+            vec!["tracks.acid.acid303.cutoff".into()]
+        )
+    );
+    assert_eq!(r[3].run_title.as_deref(), Some("open the filter"));
+
+    // `tune set`'s path.
+    apply_to_file(
+        &s.path,
+        &[set_value("song.bpm", json!(125))],
+        &Origin::claude(None),
+    )
+    .unwrap();
+    let r = records(&s);
+    assert_eq!(r.len(), 5);
+    assert_eq!(
+        summary(&r[4]),
+        (
+            Source::Claude,
+            vec!["set_value".into()],
+            None,
+            vec!["song.bpm".into()]
+        )
+    );
+    assert_eq!(r[4].run_title, None);
+
+    // The entries read as before: every line that is not a record.
+    let all = entries(&s);
+    assert_eq!(all, entry_lines(&s));
+    assert_eq!(all.len(), 6, "{all:#?}");
+}
+
+#[test]
+fn redo_and_migrations_append_records() {
+    let s = song();
+    let mut core = StudioCore::open(&s.path).unwrap();
+    core.apply_now(&[cutoff(820.0)], &Origin::human()).unwrap();
+    core.undo(Source::Human).unwrap();
+    core.redo(Source::Human).unwrap();
+    let actions: Vec<Vec<String>> = records(&s).into_iter().map(|r| r.actions).collect();
+    assert_eq!(
+        actions,
+        [vec!["set_param"], vec!["undo"], vec!["redo"]]
+            .map(|a| a.into_iter().map(str::to_owned).collect::<Vec<_>>())
+    );
+
+    // The open-time migration and `migrate_file`: no target changes.
+    for migrate in [true, false] {
+        let s = song();
+        fs::write(&s.path, include_str!("fixtures/commented-v1.toml")).unwrap();
+        if migrate {
+            tune_studio::migrate_file(&s.path, Source::Claude, false).unwrap();
+        } else {
+            StudioCore::open(&s.path).unwrap();
+        }
+        let r = records(&s);
+        assert_eq!(r.len(), 1, "migrate_file: {migrate}");
+        assert_eq!(r[0].actions, ["migrate"]);
+        assert_eq!(r[0].targets, vec![]);
+        assert_eq!(entries(&s).len(), 1, "the song.version entry");
+    }
+}
+
+/// A write that changes nothing appends nothing.
+#[test]
+fn no_change_appends_nothing() {
+    let s = song();
+    let mut core = StudioCore::open(&s.path).unwrap();
+    core.apply_now(&[cutoff(500.0)], &Origin::human()).unwrap();
+    apply_to_file(
+        &s.path,
+        &[
+            set_value("song.bpm", json!(130)),
+            set_value("song.bpm", json!(120)),
+        ],
+        &Origin::claude(None),
+    )
+    .unwrap();
+    assert!(!s.path.with_file_name("edits.jsonl").exists());
+}
+
+#[test]
+fn old_logs_read_unchanged() {
+    let s = song();
+    // Lines as Task 3's code wrote them.
+    let old = concat!(
+        r#"{"ts":"2026-10-21T22:15:01.000Z","source":"human","path":"song.bpm","old":120,"new":121,"file_hash":"aa"}"#,
+        "\n",
+        r#"{"ts":"2026-10-21T22:15:02.000Z","source":"claude","path":"song.bpm","old":121,"new":122,"file_hash":"bb","action":"set_value","run":"r1","run_title":"t"}"#,
+        "\n",
+    );
+    let file = s.path.with_file_name("edits.jsonl");
+    fs::write(&file, old).unwrap();
+    let log = EditLog::for_song(&s.path);
+    let before = log.read_since(None).unwrap();
+    assert_eq!(before.len(), 2);
+    assert_eq!(before[1].run.as_deref(), Some("r1"));
+    assert_eq!(log.read_records().unwrap(), vec![]);
+
+    let record = pinned_record();
+    log.append_write(&before[..1], Some(&record)).unwrap();
+    let text = fs::read_to_string(&file).unwrap();
+    assert!(text.starts_with(old), "{text}");
+    assert_eq!(text.lines().count(), 4);
+    assert_eq!(log.read_since(None).unwrap().len(), 3);
+    assert_eq!(log.read_records().unwrap(), vec![record]);
+}
+
+const PINNED: &str = r#"{"ts":"2026-10-27T10:00:00.000Z","source":"claude","record":"action","actions":["set_value"],"run":"r1","run_title":"open the filter","targets":[{"target":"tracks.acid.acid303.cutoff","old":500,"new":820}],"file_hash":"…"}"#;
+
+fn pinned_record() -> ActionRecord {
+    ActionRecord {
+        ts: "2026-10-27T10:00:00.000Z".parse().unwrap(),
+        source: Source::Claude,
+        actions: vec!["set_value".into()],
+        run: Some("r1".into()),
+        run_title: Some("open the filter".into()),
+        targets: vec![TargetChange {
+            target: target("tracks.acid.acid303.cutoff"),
+            old: json!(500),
+            new: json!(820),
+        }],
+        file_hash: Some("…".into()),
+    }
+}
+
+#[test]
+fn records_have_a_pinned_shape() {
+    let record = pinned_record();
+    assert_eq!(serde_json::to_string(&record).unwrap(), PINNED);
+    assert_eq!(
+        serde_json::from_str::<ActionRecord>(PINNED).unwrap(),
+        record
+    );
+    // A record is not an entry, and an entry is not a record.
+    assert!(serde_json::from_str::<EditEntry>(PINNED).is_err());
+    let entry = r#"{"ts":"2026-10-21T22:15:01.000Z","source":"human","path":"song.bpm","old":120,"new":121}"#;
+    assert!(serde_json::from_str::<ActionRecord>(entry).is_err());
+    // Without a run, the run fields are left out.
+    let bare = ActionRecord {
+        run: None,
+        run_title: None,
+        ..record
+    };
+    let text = serde_json::to_string(&bare).unwrap();
+    assert!(!text.contains("run"), "{text}");
 }
