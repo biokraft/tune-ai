@@ -472,6 +472,41 @@ fn note_clip_hits_drive_the_ducker() {
     assert_ne!(bits(&a[3000..3010]), bits(&b[3000..3010]));
 }
 
+#[test]
+fn a_note_on_left_over_at_the_next_step_still_ducks() {
+    // At 12 samples a step (no valid song is this fast), the kick note at
+    // tick 23 of step 0 lands on sample round(11.5) = 12, step 1's start:
+    // the cut there delivers it. It must duck as an On at step 1 does.
+    let duck_song = |start: &str| {
+        let song = compiled(&song_src(
+            120,
+            1,
+            &format!(
+                "[mix]\nduck_source = \"kick\"\n\n\
+                 [tracks.kick]\ninstrument = \"kick\"\n\
+                 play = [{{ at = 1, clip = \"hits\", bars = 1 }}]\n\n\
+                 [tracks.acid]\ninstrument = \"acid303\"\n\
+                 params = {{ \"duck.depth\" = 12 }}\n\
+                 play = [{{ at = 1, clip = \"held\", bars = 1 }}]\n\n{}\n{}",
+                notes_clip(
+                    "hits",
+                    1,
+                    &[&format!(r#"{{ start = {start}, pitch = "C4", len = 1 }}"#)]
+                ),
+                notes_clip("held", 1, &[r#"{ start = 0, pitch = "C2", len = 16 }"#]),
+            ),
+        ));
+        let mut fast = (*song).clone();
+        fast.clock = Clock::new(48_000.0 * 15.0 / 12.0, 48_000);
+        assert_eq!(fast.clock.tick_start(23), fast.clock.step_start(1));
+        Arc::new(fast)
+    };
+    let late = left(&stem_of(&duck_song("0.9583333"), 1, 16 * 12));
+    let on_step = left(&stem_of(&duck_song("1"), 1, 16 * 12));
+    assert!(rms(&on_step) > 1e-4, "the acid sounds");
+    assert_eq!(first_diff(&late, &on_step), None);
+}
+
 /// One track `t` (acid303, `gain_db`) playing `play`, with the clips
 /// `clips` (TOML), in a v2 song of `bars` bars at 120 BPM.
 fn swap_song(bars: u32, gain_db: i32, play: &str, clips: &str) -> Arc<CompiledSong> {
