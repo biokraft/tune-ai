@@ -1,6 +1,7 @@
 //! The transport clock and the seed derivation every track shares.
 
 use tune_dsp::acid303::math::round_to_int;
+use tune_song::TICKS_PER_STEP;
 
 /// Maps song steps (16ths) to sample positions without drift: every step start
 /// is computed from the step index, never accumulated.
@@ -24,6 +25,12 @@ impl Clock {
     /// First sample of `step`.
     pub fn step_start(&self, step: u64) -> u64 {
         (step as f64 * self.samples_per_step).round() as u64
+    }
+
+    /// First sample of `tick`, on the note-clip grid of [`TICKS_PER_STEP`]
+    /// ticks per step: `tick_start(24 * k) == step_start(k)` exactly.
+    pub fn tick_start(&self, tick: u64) -> u64 {
+        ((tick as f64 / f64::from(TICKS_PER_STEP)) * self.samples_per_step).round() as u64
     }
 
     /// The largest step `k` with `step_start(k) <= pos`.
@@ -89,6 +96,18 @@ mod tests {
         assert_eq!(c.bar_start(64), 5_084_690);
         assert_eq!(c.step_at(4965), 0);
         assert_eq!(c.step_at(4966), 1);
+    }
+
+    #[test]
+    fn tick_start_pinned() {
+        let c = Clock::new(145.0, 48_000);
+        assert_eq!(c.tick_start(12), 2483);
+        assert_eq!(c.tick_start(24), 4966);
+        assert_eq!(c.tick_start(36), 7448);
+        assert_eq!(c.tick_start(396), 81_931);
+        for k in 0..2000u64 {
+            assert_eq!(c.tick_start(24 * k), c.step_start(k), "step {k}");
+        }
     }
 
     #[test]

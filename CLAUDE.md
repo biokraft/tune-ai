@@ -88,9 +88,9 @@ Notation:
   decreases); overlaps and chords are fine. `pitch` is a note name as in an
   acid pattern, without `!` or `~` (`C3` = MIDI 48, `Bb1`, `C-1` to `G9`).
   A note with `vel` 110 or more is accented. A notes clip has no `steps`; an
-  acid or drum clip has no `bars` or `notes`. The song file only holds them
-  for now: the engine does not play them yet and the studio shows no
-  editor.
+  acid or drum clip has no `bars` or `notes`. The engine plays each note at
+  its own sample; a note cut by a placement's end, a loop wrap or a seek
+  stops there. The studio shows no editor for them yet.
 - Placements: the track's `play = [{ at, clip, bars, offset }]`. `at` is the
   1-based start bar, `offset` the bars into the clip (default 0); `at`,
   `bars` and `offset` are whole numbers. Keep them in time order and never
