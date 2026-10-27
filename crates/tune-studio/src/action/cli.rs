@@ -56,11 +56,16 @@ pub fn action_from_cli(name: &str, args: &[String]) -> Result<Action, String> {
         }
         given.insert(key.to_owned(), arg_value(arg.ty, text));
     }
-    if let Some(missing) = spec
-        .args
-        .iter()
-        .find(|a| a.required && !given.contains_key(a.name))
-    {
+    // A required text argument left empty (`track=`) is as good as missing;
+    // the others take an empty value as `null`, which can mean something.
+    let absent = |a: &&super::ArgSpec| {
+        a.required
+            && match given.get(a.name) {
+                None => true,
+                Some(value) => value.is_null() && a.ty.is_text(),
+            }
+    };
+    if let Some(missing) = spec.args.iter().find(absent) {
         return Err(format!("`{name}` needs `{}`", missing.name));
     }
     let wire = if spec.args.is_empty() {

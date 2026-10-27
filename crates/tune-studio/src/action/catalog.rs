@@ -224,6 +224,79 @@ pub const ACTIONS: &[ActionSpec] = &[
             opt("solo", Bool, "solo the track"),
         ],
     ),
+    // ----- tracks and devices -----
+    action(
+        "add_track",
+        Edit,
+        "Appends a track playing a new instrument: gain and pan 0, no effects or placements.",
+        &[
+            arg(
+                "track",
+                Id,
+                "new track id: lower-case letters, digits and `_`",
+            ),
+            arg(
+                "instrument",
+                Text,
+                "instrument module, e.g. acid303, kick, clap, hat_closed, hat_open or ride",
+            ),
+        ],
+    ),
+    action(
+        "remove_track",
+        Edit,
+        "Removes a track with its placements and lane stretches (the result lists the stretches).",
+        &[TRACK],
+    ),
+    action(
+        "rename_track",
+        Edit,
+        "Renames a track, keeping its place; its lane stretches and `mix.duck_source` follow. \
+         The track's noise changes: it is seeded from the song seed and the track id.",
+        &[TRACK, arg("to", Id, "new track id")],
+    ),
+    action(
+        "add_effect",
+        Edit,
+        "Inserts an effect into a track's chain; the result is the new device's id.",
+        &[
+            TRACK,
+            arg("module", Text, "effect module: distortion or eq"),
+            opt(
+                "id",
+                Id,
+                "device id; default the module's prefix, else the prefix and a number (eq2)",
+            ),
+            opt("index", Int, "place in the chain, 0-based; default the end"),
+        ],
+    ),
+    action(
+        "remove_effect",
+        Edit,
+        "Removes an effect from a track's chain with its lane stretches (the result lists them).",
+        &[TRACK, arg("device", Id, "effect id, e.g. dist or eq2")],
+    ),
+    action(
+        "move_effect",
+        Edit,
+        "Moves an effect to another place in a track's chain; its settings move with it.",
+        &[
+            TRACK,
+            arg("device", Id, "effect id, e.g. dist or eq2"),
+            arg("index", Int, "place it ends up at, 0-based"),
+        ],
+    ),
+    action(
+        "rename_device",
+        Edit,
+        "Renames a device of a track (its instrument or an effect); its param keys and lane \
+         stretches follow.",
+        &[
+            TRACK,
+            arg("device", Id, "device id, e.g. acid303 or dist"),
+            arg("to", Id, "new device id; not `send` or `duck`"),
+        ],
+    ),
 ];
 
 /// The catalog entry of the action named `name`.

@@ -168,7 +168,7 @@ fn reused_tables(origins: &[LaneOrigin]) -> Vec<Option<usize>> {
                 taken.push(i);
                 Some(i)
             }
-            LaneOrigin::Split(_) => None,
+            LaneOrigin::Split(_) | LaneOrigin::New => None,
         })
         .collect()
 }
@@ -177,7 +177,7 @@ fn reused_tables(origins: &[LaneOrigin]) -> Vec<Option<usize>> {
 /// held: only the values that differ from it are put, so the others keep
 /// their text. A new table (`before` is `None`) gets every key.
 fn put_lane(mut slot: Slot<'_>, before: Option<&Lane>, lane: &Lane) -> Option<()> {
-    if before.is_none() {
+    if before.is_none_or(|b| b.track != lane.track || b.param != lane.param) {
         let param = format!("{}.{}", lane.track, lane.param);
         slot.put("param", toml_edit::Value::from(param));
     }
@@ -297,5 +297,63 @@ pub(super) fn rerank(doc: &mut DocumentMut, song: &Song, start: isize) {
                 }),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tune_song::parse_song;
+
+    use super::*;
+
+    const SONG: &str = "[song]\nversion = 2\nname = \"t\"\nbpm = 120\n\n\
+        [tracks.kick]\ninstrument = \"kick\"\n\n\
+        [[sections]]\nname = \"a\"\nbars = 4\n\n\
+        # the first\n[[automation]]\nparam = \"kick.kick.decay\"\nat = 1\nbars = 2\npoints = [[0, 0], [2, 1]]\n";
+
+    /// A stretch with no old table gets a table of its own, written after
+    /// the kept one, which keeps its comment.
+    #[test]
+    fn a_new_stretch_gets_a_new_table() {
+        let old = parse_song(SONG).expect("parses");
+        let mut new = old.clone();
+        new.automation.push(Lane {
+            track: "kick".into(),
+            param: "kick.tune".into(),
+            start_bar: 2,
+            bars: 2,
+            points: vec![(0.0, 0.5), (2.0, 0.25)],
+        });
+        let arranged = Arranged {
+            song: new.clone(),
+            lanes: vec![LaneOrigin::Kept(0), LaneOrigin::New],
+        };
+        let mut doc: DocumentMut = SONG.parse().expect("parses");
+        write_automation(&mut doc, &old, &arranged).expect("written");
+        let text = doc.to_string();
+        assert!(text.starts_with(SONG), "{text}");
+        assert!(
+            text.ends_with(
+                "\n[[automation]]\nparam = \"kick.kick.tune\"\nat = 3\nbars = 2\npoints = [[0, 0.5], [2, 0.25]]\n"
+            ),
+            "{text}"
+        );
+        assert_eq!(parse_song(&text).expect("parses"), new);
+    }
+
+    /// A kept stretch whose param changed gets the new `param`.
+    #[test]
+    fn a_kept_stretch_follows_its_new_param() {
+        let old = parse_song(SONG).expect("parses");
+        let mut new = old.clone();
+        new.automation[0].param = "kick.pitch".into();
+        let arranged = Arranged {
+            song: new.clone(),
+            lanes: vec![LaneOrigin::Kept(0)],
+        };
+        let mut doc: DocumentMut = SONG.parse().expect("parses");
+        write_automation(&mut doc, &old, &arranged).expect("written");
+        let text = doc.to_string();
+        assert_eq!(text, SONG.replace("kick.kick.decay", "kick.kick.pitch"));
     }
 }

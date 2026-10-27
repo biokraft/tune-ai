@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 
 use crate::FORMAT_VERSION;
 use crate::model::{
-    Clip, DEFAULT_VELOCITY, Device, Note, Placement, Song, TICKS_PER_STEP, pitch_name,
+    Clip, DEFAULT_VELOCITY, Device, Note, Placement, Song, TICKS_PER_STEP, Track, pitch_name,
 };
 
 impl Song {
@@ -51,7 +51,7 @@ impl Song {
                 let _ = writeln!(out, "params = {}", num_table(&params));
             }
             if !track.fx.is_empty() {
-                let fx: Vec<String> = track.fx.iter().map(fx_inline).collect();
+                let fx: Vec<String> = track.fx.iter().map(fx_entry_toml).collect();
                 let _ = writeln!(out, "fx = [{}]", fx.join(", "));
             }
             if !track.play.is_empty() {
@@ -100,6 +100,41 @@ impl Song {
         }
         out
     }
+}
+
+/// The table of track `id`, `[tracks.<id>]` and its keys: the instrument,
+/// then only the fields that are not at their default (`gain_db`, `pan`,
+/// `mute`, `solo`), the `params` (the instrument's, then the strip's), the
+/// `fx` and the `play` list. Ends with a newline.
+pub fn track_table_toml(id: &str, track: &Track) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "[tracks.{}]", key(id));
+    let _ = writeln!(out, "instrument = {}", instrument(&track.instrument));
+    if track.gain_db != 0.0 {
+        let _ = writeln!(out, "gain_db = {}", num(track.gain_db));
+    }
+    if track.pan != 0.0 {
+        let _ = writeln!(out, "pan = {}", num(track.pan));
+    }
+    if track.mute {
+        out.push_str("mute = true\n");
+    }
+    if track.solo {
+        out.push_str("solo = true\n");
+    }
+    let mut params = device_params(&track.instrument);
+    params.extend(track.strip.iter().map(|(k, v)| (k.clone(), *v)));
+    if !params.is_empty() {
+        let _ = writeln!(out, "params = {}", num_table(&params));
+    }
+    if !track.fx.is_empty() {
+        let fx: Vec<String> = track.fx.iter().map(fx_entry_toml).collect();
+        let _ = writeln!(out, "fx = [{}]", fx.join(", "));
+    }
+    if !track.play.is_empty() {
+        let _ = writeln!(out, "play = {}", placements_toml(&track.play));
+    }
+    out
 }
 
 /// A track's `play` value: one placement inline (`[{ at = 1, clip = "k4",
@@ -187,9 +222,9 @@ fn device_head(device: &Device) -> Vec<String> {
     parts
 }
 
-/// `{ type = "<module>", [id = "<id>",] <setting> = "<value>", …, params =
-/// { … } }`: the head, then the explicit params.
-fn fx_inline(fx: &Device) -> String {
+/// An `fx` entry: `{ type = "<module>", [id = "<id>",] <setting> =
+/// "<value>", …, params = { … } }`: the head, then the explicit params.
+pub fn fx_entry_toml(fx: &Device) -> String {
     let mut parts = device_head(fx);
     let params = device_params(fx);
     if !params.is_empty() {

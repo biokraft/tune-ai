@@ -502,7 +502,9 @@ fn value_at(song: &Song, track: &str, param: &str, x: f64) -> Option<f64> {
 fn assert_kept(op: &str, old: &Song, new: &Arranged, map: impl Fn(u32) -> Vec<u32>) {
     assert_eq!(new.lanes.len(), new.song.automation.len(), "{op}");
     for (lane, &origin) in new.song.automation.iter().zip(&new.lanes) {
-        let (Kept(i) | Split(i) | Copy(i)) = origin;
+        let (Kept(i) | Split(i) | Copy(i)) = origin else {
+            panic!("{op}: a section operation adds no new stretch");
+        };
         let from = &old.automation[i];
         assert_eq!(
             (&lane.track, &lane.param),
