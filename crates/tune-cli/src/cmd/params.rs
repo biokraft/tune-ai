@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use serde_json::{Map, Value, json};
 use tune_dsp::{Curve, ParamSpec, STRIP_PARAMS};
-use tune_modules::{ModuleDescriptor, Registry, SettingSpec};
+use tune_modules::{ClipKind, ModuleDescriptor, Registry, SettingSpec};
 use tune_song::MixUnit;
 
 use crate::report::{Success, finish};
@@ -39,6 +39,15 @@ fn setting_json(s: &SettingSpec) -> Value {
     })
 }
 
+/// The clip kinds an instrument plays, in `ClipKind::ALL` order.
+fn plays(m: &ModuleDescriptor) -> Vec<&'static str> {
+    ClipKind::ALL
+        .into_iter()
+        .filter(|k| m.plays(*k))
+        .map(ClipKind::name)
+        .collect()
+}
+
 pub fn run(json: bool) -> ExitCode {
     let registry = Registry::builtin();
     let instrument_modules: Vec<&ModuleDescriptor> = registry.instruments().collect();
@@ -55,6 +64,9 @@ pub fn run(json: bool) -> ExitCode {
     ] {
         for m in modules {
             let _ = writeln!(text, "{heading} {}", m.name);
+            if heading == "instrument" {
+                let _ = writeln!(text, "  plays: {}", plays(m).join(", "));
+            }
             for s in m.settings {
                 let _ = writeln!(
                     text,
@@ -126,6 +138,10 @@ pub fn run(json: bool) -> ExitCode {
             json: json!({
                 "instruments": group(&instruments),
                 "effects": group(&effects),
+                "plays": instrument_modules
+                    .iter()
+                    .map(|m| (m.name.to_string(), json!(plays(m))))
+                    .collect::<Map<_, _>>(),
                 "strip": STRIP_PARAMS.iter().map(spec_json).collect::<Vec<_>>(),
                 "mix": group(&mix),
                 "settings": registry

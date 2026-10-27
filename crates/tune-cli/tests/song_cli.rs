@@ -177,6 +177,8 @@ fn params_json_lists_tables() {
     let out = tune().args(["params", "--json"]).assert().success();
     let v = json_of(&out.get_output().stdout);
     assert_eq!(v["instruments"]["kick"][0]["id"], "kick.tune");
+    assert_eq!(v["plays"]["kick"], json!(["drum", "notes"]));
+    assert_eq!(v["plays"]["acid303"], json!(["acid", "notes"]));
     assert!(!v["effects"]["distortion"].as_array().unwrap().is_empty());
     assert_eq!(
         v["settings"]["distortion"][0]["values"],
@@ -657,4 +659,96 @@ fn render_v1_reports_migration() {
             .get("migrated_from")
             .is_none()
     );
+}
+
+#[test]
+fn a_note_clip_song_validates_and_renders() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.toml");
+    std::fs::write(
+        &path,
+        r#"[song]
+version = 2
+name = "notes"
+bpm = 120
+
+[tracks.kick]
+instrument = "kick"
+play = [{ at = 1, clip = "k4", bars = 2 }]
+
+[tracks.acid]
+instrument = "acid303"
+play = [{ at = 1, clip = "lead", bars = 2 }]
+
+[clips.k4]
+kind = "drum"
+steps = "x...x...x...x..."
+
+[clips.lead]
+kind = "notes"
+bars = 2
+notes = [
+  { start = 0, pitch = "C2", len = 3 },
+  { start = 4, pitch = "C3", len = 2, vel = 120 },
+  { start = 8, pitch = "G2", len = 4 },
+  { start = 16, pitch = "D#2", len = 4 },
+  { start = 24, pitch = "F2", len = 4 },
+]
+
+[[sections]]
+name = "a"
+bars = 2
+"#,
+    )
+    .unwrap();
+    tune().arg("validate").arg(&path).assert().success();
+
+    let out = tune()
+        .arg("info")
+        .arg(&path)
+        .arg("--json")
+        .assert()
+        .success();
+    let v = json_of(&out.get_output().stdout);
+    assert_eq!(
+        v["clips"],
+        json!([
+            { "id": "k4", "kind": "drum", "steps": 16 },
+            { "id": "lead", "kind": "notes", "steps": 32, "bars": 2, "notes": 5 },
+        ])
+    );
+    let out = tune().arg("info").arg(&path).assert().success();
+    let s = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(
+        s.contains("clips: k4 drum 16 steps, lead notes 2 bars 5 notes"),
+        "{s}"
+    );
+
+    let stems = dir.path().join("stems");
+    let out = tune()
+        .arg("render")
+        .arg(&path)
+        .args(["--stems", "--json", "--out"])
+        .arg(&stems)
+        .assert()
+        .success();
+    let v = json_of(&out.get_output().stdout);
+    let files = v["files"].as_array().unwrap();
+    let acid = files
+        .iter()
+        .map(|f| PathBuf::from(f.as_str().unwrap()))
+        .find(|f| f.file_name().unwrap().to_string_lossy().contains("acid"))
+        .unwrap_or_else(|| panic!("no acid stem in {v}"));
+    let acid = if acid.is_absolute() {
+        acid
+    } else {
+        stems.join(acid.file_name().unwrap())
+    };
+    let peak = hound::WavReader::open(&acid)
+        .unwrap()
+        .samples::<f32>()
+        .map(|s| s.unwrap().abs())
+        .fold(0.0_f32, f32::max);
+    let dbfs = 20.0 * f64::from(peak).log10();
+    assert!(dbfs > -60.0, "acid stem peak {dbfs} dBFS");
 }

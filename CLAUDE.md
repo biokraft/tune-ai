@@ -90,7 +90,9 @@ Notation:
   A note with `vel` 110 or more is accented. A notes clip has no `steps`; an
   acid or drum clip has no `bars` or `notes`. The engine plays each note at
   its own sample; a note cut by a placement's end, a loop wrap or a seek
-  stops there. The studio shows no editor for them yet.
+  stops there. The studio shows no editor for them yet. `tune info` lists
+  every clip (`clips: k4 drum 16 steps, lead notes 2 bars 5 notes`; `--json`
+  has `clips`), and `tune params` says what each instrument plays (`plays`).
 - Placements: the track's `play = [{ at, clip, bars, offset }]`. `at` is the
   1-based start bar, `offset` the bars into the clip (default 0); `at`,
   `bars` and `offset` are whole numbers. Keep them in time order and never
@@ -253,6 +255,8 @@ The producer may have the studio (app or browser) open on the same song.
   | `mix.master` | `clip` or `limit` |
   | `mix.duck_source` | track id; empty = first kick |
   | `clips.<c>.steps` | the clip in notation, quoted (`patterns.<c>.steps` is still accepted) |
+  | `clips.<c>.notes` | a notes clip's notes as a TOML array of `{ start, pitch, len, vel }`, quoted, e.g. `clips.lead.notes='[{ start = 0, pitch = "C3", len = 2 }]'` |
+  | `clips.<c>.bars` | a notes clip's length in bars, 1 to 64 |
   | `sections[<i>].name` | string; `<i>` is 0-based |
   | `sections[<i>].bars` | integer, 1 to 1024; resizes the section: placements and stretches that ran to its end run to the new end (grow) or are cut at it (shrink), later ones move |
   | `sections[<i>].play.<t>` | clip id: replaces what the track plays inside the section with one placement covering it; empty removes them |
