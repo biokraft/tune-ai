@@ -229,6 +229,16 @@ pub(crate) fn apply_action(
         Action::SetInstrument { track, module } => {
             return Ok(removed_value(&doc.set_instrument(track, module)?));
         }
+        Action::AddClip {
+            clip,
+            kind,
+            steps,
+            bars,
+            notes,
+        } => doc.add_clip(clip, kind, steps.as_deref(), *bars, notes.as_ref())?,
+        Action::RemoveClip { clip } => return Ok(removed_value(&doc.remove_clip(clip)?)),
+        Action::RenameClip { clip, to } => doc.rename_clip(clip, to)?,
+        Action::DuplicateClip { clip, to } => doc.duplicate_clip(clip, to)?,
         Action::SetParam { commit: false, .. }
         | Action::Play { .. }
         | Action::Stop

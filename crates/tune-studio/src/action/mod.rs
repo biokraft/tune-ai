@@ -171,6 +171,34 @@ pub enum Action {
         track: String,
         module: String,
     },
+    // ----- clips -----
+    /// Adds a clip of `kind` (`acid`, `drum` or `notes`). `steps` is for
+    /// acid and drum clips (16 rests by default), `bars` and `notes` for
+    /// notes clips (1 bar and no notes by default).
+    AddClip {
+        clip: String,
+        kind: String,
+        #[serde(default)]
+        steps: Option<String>,
+        #[serde(default)]
+        bars: Option<u32>,
+        #[serde(default)]
+        notes: Option<Value>,
+    },
+    /// Removes a clip with its placements.
+    RemoveClip {
+        clip: String,
+    },
+    /// Renames a clip; its placements follow.
+    RenameClip {
+        clip: String,
+        to: String,
+    },
+    /// Copies a clip as `to`, right after the original.
+    DuplicateClip {
+        clip: String,
+        to: String,
+    },
 }
 
 fn yes() -> bool {
@@ -286,6 +314,10 @@ impl Action {
             Self::MoveEffect { .. } => "move_effect",
             Self::RenameDevice { .. } => "rename_device",
             Self::SetInstrument { .. } => "set_instrument",
+            Self::AddClip { .. } => "add_clip",
+            Self::RemoveClip { .. } => "remove_clip",
+            Self::RenameClip { .. } => "rename_clip",
+            Self::DuplicateClip { .. } => "duplicate_clip",
         }
     }
 
@@ -348,6 +380,12 @@ impl Action {
                 vec![format!("tracks.{track}.{role}")]
             }
             Self::SetInstrument { track, .. } => vec![format!("tracks.{track}.instrument")],
+            Self::AddClip { clip, .. } | Self::RemoveClip { clip } => {
+                vec![format!("clips.{clip}")]
+            }
+            Self::RenameClip { clip, to } | Self::DuplicateClip { clip, to } => {
+                vec![format!("clips.{clip}"), format!("clips.{to}")]
+            }
             Self::MoveSection { .. }
             | Self::DuplicateSection { .. }
             | Self::DeleteSection { .. } => {

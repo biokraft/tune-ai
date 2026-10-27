@@ -390,3 +390,42 @@ fn swap_from_the_cli() {
         "{text}"
     );
 }
+
+#[test]
+fn clips_from_the_cli() {
+    let e = fixture();
+    let song = e.song.to_str().unwrap();
+    let v = json_out(e.tune().args([
+        "do",
+        song,
+        "add_clip",
+        "clip=lead",
+        "kind=notes",
+        "bars=2",
+        "notes=[{ start = 0, pitch = \"C3\", len = 2 }]",
+        "--json",
+    ]));
+    assert_eq!(v["changes"][0]["path"], "clips.lead.bars");
+    assert!(
+        fs::read_to_string(&e.song)
+            .unwrap()
+            .contains("notes = [{ start = 0, pitch = \"C3\", len = 2 }]")
+    );
+
+    // Text mode says which placements went with the clip.
+    let out = e
+        .tune()
+        .args(["do", song, "remove_clip", "clip=k4"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("removed placement k4 on kick at bar 1"),
+        "{text}"
+    );
+    assert!(
+        text.contains("removed placement k4 on kick at bar 3"),
+        "{text}"
+    );
+}

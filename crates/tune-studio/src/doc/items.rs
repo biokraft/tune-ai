@@ -6,12 +6,16 @@
 //! changes only where the edit does: the other tables, comments and
 //! the other `fx` entries keep their bytes.
 
+use serde_json::Value as Json;
 use toml_edit::{Decor, DocumentMut, InlineTable, Item, Key, Table, Value};
 use tune_song::toml_doc::{Slot, normalize_positions, reshape, root_child, walk, walk_mut};
-use tune_song::{Device, Edited, Registry, Removed, Track, fx_entry_toml, track_table_toml};
+use tune_song::{
+    Clip, ClipKind, Device, EditOpError, Edited, Registry, Removed, Track, clip_table_toml,
+    fx_entry_toml, parse, track_table_toml,
+};
 
 use super::arrange::{write_automation, write_plays};
-use super::{EditError, SongDoc, fx_table, put_instrument_setting, track_table};
+use super::{EditError, SongDoc, fx_table, notes_value, put_instrument_setting, track_table};
 
 impl SongDoc {
     /// Appends track `track` playing a new `module` instrument (see
@@ -131,6 +135,107 @@ impl SongDoc {
         })
     }
 
+    /// Appends clip `clip` of `kind` (`acid`, `drum` or `notes`) to the pool
+    /// (see [`tune_song::add_clip`]). Its table goes right after the last
+    /// clip table, else after the last track table. The keys are written as
+    /// given, so the validator judges them: `steps` of a notes clip or
+    /// `bars` and `notes` of a steps clip are refused with its hints.
+    /// `steps` defaults to 16 rests, `bars` to 1.
+    pub fn add_clip(
+        &mut self,
+        clip: &str,
+        kind: &str,
+        steps: Option<&str>,
+        bars: Option<u32>,
+        notes: Option<&Json>,
+    ) -> Result<(), EditError> {
+        let kind = ClipKind::from_name(kind).ok_or_else(|| {
+            let expected: Vec<&str> = ClipKind::ALL.iter().map(|k| k.name()).collect();
+            EditOpError::UnknownClipKind {
+                name: kind.to_owned(),
+                expected: format!("{} or {}", expected[..2].join(", "), expected[2]),
+            }
+        })?;
+        tune_song::check_new_clip(&self.song, clip)?;
+        let text = new_clip_table(clip, kind, steps, bars, notes)?;
+        // Parse the table alone first: the validator's message is the answer
+        // for a bad key, step or note, and the parsed clip is the edit's.
+        let mut trial = self.doc.clone();
+        let broken =
+            || EditError::Internal("the edit could not be written into the file".to_owned());
+        insert_table(&mut trial, "clips", clip, &text, None, CLIP_ANCHORS).ok_or_else(broken)?;
+        let made = parse(&trial.to_string())
+            .map_err(EditError::Invalid)?
+            .song
+            .clips
+            .get(clip)
+            .cloned()
+            .ok_or_else(broken)?;
+        let edited = tune_song::add_clip(&self.song, clip, made)?;
+        self.write_edited(edited, |doc| {
+            insert_table(doc, "clips", clip, &text, None, CLIP_ANCHORS)
+        })?;
+        Ok(())
+    }
+
+    /// Removes clip `clip` with the comments above its table and every
+    /// placement of it (see [`tune_song::remove_clip`]). Returns the
+    /// placements.
+    pub fn remove_clip(&mut self, clip: &str) -> Result<Removed, EditError> {
+        let edited = tune_song::remove_clip(&self.song, clip)?;
+        let old = self.song.clone();
+        let new = edited.arranged.song.clone();
+        self.write_edited(edited, |doc| {
+            match doc.as_table_mut().get_mut("clips")? {
+                Item::Table(clips) => clips.remove(clip)?,
+                _ => return None,
+            };
+            write_plays(doc, &old, &new)
+        })
+    }
+
+    /// Renames clip `clip` to `to` in place: its table keeps its comments
+    /// and position, and the `play` lists that name it are rewritten (see
+    /// [`tune_song::rename_clip`]).
+    pub fn rename_clip(&mut self, clip: &str, to: &str) -> Result<(), EditError> {
+        let edited = tune_song::rename_clip(&self.song, clip, to)?;
+        let old = self.song.clone();
+        let new = edited.arranged.song.clone();
+        self.write_edited(edited, |doc| {
+            rename_keys(root_child(doc, "clips")?, |k| {
+                (k == clip).then(|| to.to_owned())
+            })?;
+            write_plays(doc, &old, &new)
+        })?;
+        Ok(())
+    }
+
+    /// Copies clip `clip` as `to`, written right after the original, with
+    /// its `steps` as written but not its comments (see
+    /// [`tune_song::duplicate_clip`]).
+    pub fn duplicate_clip(&mut self, clip: &str, to: &str) -> Result<(), EditError> {
+        let edited = tune_song::duplicate_clip(&self.song, clip, to)?;
+        let copy = &edited.arranged.song.clips[to];
+        let written = self
+            .doc
+            .get("clips")
+            .and_then(|c| c.get(clip))
+            .and_then(|c| c.get("steps"))
+            .and_then(Item::as_str);
+        let text = match (copy, written) {
+            (Clip::Notes(_), _) | (_, None) => clip_table_toml(to, copy),
+            (_, Some(steps)) => format!(
+                "[clips.{to}]\nkind = {}\nsteps = {}\n",
+                Value::from(copy.kind().name()),
+                Value::from(steps)
+            ),
+        };
+        self.write_edited(edited, |doc| {
+            insert_table(doc, "clips", to, &text, Some(clip), CLIP_ANCHORS)
+        })?;
+        Ok(())
+    }
+
     /// Writes an edit's result into a copy of the text with `write`, and
     /// the lane stretches it kept, and commits the copy only when it
     /// describes exactly the edited song. An edit that changes nothing
@@ -154,6 +259,46 @@ impl SongDoc {
         self.commit_as(doc, Some(&arranged.song))?;
         Ok(removed)
     }
+}
+
+/// Where the first clip table goes: after the last of these tables.
+const CLIP_ANCHORS: &[&str] = &["song", "mix", "tracks"];
+
+/// The text of a new clip's table: the keys as given, `steps` and `bars`
+/// defaulting for the kinds that take them.
+fn new_clip_table(
+    id: &str,
+    kind: ClipKind,
+    steps: Option<&str>,
+    bars: Option<u32>,
+    notes: Option<&Json>,
+) -> Result<String, EditError> {
+    let steps = match (kind, steps) {
+        (_, Some(steps)) => Some(steps),
+        (ClipKind::Acid, None) => Some(". . . . . . . . . . . . . . . ."),
+        (ClipKind::Drum, None) => Some("................"),
+        (ClipKind::Notes, None) => None,
+    };
+    let bars = match (kind, bars) {
+        (_, Some(bars)) => Some(bars),
+        (ClipKind::Notes, None) => Some(1),
+        _ => None,
+    };
+    let mut out = format!("[clips.{id}]\nkind = {}\n", Value::from(kind.name()));
+    if let Some(steps) = steps {
+        out.push_str(&format!("steps = {}\n", Value::from(steps)));
+    }
+    if let Some(bars) = bars {
+        out.push_str(&format!("bars = {bars}\n"));
+    }
+    if let Some(notes) = notes {
+        let value = notes_value(notes).map_err(|message| EditError::BadValue {
+            path: format!("clips.{id}.notes"),
+            message,
+        })?;
+        out.push_str(&format!("notes = {}\n", value.to_string().trim()));
+    }
+    Ok(out)
 }
 
 /// Adds the table of track `id` right after the last `[tracks.*]` table,
@@ -200,7 +345,25 @@ fn insert_table(
         };
         let mut entry = table.into_inline_table();
         entry.fmt();
+        // Behind the sibling when there is one: the entries after it move
+        // behind the new one.
+        let later: Vec<String> = match sibling {
+            Some(sibling) => holder
+                .iter()
+                .map(|(k, _)| k.to_owned())
+                .skip_while(|k| k != sibling)
+                .skip(1)
+                .collect(),
+            None => Vec::new(),
+        };
+        let moved: Vec<(Key, Item)> = later
+            .iter()
+            .filter_map(|k| holder.remove_entry(k))
+            .collect();
         holder.insert(id, Item::Value(Value::InlineTable(entry)));
+        for (key, item) in moved {
+            holder.insert_formatted(&key, item);
+        }
         return Some(());
     }
     let last = match root.get(container) {
