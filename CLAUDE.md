@@ -90,9 +90,13 @@ Notation:
   A note with `vel` 110 or more is accented. A notes clip has no `steps`; an
   acid or drum clip has no `bars` or `notes`. The engine plays each note at
   its own sample; a note cut by a placement's end, a loop wrap or a seek
-  stops there. The studio shows no editor for them yet. `tune info` lists
-  every clip (`clips: k4 drum 16 steps, lead notes 2 bars 5 notes`; `--json`
-  has `clips`), and `tune params` says what each instrument plays (`plays`).
+  stops there. A placement that picks up where the one before it stopped
+  (the same clip, its offset lining up, as when a section operation splits
+  a placement) plays on, held notes included; so does a hot reload that
+  keeps the clip and the clip step. The studio shows no editor for them
+  yet. `tune info` lists every clip
+  (`clips: k4 drum 16 steps, lead notes 2 bars 5 notes`; `--json` has
+  `clips`), and `tune params` says what each instrument plays (`plays`).
 - Placements: the track's `play = [{ at, clip, bars, offset }]`. `at` is the
   1-based start bar, `offset` the bars into the clip (default 0); `at`,
   `bars` and `offset` are whole numbers. Keep them in time order and never
