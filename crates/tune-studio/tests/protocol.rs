@@ -49,6 +49,10 @@ fn wire_name(c: &Command) -> &'static str {
             Action::MoveEffect { .. } => "move_effect",
             Action::RenameDevice { .. } => "rename_device",
             Action::SetInstrument { .. } => "set_instrument",
+            Action::AddClip { .. } => "add_clip",
+            Action::RemoveClip { .. } => "remove_clip",
+            Action::RenameClip { .. } => "rename_clip",
+            Action::DuplicateClip { .. } => "duplicate_clip",
         },
     }
 }
@@ -175,6 +179,22 @@ fn sample_actions() -> Vec<Action> {
         Action::SetInstrument {
             track: "acid".into(),
             module: "kick".into(),
+        },
+        Action::AddClip {
+            clip: "lead".into(),
+            kind: "notes".into(),
+            steps: None,
+            bars: Some(2),
+            notes: Some(json!([{ "start": 0, "pitch": "C3", "len": 2 }])),
+        },
+        Action::RemoveClip { clip: "k4".into() },
+        Action::RenameClip {
+            clip: "a1".into(),
+            to: "bass1".into(),
+        },
+        Action::DuplicateClip {
+            clip: "h".into(),
+            to: "h2".into(),
         },
     ]
 }

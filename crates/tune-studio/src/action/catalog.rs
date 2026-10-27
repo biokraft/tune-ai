@@ -313,6 +313,50 @@ pub const ACTIONS: &[ActionSpec] = &[
             ),
         ],
     ),
+    // ----- clips -----
+    action(
+        "add_clip",
+        Edit,
+        "Adds a clip to the pool, after the last one. `steps` is for acid and drum clips (16 \
+         rests by default), `bars` and `notes` for notes clips (1 bar and no notes by default).",
+        &[
+            arg(
+                "clip",
+                Id,
+                "new clip id: lower-case letters, digits and `_`",
+            ),
+            arg("kind", Text, "clip kind: acid, drum or notes"),
+            opt(
+                "steps",
+                Text,
+                "steps in the kind's notation (acid and drum)",
+            ),
+            opt("bars", Int, "length in bars (notes)"),
+            opt(
+                "notes",
+                Json,
+                "array of notes, each { start, pitch, len, vel } (notes)",
+            ),
+        ],
+    ),
+    action(
+        "remove_clip",
+        Edit,
+        "Removes a clip with every placement of it (the result lists the placements).",
+        &[arg("clip", Id, "clip id")],
+    ),
+    action(
+        "rename_clip",
+        Edit,
+        "Renames a clip, keeping its place in the pool; its placements follow.",
+        &[arg("clip", Id, "clip id"), arg("to", Id, "new clip id")],
+    ),
+    action(
+        "duplicate_clip",
+        Edit,
+        "Copies a clip as a new one, right after the original in the pool.",
+        &[arg("clip", Id, "clip id"), arg("to", Id, "id of the copy")],
+    ),
 ];
 
 /// The catalog entry of the action named `name`.

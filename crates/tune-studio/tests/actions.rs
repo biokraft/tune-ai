@@ -971,3 +971,331 @@ fn swap_handles_a_device_table_and_inline_forms() {
         s.text()
     );
 }
+
+// ----- clips -----
+
+fn add_clip(clip: &str, kind: &str) -> Action {
+    add_clip_with(clip, kind, None, None, None)
+}
+
+fn add_clip_with(
+    clip: &str,
+    kind: &str,
+    steps: Option<&str>,
+    bars: Option<u32>,
+    notes: Option<Value>,
+) -> Action {
+    Action::AddClip {
+        clip: clip.into(),
+        kind: kind.into(),
+        steps: steps.map(Into::into),
+        bars,
+        notes,
+    }
+}
+
+/// The lines of `[clips.<id>]`, up to the next table header.
+fn clip_lines(text: &str, id: &str) -> Vec<String> {
+    let header = format!("[clips.{id}]");
+    text.lines()
+        .skip_while(|l| *l != header)
+        .skip(1)
+        .take_while(|l| !l.starts_with('['))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn add_clip_kinds() {
+    let s = fixture();
+    s.ok(add_clip_with(
+        "k8",
+        "drum",
+        Some("x.x.x.x.x.x.x.x."),
+        None,
+        None,
+    ));
+    let text = s.text();
+    // Right after the last clip table.
+    assert!(
+        text.contains(
+            "steps = \"..x...x...x...x.\"\n\n[clips.k8]\nkind = \"drum\"\n\
+             steps = \"x.x.x.x.x.x.x.x.\"\n\n[[sections]]"
+        ),
+        "{text}"
+    );
+    comments_kept(FIXTURE, &text, &[]);
+
+    // A notes clip through the CLI: `notes` is the TOML array `tune set` reads.
+    let lead = cli(
+        "add_clip",
+        &[
+            "clip=lead",
+            "kind=notes",
+            "bars=2",
+            "notes=[{ start = 0, pitch = \"C3\", len = 2 }]",
+        ],
+    )
+    .expect("parses");
+    s.ok(lead);
+    let text = s.text();
+    assert_eq!(
+        clip_lines(&text, "lead"),
+        [
+            "kind = \"notes\"",
+            "bars = 2",
+            "notes = [{ start = 0, pitch = \"C3\", len = 2 }]",
+            ""
+        ]
+    );
+    assert_eq!(s.song().clips["lead"].steps(), 32);
+
+    // Defaults: 16 rests, one bar, no notes.
+    s.ok(add_clip("a2", "acid"));
+    s.ok(add_clip("d2", "drum"));
+    s.ok(add_clip("n2", "notes"));
+    let text = s.text();
+    assert_eq!(
+        clip_lines(&text, "a2"),
+        [
+            "kind = \"acid\"",
+            "steps = \". . . . . . . . . . . . . . . .\"",
+            ""
+        ]
+    );
+    assert_eq!(
+        clip_lines(&text, "d2"),
+        ["kind = \"drum\"", "steps = \"................\"", ""]
+    );
+    assert_eq!(
+        clip_lines(&text, "n2"),
+        ["kind = \"notes\"", "bars = 1", ""]
+    );
+    let song = s.song();
+    let ids: Vec<&str> = song.clips.keys().map(String::as_str).collect();
+    assert_eq!(ids, ["k4", "a1", "h", "k8", "lead", "a2", "d2", "n2"]);
+}
+
+#[test]
+fn a_clip_goes_after_the_tracks_when_there_are_none() {
+    let text = "[song]\nversion = 2\nname = \"t\"\nbpm = 120\n\n[tracks.kick]\ninstrument = \"kick\"\n\n[[sections]]\nname = \"a\"\nbars = 1\n";
+    let s = song_with(text);
+    s.ok(add_clip("k4", "drum"));
+    assert_eq!(
+        s.text(),
+        text.replace(
+            "\n[[sections]]",
+            "\n[clips.k4]\nkind = \"drum\"\nsteps = \"................\"\n\n[[sections]]"
+        )
+    );
+}
+
+#[test]
+fn add_clip_rules() {
+    let s = fixture();
+    assert_eq!(
+        s.refused(add_clip("x", "chords")),
+        "unknown clip kind `chords` (expected acid, drum or notes)"
+    );
+    assert_eq!(
+        s.refused(add_clip("k4", "drum")),
+        "clip `k4` already exists"
+    );
+    assert_eq!(
+        s.refused(add_clip("K9", "drum")),
+        "a clip id is lower-case letters, digits and `_`, got `K9`"
+    );
+    let steps_on_notes = s.refused(add_clip_with("n", "notes", Some("x..."), None, None));
+    assert!(
+        steps_on_notes.contains(
+            "a notes clip has no `steps`: its length is `bars` and its notes are `notes`"
+        ),
+        "{steps_on_notes}"
+    );
+    let bars_on_drum = s.refused(add_clip_with("d", "drum", None, Some(2), None));
+    assert!(
+        bars_on_drum.contains("`bars` and `notes` are for a notes clip (kind = \"notes\")"),
+        "{bars_on_drum}"
+    );
+    let bad_steps = s.refused(add_clip_with("d", "drum", Some("x.q"), None, None));
+    assert!(
+        bad_steps.starts_with("the edit would make the song invalid:\n"),
+        "{bad_steps}"
+    );
+    let position = bad_steps.lines().nth(1).expect("an error line");
+    assert!(
+        position.chars().next().is_some_and(|c| c.is_ascii_digit()) && position.contains(':'),
+        "a positioned error: {position}"
+    );
+    let bad_note = s.refused(add_clip_with(
+        "n",
+        "notes",
+        None,
+        None,
+        Some(json!([{"start": 0, "pitch": "H9", "len": 2}])),
+    ));
+    assert!(bad_note.contains("pitch"), "{bad_note}");
+}
+
+#[test]
+fn remove_clip_removes_its_placements() {
+    let s = fixture();
+    let out = s.ok(Action::RemoveClip { clip: "k4".into() });
+    assert_eq!(
+        out.results,
+        [json!({"removed": {
+            "lanes": [],
+            "placements": [
+                {"track": "kick", "at": 1, "clip": "k4", "bars": 2, "offset": 0},
+                {"track": "kick", "at": 3, "clip": "k4", "bars": 2, "offset": 0},
+            ],
+            "duck_source": null,
+        }})]
+    );
+    let text = s.text();
+    assert!(!text.contains("[clips.k4]"), "{text}");
+    assert!(
+        !track_lines(&text, "kick")
+            .iter()
+            .any(|l| l.starts_with("play") || l.contains("k4")),
+        "{text}"
+    );
+    comments_kept(FIXTURE, &text, &[]);
+    assert_eq!(
+        s.refused(Action::RemoveClip { clip: "k9".into() }),
+        "there is no clip `k9`"
+    );
+}
+
+#[test]
+fn rename_clip_rewrites_placements() {
+    let s = fixture();
+    s.ok(Action::RenameClip {
+        clip: "a1".into(),
+        to: "bass1".into(),
+    });
+    let text = s.text();
+    assert!(
+        text.contains(
+            "steps = \"x...x...x...X...\"\n\n[clips.bass1]\nkind = \"acid\"\n\
+             steps = \"C2 C2! C3~ C2 . D#2 C2~ G2!\"\n\n[clips.h]"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("play = [{ at = 3, clip = \"bass1\", bars = 2 }]"),
+        "{text}"
+    );
+    assert!(!text.contains("a1"), "{text}");
+    comments_kept(FIXTURE, &text, &[]);
+    assert_eq!(
+        s.refused(Action::RenameClip {
+            clip: "bass1".into(),
+            to: "h".into()
+        }),
+        "clip `h` already exists"
+    );
+}
+
+#[test]
+fn duplicate_clip_copies_after_the_original() {
+    let s = fixture();
+    s.ok(Action::DuplicateClip {
+        clip: "h".into(),
+        to: "h2".into(),
+    });
+    let text = s.text();
+    assert!(
+        text.contains(
+            "[clips.h]\nkind = \"drum\"\nsteps = \"..x...x...x...x.\"\n\n\
+             [clips.h2]\nkind = \"drum\"\nsteps = \"..x...x...x...x.\"\n\n[[sections]]"
+        ),
+        "{text}"
+    );
+    // The copy does not take the original's comments.
+    let commented = FIXTURE.replacen(
+        "[clips.h]\nkind = \"drum\"",
+        "[clips.h] # the hats\nkind = \"drum\" # four on the floor?",
+        1,
+    );
+    let s = song_with(&commented);
+    s.ok(Action::DuplicateClip {
+        clip: "h".into(),
+        to: "h2".into(),
+    });
+    let text = s.text();
+    assert_eq!(text.matches("# the hats").count(), 1, "{text}");
+    assert_eq!(text.matches("# four on the floor?").count(), 1, "{text}");
+    assert_eq!(
+        s.refused(Action::DuplicateClip {
+            clip: "h".into(),
+            to: "k4".into()
+        }),
+        "clip `k4` already exists"
+    );
+}
+
+#[test]
+fn clip_actions_name_their_targets_and_read_back() {
+    assert_eq!(add_clip("k8", "drum").targets(), ["clips.k8"]);
+    assert_eq!(
+        Action::RemoveClip { clip: "k4".into() }.targets(),
+        ["clips.k4"]
+    );
+    let rename = Action::RenameClip {
+        clip: "a1".into(),
+        to: "bass1".into(),
+    };
+    assert_eq!(rename.targets(), ["clips.a1", "clips.bass1"]);
+    let dup = Action::DuplicateClip {
+        clip: "h".into(),
+        to: "h2".into(),
+    };
+    assert_eq!(dup.targets(), ["clips.h", "clips.h2"]);
+    for name in ["add_clip", "remove_clip", "rename_clip", "duplicate_clip"] {
+        let spec = tune_studio::find_action(name).unwrap_or_else(|| panic!("{name}"));
+        assert_eq!(spec.kind, tune_studio::ActionKind::Edit);
+    }
+    let full = Action::AddClip {
+        clip: "lead".into(),
+        kind: "notes".into(),
+        steps: None,
+        bars: Some(2),
+        notes: Some(json!([{"start": 0, "pitch": "C3", "len": 2}])),
+    };
+    for action in [full, add_clip("k8", "drum"), rename, dup] {
+        let got = action.to_cli_args();
+        assert_eq!(action_from_cli(action.name(), &got), Ok(action));
+    }
+}
+
+#[test]
+fn clip_edits_work_on_inline_files_and_are_one_undo_step() {
+    let text = "[song]\nversion = 2\nname = \"t\"\nbpm = 120\n\n[tracks]\nkick = { instrument = \"kick\", play = [{ at = 1, clip = \"k4\", bars = 1 }] }\n\n[clips]\nk4 = { kind = \"drum\", steps = \"x...x...x...X...\" }\n\n[[sections]]\nname = \"a\"\nbars = 1\n";
+    let s = song_with(text);
+    s.ok(add_clip("k8", "drum"));
+    s.ok(Action::DuplicateClip {
+        clip: "k4".into(),
+        to: "k5".into(),
+    });
+    s.ok(Action::RenameClip {
+        clip: "k4".into(),
+        to: "main".into(),
+    });
+    s.ok(Action::RemoveClip { clip: "k8".into() });
+    let song = s.song();
+    let ids: Vec<&str> = song.clips.keys().map(String::as_str).collect();
+    assert_eq!(ids, ["main", "k5"]);
+    assert_eq!(song.tracks["kick"].play[0].clip, "main");
+
+    let s = fixture();
+    let mut core = tune_studio::StudioCore::open(&s.path).expect("opens");
+    core.apply_now(
+        &[Action::RemoveClip { clip: "k4".into() }],
+        &Origin::claude(None),
+    )
+    .expect("removes");
+    assert_ne!(s.text(), FIXTURE);
+    core.undo(tune_studio::Source::Human).expect("undoes");
+    assert_eq!(s.text(), FIXTURE);
+}

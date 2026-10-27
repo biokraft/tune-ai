@@ -193,6 +193,42 @@
         "track": "acid",
         "module": "kick"
       }
+    },
+    {
+      "cmd": "add_clip",
+      "args": {
+        "clip": "lead",
+        "kind": "notes",
+        "steps": null,
+        "bars": 2,
+        "notes": [
+          {
+            "start": 0,
+            "pitch": "C3",
+            "len": 2
+          }
+        ]
+      }
+    },
+    {
+      "cmd": "remove_clip",
+      "args": {
+        "clip": "k4"
+      }
+    },
+    {
+      "cmd": "rename_clip",
+      "args": {
+        "clip": "a1",
+        "to": "bass1"
+      }
+    },
+    {
+      "cmd": "duplicate_clip",
+      "args": {
+        "clip": "h",
+        "to": "h2"
+      }
     }
   ],
   "events": [

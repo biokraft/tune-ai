@@ -311,6 +311,15 @@ The producer may have the studio (app or browser) open on the same song.
   | `rename_device` | `tune do <song> rename_device track=acid device=acid303 to=bass303` renames the instrument or an effect, its param keys and lanes |
   | `set_instrument` | `tune do <song> set_instrument track=acid module=kick` swaps the instrument; the new device is `kick` with default settings, so the old instrument's params, lane stretches and placements of clips the new module cannot play go (the result lists them; the clips stay) and so does a `mix.duck_source` naming the track when the new module plays no drum clips; strip params stay |
 
+  The clip ones, refused the same way:
+
+  | Action | Example |
+  | --- | --- |
+  | `add_clip` | `tune do <song> add_clip clip=lead kind=notes bars=2 notes='[{ start = 0, pitch = "C3", len = 2 }]'`; `kind` is `acid`, `drum` or `notes`, `steps` only for acid and drum (16 rests by default), `bars` and `notes` only for notes; goes after the last clip |
+  | `remove_clip` | `tune do <song> remove_clip clip=k4` removes the clip and its placements (the result lists them) |
+  | `rename_clip` | `tune do <song> rename_clip clip=a1 to=bass1`; keeps its place, placements follow |
+  | `duplicate_clip` | `tune do <song> duplicate_clip clip=h to=h2` copies it right after the original, without its comments |
+
 - To see the UI: `tune serve <song> --device null --port 4580` (in the
   background; `task ui:build` first), then drive Chrome with the
   `agent-browser` skill: start the agent Chrome, pick a session
