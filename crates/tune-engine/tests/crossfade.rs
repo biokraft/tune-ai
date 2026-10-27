@@ -522,3 +522,117 @@ fn a_seek_ends_the_fade() {
     assert!(!e.swap_fading());
     assert!(e.take_retired_swap().is_some());
 }
+
+/// Two `tone` tracks, `t` (a sine) and `u` (a cosine at -6 dB, panned to
+/// 0.5, with `u_extra` keys), and `t` alone with `t_extra` keys.
+fn removal(u_extra: &str, t_extra: &str) -> (Arc<CompiledSong>, Arc<CompiledSong>) {
+    let u = track(
+        "u",
+        "cos",
+        &[],
+        &format!("gain_db = -6\npan = 0.5\n{u_extra}"),
+    );
+    (
+        song(&[track("t", "sin", &[], t_extra), u]),
+        song(&[track("t", "sin", &[], t_extra)]),
+    )
+}
+
+/// The stems of `song`'s offline render, by track.
+fn stems(song: &Arc<CompiledSong>) -> Vec<Vec<f32>> {
+    render(
+        song.clone(),
+        &RenderOptions {
+            start_bar: 0,
+            end_bar: 2,
+            stems: true,
+        },
+    )
+    .unwrap()
+    .stems
+    .into_iter()
+    .map(|(_, x)| x)
+    .collect()
+}
+
+/// The weight of the old song in fade frame `S + n`: `1 - (n + 1) / 480`
+/// during the fade, 0 after.
+fn fade_out(n: u64) -> f64 {
+    if n < FADE {
+        1.0 - (n + 1) as f64 / FADE as f64
+    } else {
+        0.0
+    }
+}
+
+#[test]
+fn a_removed_track_fades_out() {
+    let (a, b) = removal("", "");
+    let rb = offline(&b);
+    let stem_u = &stems(&a)[1];
+    let (mix, s) = swap_at(&a, &b);
+    // The fade-out is audible and lopsided (the pan is kept).
+    assert!(stem_u[2 * s as usize + 1].abs() > 0.05);
+    for n in 0..FADE {
+        for c in 0..2 {
+            let i = 2 * (s + n) as usize + c;
+            let want = f64::from(rb[i]) + fade_out(n) * f64::from(stem_u[i]);
+            assert!(
+                (f64::from(mix[i]) - want).abs() <= 1e-7,
+                "frame S + {n}, channel {c}: {} vs {want}",
+                mix[i]
+            );
+        }
+    }
+    let rest = 2 * (s + FADE) as usize..mix.len();
+    let bits = |x: &[f32]| x.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+    assert_eq!(
+        bits(&mix[rest.clone()]),
+        bits(&rb[rest]),
+        "b after the fade"
+    );
+}
+
+#[test]
+fn a_removed_track_fades_out_of_the_bus() {
+    // `u` sends into the reverb; `t` keeps the bus built with a send that
+    // is off (exactly 0), so after the swap only `u`'s fading send feeds it.
+    let (a, b) = removal(
+        r#"params = { "send.reverb" = -6 }"#,
+        r#"params = { "send.reverb" = -60 }"#,
+    );
+    let rb = offline(&b);
+    let stem_u = &stems(&a)[1];
+    let (mix, s) = swap_at(&a, &b);
+    // The reverb fed what the engine sends: `u`'s strip output (its stem
+    // without the pan) times the send gain, faded out from `S`.
+    let pan_l = tune_engine::pan_gains(0.5).0;
+    let send = tune_dsp::send_gain(-6.0);
+    let mut reverb = tune_dsp::Reverb::new(f64::from(RATE));
+    for (index, spec) in tune_dsp::REVERB_PARAMS.iter().enumerate() {
+        reverb.set_param_at(index, spec.default);
+    }
+    let end = s + 2000;
+    let mut tail = 0.0f64;
+    for frame in 0..end {
+        let y = f64::from(stem_u[2 * frame as usize]) / pan_l;
+        let weight = if frame < s { 1.0 } else { fade_out(frame - s) };
+        let (rl, rr) = reverb.process(y * send * weight);
+        if frame < s {
+            continue;
+        }
+        for (c, ret) in [rl, rr].into_iter().enumerate() {
+            let i = 2 * frame as usize + c;
+            let want = f64::from(rb[i]) + weight * f64::from(stem_u[i]) + ret;
+            assert!(
+                (f64::from(mix[i]) - want).abs() <= 1e-7,
+                "frame {frame}, channel {c}: {} vs {want}",
+                mix[i]
+            );
+            if frame < s + FADE {
+                tail = tail.max(ret.abs());
+            }
+        }
+    }
+    assert!(tail > 1e-3, "the reverb sounds during the fade: {tail}");
+}
