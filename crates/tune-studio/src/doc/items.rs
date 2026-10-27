@@ -159,7 +159,7 @@ impl SongDoc {
             let expected: Vec<&str> = ClipKind::ALL.iter().map(|k| k.name()).collect();
             EditOpError::UnknownClipKind {
                 name: kind.to_owned(),
-                expected: format!("{} or {}", expected[..2].join(", "), expected[2]),
+                expected: or_list(&expected),
             }
         })?;
         tune_song::check_new_clip(&self.song, clip)?;
@@ -989,6 +989,15 @@ fn rename_keys(slot: Slot<'_>, rename: impl Fn(&str) -> Option<String>) -> Optio
     Some(())
 }
 
+/// `a`, `a or b`, `a, b or c`, for any number of names.
+fn or_list(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [only] => (*only).to_owned(),
+        [init @ .., last] => format!("{} or {last}", init.join(", ")),
+    }
+}
+
 /// The `fx` array of a track.
 fn fx_array<'a>(doc: &'a mut DocumentMut, track: &str) -> Option<&'a mut toml_edit::Array> {
     match track_table(doc, track)? {
@@ -1141,4 +1150,20 @@ fn remove_params(doc: &mut DocumentMut, track: &str, prefix: &str) -> Option<()>
         track_table(doc, track)?.remove("params");
     }
     Some(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kinds_join_for_any_count() {
+        assert_eq!(or_list(&[]), "");
+        assert_eq!(or_list(&["a"]), "a");
+        assert_eq!(or_list(&["a", "b"]), "a or b");
+        assert_eq!(or_list(&["a", "b", "c"]), "a, b or c");
+        assert_eq!(or_list(&["a", "b", "c", "d"]), "a, b, c or d");
+        let kinds: Vec<&str> = ClipKind::ALL.iter().map(|k| k.name()).collect();
+        assert_eq!(or_list(&kinds), "acid, drum or notes");
+    }
 }
