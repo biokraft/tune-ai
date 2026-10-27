@@ -79,6 +79,39 @@ describe("patternGlyph", () => {
       }),
     ).toEqual([0.6, 0, 1, 0]);
   });
+
+  it("a note clip's glyph marks its note starts", () => {
+    const glyph = patternGlyph({
+      kind: "notes",
+      id: "lead",
+      bars: 1,
+      notes: [
+        { start: 0, pitch: 48, len: 3, vel: 100 },
+        { start: 2.5, pitch: 51, len: 2, vel: 120 },
+        { start: 15.9, pitch: 48, len: 0.1, vel: 100 },
+      ],
+    });
+    expect(glyph).toHaveLength(16);
+    expect(glyph.map((v, i) => [i, v]).filter(([, v]) => v !== 0)).toEqual([
+      [0, 0.6],
+      [2, 1],
+      [15, 0.6],
+    ]);
+  });
+
+  it("keeps the larger value where two notes start in one step", () => {
+    const glyph = patternGlyph({
+      kind: "notes",
+      id: "lead",
+      bars: 2,
+      notes: [
+        { start: 4, pitch: 48, len: 1, vel: 127 },
+        { start: 4.5, pitch: 55, len: 1, vel: 100 },
+      ],
+    });
+    expect(glyph).toHaveLength(32);
+    expect(glyph[4]).toBe(1);
+  });
 });
 
 describe("highlightedSteps", () => {
