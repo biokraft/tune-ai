@@ -21,6 +21,11 @@ use crate::compile::{
 use crate::live::SongUpdate;
 use crate::mixer::{Meter, MixRuntime, Strip};
 
+/// How long a swap that changes a track's signal path crossfades that
+/// track, in milliseconds: `(SWAP_FADE_MS * 0.001 * rate).round().max(1)`
+/// frames (480 at 48 kHz).
+pub const SWAP_FADE_MS: f64 = 10.0;
+
 /// The live DSP objects of one track, with its knob overrides.
 pub struct TrackRuntime {
     pub instrument: Box<dyn Instrument>,
@@ -37,6 +42,40 @@ pub struct TrackRuntime {
     /// What the instrument is sounding, from the engine's side: it travels
     /// with the instrument on a swap and is reset with it.
     seq: Sequencer,
+    /// How this track plays the swap crossfade, set by every swap (see
+    /// [`FadeRole`]).
+    fade: FadeRole,
+    /// A placeholder a swap left behind in the old list: it holds nothing
+    /// and plays no fade-out.
+    vacant: bool,
+}
+
+/// How a track of the new song plays a swap's crossfade, while
+/// [`Engine::swap_fading`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum FadeRole {
+    /// The swap kept the signal path (or the track could not keep the old
+    /// one running): it plays the new song only.
+    #[default]
+    None,
+    /// The track is new: it fades in from silence.
+    In,
+    /// The swap changed the path: the old chain, in the retired update's
+    /// fresh-runtime slot of this track, plays beside the new one and the
+    /// output moves from it to the new one. With `own_instrument` the old
+    /// chain plays the old instrument (kept in that slot); otherwise both
+    /// chains share the kept instrument's sample.
+    Cross { own_instrument: bool },
+}
+
+/// A swap crossfade in progress: `done` frames of `len`.
+#[derive(Clone, Copy, Debug)]
+struct SwapFade {
+    done: usize,
+    len: usize,
+    /// Whether some track of the old song was soloed: what decides which
+    /// fading-out tracks are audible.
+    old_any_solo: bool,
 }
 
 /// The notes a track's instrument is sounding, from step clips and from
@@ -350,6 +389,8 @@ impl TrackRuntime {
                 .map(|fx| vec![f64::NAN; fx.params.len()])
                 .collect(),
             seq: Sequencer::default(),
+            fade: FadeRole::None,
+            vacant: false,
         };
         rt.apply_static(track);
         rt
@@ -482,6 +523,8 @@ impl TrackRuntime {
             strip_overrides: Vec::new(),
             fx_overrides: Vec::new(),
             seq: Sequencer::default(),
+            fade: FadeRole::None,
+            vacant: true,
         }
     }
 }
@@ -499,6 +542,30 @@ impl Instrument for Vacant {
         0.0
     }
     fn reset(&mut self) {}
+}
+
+impl FadeRole {
+    /// The new chain's output `y` (on instrument sample `x`) at crossfade
+    /// weight `a`, for the track whose old path, if it has one, is `path`
+    /// (see [`FadeRole`]). The old path gets no events, lanes or overrides.
+    #[inline]
+    fn blend(self, a: f64, x: f64, y: f64, path: Option<&mut Option<TrackRuntime>>) -> f64 {
+        match (self, path.and_then(Option::as_mut)) {
+            (Self::In, _) => a * y,
+            (Self::Cross { own_instrument }, Some(path)) => {
+                let mut y_old = if own_instrument {
+                    path.instrument.process()
+                } else {
+                    x
+                };
+                for fx in &mut path.fx {
+                    y_old = fx.process(y_old);
+                }
+                y_old + a * (y - y_old)
+            }
+            _ => y,
+        }
+    }
 }
 
 /// Whether a swap may keep the running `a` for `b`: the same id, module
@@ -543,6 +610,11 @@ pub struct Engine {
     generation: u64,
     /// Knob overrides set across all runtimes.
     overrides_active: u32,
+    /// The crossfade of the last swap, while it runs (see
+    /// [`swap_fading`](Self::swap_fading)).
+    fade: Option<SwapFade>,
+    /// Crossfade length in frames ([`SWAP_FADE_MS`]).
+    fade_len: usize,
 }
 
 static REST: Cell = Cell::Rest;
@@ -568,6 +640,7 @@ impl Engine {
             song.tracks.len(),
             "one runtime per track is required"
         );
+        let fade_len = fade_len(&song);
         Self {
             any_solo: song.tracks.iter().any(|t| t.solo),
             gate_samples: gate_samples(&song),
@@ -587,6 +660,8 @@ impl Engine {
             mix_swaps_kept: 0,
             generation: 0,
             overrides_active: 0,
+            fade: None,
+            fade_len,
         }
     }
 
@@ -613,6 +688,18 @@ impl Engine {
     ///   only when its placement at `k` starts and is offset as before and
     ///   plays a clip with the same events; otherwise they get `AllOff` at
     ///   `k` (see `Sequencer::carry_over`);
+    /// - a swap that changes a track's signal path (a device added, removed,
+    ///   reordered or rebuilt, the instrument swapped, the track added or
+    ///   removed) crossfades that track over [`SWAP_FADE_MS`]: the old path
+    ///   keeps running beside the new one, from the same state (each kept
+    ///   device copies itself into a stand-in, see
+    ///   [`Effect::copy_state_to`]), with no events, lanes or overrides; an
+    ///   added track fades in and a removed one fades out. A track with a
+    ///   kept device that cannot copy its state switches at once. Value,
+    ///   step and clip edits switch at the step, as before;
+    /// - the retired update, which holds the old paths, comes back from
+    ///   [`take_retired_swap`](Self::take_retired_swap) only once the fade
+    ///   is over, so the next swap waits for it;
     /// - the new clock takes over at step `k` (the step index survives a bpm
     ///   change) and static params are re-applied;
     /// - the loop is clamped to the new end, and dropped when it starts at
@@ -649,8 +736,19 @@ impl Engine {
 
     /// The last applied swap's update, now holding the old song and every
     /// runtime the new song did not take. Drop it off the audio thread.
+    /// `None` while [`swap_fading`](Self::swap_fading): the old runtimes in
+    /// it are still playing.
     pub fn take_retired_swap(&mut self) -> Option<Box<SongUpdate>> {
+        if self.fade.is_some() {
+            return None;
+        }
         self.retired.take()
+    }
+
+    /// Whether a structural swap's crossfade is running (see
+    /// [`queue_swap`](Self::queue_swap)). A seek or the song's end ends it.
+    pub fn swap_fading(&self) -> bool {
+        self.fade.is_some()
     }
 
     /// Swaps applied since the engine was built.
@@ -755,6 +853,8 @@ impl Engine {
             rt.reset();
         }
         self.mix.reset();
+        // Every runtime restarts from silence, so there is nothing to fade.
+        self.fade = None;
         self.step = 16 * u64::from(bar);
         self.pos = self.song.clock.step_start(self.step);
         self.region = region_of(&self.song, self.step);
@@ -805,7 +905,14 @@ impl Engine {
     /// 3. For every track in song order: instrument, then fx in order, then
     ///    the ducker (`y`); `l, r = y·gain·pan`; write its stem; when audible
     ///    (mute and solo), add `l, r` to the master and `y·gain·send` to the
-    ///    input of each built bus.
+    ///    input of each built bus. While a swap crossfades (`a = done / len`
+    ///    after `done += 1`), before the ducker: a track whose path changed
+    ///    plays `y_old + a·(y − y_old)`, `y_old` being its old chain on the
+    ///    old (or the shared) instrument sample, and an added track `a·y`.
+    ///    Then each track the swap removed, in old song order: instrument,
+    ///    fx, its own ducker, `·(1 − a)`, its old gain and pan, into the
+    ///    master and the buses as it was audible in the old song (no stem).
+    ///    The frame that reaches `done == len` ends the fade.
     /// 4. Add the delay bus's return, then the reverb bus's, to the master
     ///    (a bus that is not built is off).
     /// 5. Master gain; then the soft clipper, or the limiter in limit mode;
@@ -848,6 +955,7 @@ impl Engine {
             self.apply_swap();
         }
         if self.finished {
+            self.fade = None;
             return self.silence(&mut stem);
         }
         let song = &*self.song;
@@ -861,6 +969,7 @@ impl Engine {
             let total_steps = 16 * u64::from(song.total_bars);
             if self.step == total_steps {
                 self.finished = true;
+                self.fade = None;
                 return self.silence(&mut stem);
             }
             let region = region_of(song, self.step);
@@ -940,10 +1049,24 @@ impl Engine {
         let (mut ml, mut mr) = (0.0, 0.0);
         let (mut delay_in, mut reverb_in) = (0.0, 0.0);
         let (has_delay, has_reverb) = (self.mix.has_delay(), self.mix.has_reverb());
+        // A swap crossfade: this frame's weight of the new song, and the
+        // retired update holding the old paths.
+        let fade = self.fade.as_mut().map(|f| {
+            f.done += 1;
+            (f.done as f64 / f.len as f64, f.old_any_solo)
+        });
+        let mut old = match fade {
+            Some(_) => self.retired.as_deref_mut(),
+            None => None,
+        };
         for (t, (rt, track)) in self.tracks.iter_mut().zip(&song.tracks).enumerate() {
-            let mut y = rt.instrument.process();
+            let x = rt.instrument.process();
+            let mut y = x;
             for fx in &mut rt.fx {
                 y = fx.process(y);
+            }
+            if let (Some((a, _)), Some(old)) = (fade, old.as_deref_mut()) {
+                y = rt.fade.blend(a, x, y, old.tracks.get_mut(t));
             }
             // `y·gain·pan` evaluates as `(y·gain)·pan`, as it always has.
             let y = rt.strip.duck(y) * track.gain;
@@ -961,6 +1084,33 @@ impl Engine {
                     reverb_in += y * send_reverb;
                 }
             }
+        }
+        if let (Some((a, old_any_solo)), Some(old)) = (fade, old) {
+            // Each old track the new song dropped fades out as it played.
+            for (rt, track) in old.spare.iter_mut().zip(&old.song.tracks) {
+                if rt.vacant {
+                    continue;
+                }
+                let mut y = rt.instrument.process();
+                for fx in &mut rt.fx {
+                    y = fx.process(y);
+                }
+                let y = rt.strip.duck(y) * (1.0 - a) * track.gain;
+                if !track.mute && (!old_any_solo || track.solo) {
+                    ml += y * track.pan_gains.0;
+                    mr += y * track.pan_gains.1;
+                    let (send_delay, send_reverb) = rt.strip.sends();
+                    if has_delay {
+                        delay_in += y * send_delay;
+                    }
+                    if has_reverb {
+                        reverb_in += y * send_reverb;
+                    }
+                }
+            }
+        }
+        if self.fade.is_some_and(|f| f.done >= f.len) {
+            self.fade = None;
         }
         self.mix.add_returns(&mut ml, &mut mr, delay_in, reverb_in);
         let (cl, cr) = self.mix.master(song.mix.master, &mut self.meter, ml, mr);
@@ -981,20 +1131,27 @@ impl Engine {
             let fresh = u.tracks[j].take().expect("one fresh runtime per track");
             let old = self.song.tracks.iter().position(|t| t.id == new.id);
             let rt = match old {
-                None => fresh,
+                None => TrackRuntime {
+                    fade: FadeRole::In,
+                    ..fresh
+                },
                 Some(i) => {
                     let old = &self.song.tracks[i];
                     let mut kept =
                         std::mem::replace(&mut self.tracks[i], TrackRuntime::placeholder());
                     let mut unused = fresh;
-                    if same_device(&old.instrument, &new.instrument) {
-                        // Held note-clip notes play on or end here.
-                        kept.seq.carry_over(&self.song, &u.song, j, self.step);
-                    } else {
+                    let own_instrument = !same_device(&old.instrument, &new.instrument);
+                    if own_instrument {
                         std::mem::swap(&mut kept.instrument, &mut unused.instrument);
                         std::mem::swap(&mut kept.overrides, &mut unused.overrides);
                         std::mem::swap(&mut kept.seq, &mut unused.seq);
+                    } else {
+                        // Held note-clip notes play on or end here.
+                        kept.seq.carry_over(&self.song, &u.song, j, self.step);
                     }
+                    let path_changed = own_instrument
+                        || old.fx.len() != new.fx.len()
+                        || old.fx.iter().zip(&new.fx).any(|(o, n)| !same_device(o, n));
                     // Deal every kept device into its new slot of the fresh
                     // chain, then take that chain; the old one goes back
                     // with the devices nobody kept.
@@ -1009,6 +1166,23 @@ impl Engine {
                     }
                     std::mem::swap(&mut kept.fx, &mut unused.fx);
                     std::mem::swap(&mut kept.fx_overrides, &mut unused.fx_overrides);
+                    // `unused` now holds the old chain in old order, with a
+                    // fresh stand-in where a kept device was: each kept
+                    // device copies itself into its stand-in, so the old
+                    // path plays on from the same state. One that cannot
+                    // copy makes the track switch at once.
+                    let copied = path_changed
+                        && new.fx.iter().enumerate().all(|(slot, fx)| {
+                            match old.fx.iter().position(|o| same_device(o, fx)) {
+                                Some(k) => kept.fx[slot].copy_state_to(unused.fx[k].as_mut()),
+                                None => true,
+                            }
+                        });
+                    kept.fade = if copied {
+                        FadeRole::Cross { own_instrument }
+                    } else {
+                        FadeRole::None
+                    };
                     u.tracks[j] = Some(unused);
                     kept
                 }
@@ -1016,6 +1190,11 @@ impl Engine {
             u.spare.push(rt);
         }
         std::mem::swap(&mut self.tracks, &mut u.spare);
+        // `u.spare` is the old list: placeholders, and the runtimes of the
+        // tracks the new song dropped, which fade out.
+        let fades = u.spare.iter().any(|rt| !rt.vacant)
+            || self.tracks.iter().any(|rt| rt.fade != FadeRole::None);
+        let old_any_solo = self.any_solo;
         if self.mix.take_units(&mut u.mix, &self.song, &u.song) {
             self.mix_swaps_kept += 1;
         }
@@ -1053,6 +1232,12 @@ impl Engine {
         }
         self.pos = song.clock.step_start(self.step);
         self.region = region_of(song, self.step);
+        // A finished engine plays silence: nothing to fade.
+        self.fade = (fades && !self.finished).then_some(SwapFade {
+            done: 0,
+            len: self.fade_len,
+            old_any_solo,
+        });
     }
 
     fn silence(&self, stem: &mut impl FnMut(usize, f64, f64)) -> (f32, f32) {
@@ -1091,6 +1276,13 @@ impl Engine {
     pub fn song(&self) -> &Arc<CompiledSong> {
         &self.song
     }
+}
+
+/// The swap crossfade's length in frames at the song's rate: 480 at 48 kHz.
+fn fade_len(song: &CompiledSong) -> usize {
+    (SWAP_FADE_MS * 0.001 * f64::from(song.clock.sample_rate))
+        .round()
+        .max(1.0) as usize
 }
 
 /// The song's gate length in samples (half a step).

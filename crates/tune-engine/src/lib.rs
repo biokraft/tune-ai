@@ -18,7 +18,7 @@ pub use compile::{
     CompiledRegion, CompiledSection, CompiledSong, CompiledTrack, MIX_TRACK, NOTE_CLIP_IDS,
     NoteClipEvents, ParamTarget,
 };
-pub use engine::{Engine, TrackRuntime};
+pub use engine::{Engine, SWAP_FADE_MS, TrackRuntime};
 pub use live::{AudioOut, LiveController, LiveError, LiveProcessor, SongUpdate, live};
 pub use mixer::{CLIP_CEILING, CLIP_KNEE, Meter, MixRuntime, Strip, pan_gains, soft_clip};
 pub use offline::{RenderError, RenderOptions, RenderReport, Rendered, render, render_to_files};
