@@ -51,8 +51,12 @@ fn changes(a: &Args) -> Result<Success, Vec<Failure>> {
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_owned))
                 .unwrap_or_default();
+            let run = e
+                .run
+                .as_ref()
+                .map_or(String::new(), |r| format!(" (run {r})"));
             format!(
-                "{} {} {} {} -> {}",
+                "{} {} {} {} -> {}{run}",
                 e.ts.to_zoned(tz.clone()).strftime("%H:%M:%S"),
                 source,
                 e.path,

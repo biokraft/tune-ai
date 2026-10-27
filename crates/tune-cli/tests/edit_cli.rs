@@ -23,8 +23,16 @@ fn fixture_of(name: &str) -> (TempDir, PathBuf) {
     (dir, song)
 }
 
+/// One studio directory per test process, so no test reads the real `~/.tune`.
+fn studio_dir() -> &'static Path {
+    static DIR: std::sync::OnceLock<TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
+}
+
 fn tune() -> Command {
-    Command::cargo_bin("tune").unwrap()
+    let mut c = Command::cargo_bin("tune").unwrap();
+    c.env("TUNE_STUDIO_DIR", studio_dir());
+    c
 }
 
 fn json_out(cmd: &mut Command) -> Value {

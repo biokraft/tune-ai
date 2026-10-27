@@ -191,7 +191,10 @@ impl StudioCore {
             }
         };
         let changes: Vec<Change> = version_change(from, FORMAT_VERSION).into_iter().collect();
-        if let Err(e) = self.log.append_changes(Source::External, &changes, &hash) {
+        if let Err(e) = self
+            .log
+            .append_changes(Source::External, &changes, &hash, None, None)
+        {
             // The file is migrated either way; say that the log missed it.
             self.migration_error = Some(format!(
                 "the song was upgraded and saved, but the edit log could not be written: {e}"
@@ -681,11 +684,13 @@ impl StudioCore {
         changes: &[Change],
         hash: &str,
     ) -> Result<(), StudioError> {
-        self.log.append_changes(source, changes, hash).map_err(|e| {
-            StudioError::Io(format!(
-                "the song was written, but the edit log failed: {e}"
-            ))
-        })
+        self.log
+            .append_changes(source, changes, hash, None, None)
+            .map_err(|e| {
+                StudioError::Io(format!(
+                    "the song was written, but the edit log failed: {e}"
+                ))
+            })
     }
 }
 
