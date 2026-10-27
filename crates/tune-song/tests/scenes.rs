@@ -112,3 +112,133 @@ fn scenes_round_trip() {
     assert!(text.contains("\n[scenes.empty]\n\n[[sections]]"), "{text}");
     assert_eq!(parse_song(&text).unwrap(), song);
 }
+
+fn keys(song: &tune_song::Song) -> Vec<&str> {
+    song.scenes.keys().map(String::as_str).collect()
+}
+
+fn refused<T: std::fmt::Debug>(result: Result<T, tune_song::EditOpError>) -> String {
+    result.unwrap_err().to_string()
+}
+
+#[test]
+fn scene_edits() {
+    let song = parse_song(SESSION).unwrap();
+
+    let added = tune_song::add_scene(&song, "jam", None).unwrap();
+    let after = &added.arranged.song;
+    assert_eq!(keys(after), ["groove", "break", "jam"]);
+    assert!(after.scenes["jam"].slots.is_empty());
+    assert_eq!(added.removed, tune_song::Removed::default());
+    let first = tune_song::add_scene(&song, "jam", Some(0)).unwrap();
+    assert_eq!(keys(&first.arranged.song), ["jam", "groove", "break"]);
+    let middle = tune_song::add_scene(&song, "jam", Some(1)).unwrap();
+    assert_eq!(keys(&middle.arranged.song), ["groove", "jam", "break"]);
+    // An index equal to the count appends.
+    let last = tune_song::add_scene(&song, "jam", Some(2)).unwrap();
+    assert_eq!(keys(&last.arranged.song), ["groove", "break", "jam"]);
+
+    let moved = tune_song::move_scene(&song, "break", 0).unwrap();
+    assert_eq!(keys(&moved.arranged.song), ["break", "groove"]);
+    assert_eq!(slots(&moved.arranged.song.scenes["break"]), [("hat", "h")]);
+    let stay = tune_song::move_scene(&song, "groove", 0).unwrap();
+    assert_eq!(stay.arranged.song, song);
+    assert_eq!(keys(&stay.arranged.song), ["groove", "break"]);
+
+    let renamed = tune_song::rename_scene(&song, "groove", "drop").unwrap();
+    assert_eq!(keys(&renamed.arranged.song), ["drop", "break"]);
+    assert_eq!(
+        slots(&renamed.arranged.song.scenes["drop"]),
+        [("kick", "k4"), ("acid", "a1")]
+    );
+    let same = tune_song::rename_scene(&song, "groove", "groove").unwrap();
+    assert_eq!(same.arranged.song, song);
+
+    let removed = tune_song::remove_scene(&song, "groove").unwrap();
+    assert_eq!(keys(&removed.arranged.song), ["break"]);
+    let slot = |track: &str, clip: &str| tune_song::RemovedSlot {
+        scene: "groove".into(),
+        track: track.into(),
+        clip: clip.into(),
+    };
+    assert_eq!(
+        removed.removed.slots,
+        [slot("kick", "k4"), slot("acid", "a1")]
+    );
+    assert!(removed.removed.lanes.is_empty() && removed.removed.placements.is_empty());
+
+    let set = tune_song::set_slot(&song, "break", "kick", Some("k4")).unwrap();
+    assert_eq!(
+        slots(&set.arranged.song.scenes["break"]),
+        [("hat", "h"), ("kick", "k4")]
+    );
+    let set = tune_song::set_slot(&song, "break", "hat", Some("h")).unwrap();
+    assert_eq!(set.arranged.song, song);
+    let swapped = tune_song::set_slot(&song, "groove", "kick", Some("a1")).unwrap();
+    assert_eq!(
+        slots(&swapped.arranged.song.scenes["groove"]),
+        [("kick", "a1"), ("acid", "a1")]
+    );
+    let added = tune_song::set_slot(&song, "groove", "hat", Some("h")).unwrap();
+    assert_eq!(
+        slots(&added.arranged.song.scenes["groove"]),
+        [("kick", "k4"), ("acid", "a1"), ("hat", "h")]
+    );
+    let cleared = tune_song::set_slot(&song, "groove", "acid", None).unwrap();
+    assert_eq!(
+        slots(&cleared.arranged.song.scenes["groove"]),
+        [("kick", "k4")]
+    );
+    let nothing = tune_song::set_slot(&song, "groove", "hat", None).unwrap();
+    assert_eq!(nothing.arranged.song, song);
+
+    // The refusals, verbatim.
+    assert_eq!(
+        refused(tune_song::add_scene(&song, "groove", None)),
+        "scene `groove` already exists"
+    );
+    assert_eq!(
+        refused(tune_song::add_scene(&song, "Jam", None)),
+        "a scene id is lower-case letters, digits and `_`, got `Jam`"
+    );
+    assert_eq!(
+        refused(tune_song::rename_scene(&song, "groove", "break")),
+        "scene `break` already exists"
+    );
+    assert_eq!(
+        refused(tune_song::rename_scene(&song, "groove", "Drop")),
+        "a scene id is lower-case letters, digits and `_`, got `Drop`"
+    );
+    assert_eq!(
+        refused(tune_song::remove_scene(&song, "drop")),
+        "there is no scene `drop`"
+    );
+    assert_eq!(
+        refused(tune_song::rename_scene(&song, "drop", "x")),
+        "there is no scene `drop`"
+    );
+    assert_eq!(
+        refused(tune_song::move_scene(&song, "drop", 0)),
+        "there is no scene `drop`"
+    );
+    assert_eq!(
+        refused(tune_song::set_slot(&song, "drop", "kick", None)),
+        "there is no scene `drop`"
+    );
+    assert_eq!(
+        refused(tune_song::set_slot(&song, "groove", "bass", Some("k4"))),
+        "there is no track `bass`"
+    );
+    assert_eq!(
+        refused(tune_song::set_slot(&song, "groove", "kick", Some("nope"))),
+        "there is no clip `nope`"
+    );
+    assert_eq!(
+        refused(tune_song::move_scene(&song, "groove", 2)),
+        "index 2 is out of bounds (the song has 2 scenes)"
+    );
+    assert_eq!(
+        refused(tune_song::add_scene(&song, "jam", Some(3))),
+        "index 3 is out of bounds (the song has 2 scenes)"
+    );
+}

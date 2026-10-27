@@ -38,6 +38,16 @@ pub struct Removed {
     pub placements: Vec<(String, Placement)>,
     /// The `mix.duck_source` a removed track was, now cleared.
     pub duck_source: Option<String>,
+    /// Scene slots that went with a removed scene, in scene and slot order.
+    pub slots: Vec<RemovedSlot>,
+}
+
+/// A scene slot an edit removed: the clip `track` held in `scene`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemovedSlot {
+    pub scene: String,
+    pub track: String,
+    pub clip: String,
 }
 
 /// Why an edit was refused.
@@ -49,7 +59,7 @@ pub enum EditOpError {
     NoSuchTrack(String),
     #[error("`mix` is reserved for the mix params")]
     MixReserved,
-    /// `what` is `track`, `device` or `clip`.
+    /// `what` is `track`, `device`, `clip` or `scene`.
     #[error("a {what} id is lower-case letters, digits and `_`, got `{id}`")]
     BadId { what: &'static str, id: String },
     #[error("unknown instrument `{name}` (expected {expected})")]
@@ -91,6 +101,16 @@ pub enum EditOpError {
     },
     #[error("index {index} is out of bounds (the chain has {len})")]
     IndexOutOfBounds { index: usize, len: usize },
+    #[error("scene `{0}` already exists")]
+    SceneExists(String),
+    #[error("there is no scene `{0}`")]
+    NoSuchScene(String),
+    /// A launch of a slot that holds no clip.
+    #[error("scene `{scene}` has no clip for track `{track}`")]
+    EmptySlot { scene: String, track: String },
+    /// `index` is 0-based, as the scene edits take it.
+    #[error("index {index} is out of bounds (the song has {len} scenes)")]
+    SceneIndexOutOfBounds { index: usize, len: usize },
 }
 
 /// Appends track `id` playing a new `module` instrument: its device id is
@@ -549,7 +569,7 @@ fn placement_at(play: &[Placement], track: &str, start_bar: u32) -> Result<usize
         })
 }
 
-fn clip_of<'s>(song: &'s Song, id: &str) -> Result<&'s Clip, EditOpError> {
+pub(crate) fn clip_of<'s>(song: &'s Song, id: &str) -> Result<&'s Clip, EditOpError> {
     song.clips
         .get(id)
         .ok_or_else(|| EditOpError::NoSuchClip(id.to_owned()))
@@ -570,7 +590,7 @@ pub fn check_new_clip(song: &Song, id: &str) -> Result<(), EditOpError> {
     Ok(())
 }
 
-fn track_of<'s>(song: &'s Song, id: &str) -> Result<&'s Track, EditOpError> {
+pub(crate) fn track_of<'s>(song: &'s Song, id: &str) -> Result<&'s Track, EditOpError> {
     song.tracks
         .get(id)
         .ok_or_else(|| EditOpError::NoSuchTrack(id.to_owned()))
@@ -604,7 +624,7 @@ fn device_exists(track: &str, device: &str) -> EditOpError {
 
 /// Whether `id` is lower-case letters, digits and `_`, as the validator
 /// wants of a track, device or clip id.
-fn well_formed(id: &str) -> bool {
+pub(crate) fn well_formed(id: &str) -> bool {
     !id.is_empty()
         && id
             .chars()
@@ -696,7 +716,7 @@ fn take_lanes(song: &mut Song, removed: &mut Removed, gone: impl Fn(&Lane) -> bo
 }
 
 /// `song` with every stretch still the old one, in the old order.
-fn untouched_lanes(song: Song, removed: Removed) -> Edited {
+pub(crate) fn untouched_lanes(song: Song, removed: Removed) -> Edited {
     let kept = (0..song.automation.len()).collect();
     edited(song, kept, removed)
 }
