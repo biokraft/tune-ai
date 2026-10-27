@@ -108,9 +108,14 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
     }
 
     for name in union(old.clips.keys(), new.clips.keys()) {
-        let p = SongPath::Clip { clip: name };
-        let (a, b) = both(&p);
-        push(p, a, b);
+        for p in [
+            SongPath::Clip { clip: name.clone() },
+            SongPath::ClipBars { clip: name.clone() },
+            SongPath::ClipNotes { clip: name },
+        ] {
+            let (a, b) = both(&p);
+            push(p, a, b);
+        }
     }
 
     if sections_restructured(old, new) {

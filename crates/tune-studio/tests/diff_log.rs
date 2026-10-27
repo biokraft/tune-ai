@@ -454,3 +454,49 @@ fn diff_reports_mix_changes() {
         ]
     );
 }
+
+const NOTE_SONG: &str = r#"[song]
+version = 2
+name = "notes"
+bpm = 120
+
+[tracks.acid]
+instrument = "acid303"
+play = [{ at = 1, clip = "lead", bars = 1 }]
+
+[clips.lead]
+kind = "notes"
+bars = 1
+notes = [
+  { start = 0, pitch = "C3", len = 3 },
+  { start = 2.5, pitch = "D#3", len = 2, vel = 120 },
+]
+
+[[sections]]
+name = "a"
+bars = 1
+"#;
+
+#[test]
+fn note_edits_are_clip_note_changes() {
+    let old = json!([
+        { "start": 0, "pitch": "C3", "len": 3, "vel": 100 },
+        { "start": 2.5, "pitch": "D#3", "len": 2, "vel": 120 },
+    ]);
+    let new = json!([
+        { "start": 0, "pitch": "C3", "len": 3, "vel": 100 },
+        { "start": 2.5, "pitch": "E3", "len": 2, "vel": 120 },
+    ]);
+    let text = NOTE_SONG.replace("D#3", "E3");
+    assert_eq!(
+        diff_songs(&song(NOTE_SONG), &song(&text)),
+        vec![change("clips.lead.notes", old, new)]
+    );
+
+    let text = NOTE_SONG.replace("bars = 1\nnotes", "bars = 2\nnotes");
+    assert_eq!(
+        diff_songs(&song(NOTE_SONG), &song(&text)),
+        vec![change("clips.lead.bars", json!(1), json!(2))]
+    );
+    assert!(diff_songs(&song(NOTE_SONG), &song(NOTE_SONG)).is_empty());
+}
