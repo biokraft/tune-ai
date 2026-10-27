@@ -365,7 +365,10 @@ The producer may have the studio (app or browser) open on the same song.
   its clip or the sections for a placement; its track, the track's
   instrument or effects, or the sections for a lane stretch). A list
   another edit touched while the run was still working on it is kept
-  whole. A section
+  whole. A target that changed between two of the run's writes with no
+  edit in the log to say so (a hand edit with the studio closed, which
+  the run's next write carried along) is kept, a list whole, with `by`
+  `null`. A section
   edit (`add_section`, `move_section`, `resize_section` and the like)
   goes back whole with the placements and stretches it moved, or is kept
   whole when any part of it changed later, and also when any other edit
