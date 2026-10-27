@@ -103,11 +103,10 @@ enum Decision {
     },
 }
 
-/// A revert the song refused, waiting for the others.
+/// Reverts the song refused, waiting for the others: one target's, or a
+/// section edit's (all written together).
 struct Waiting {
-    target: Target,
-    value: Value,
-    items: Vec<Option<Value>>,
+    puts: Vec<Put>,
     error: EditError,
 }
 
@@ -115,6 +114,11 @@ struct Waiting {
 /// order) describe it. Gives what was reverted and what was kept; `doc`
 /// holds every revert that could be written. No record of the run gives
 /// [`StudioError::NoSuchRun`].
+///
+/// A section edit's changes (the sections, and the placements and lane
+/// stretches of the records that changed them) go back together or not
+/// at all: kept whole when any part of it would be kept, written in one
+/// go otherwise.
 pub fn undo_run(
     doc: &mut SongDoc,
     records: &[ActionRecord],
@@ -131,10 +135,22 @@ pub fn undo_run(
         .rev()
         .find_map(|&i| records[i].run_title.clone());
     let plans = plan(records, &mine);
+    let key = |k: usize| (plans[k].last, plans[k].pos);
 
-    // Newest first; within one record, last change first.
-    let mut order: Vec<usize> = (0..plans.len()).collect();
-    order.sort_by_key(|&k| std::cmp::Reverse((plans[k].last, plans[k].pos)));
+    // Each unit is one target, or the section edit's group; newest first
+    // (a group by its newest member), within one record last change first.
+    let group = section_group(&plans, records, &mine);
+    let mut units: Vec<Vec<usize>> = (0..plans.len())
+        .filter(|k| !group.contains(k))
+        .map(|k| vec![k])
+        .collect();
+    if !group.is_empty() {
+        units.push(group);
+    }
+    for unit in &mut units {
+        unit.sort_by_key(|&k| std::cmp::Reverse(key(k)));
+    }
+    units.sort_by_key(|unit| std::cmp::Reverse(key(unit[0])));
 
     let mut out = RunUndo {
         run: run.to_owned(),
@@ -144,41 +160,53 @@ pub fn undo_run(
         already: Vec::new(),
     };
     let mut waiting = Vec::new();
-    for k in order {
-        let p = &plans[k];
-        // The other writes since the run first changed the target, and
-        // those of them that touch it.
-        let others: Vec<usize> = (p.first + 1..records.len())
-            .filter(|&j| records[j].run.as_deref() != Some(run))
-            .collect();
-        let foreign: Vec<usize> = others
+    for unit in units {
+        let decided: Vec<(&Plan, Decision, Option<Source>)> = unit
             .iter()
-            .copied()
-            .filter(|&j| {
-                let mut targets = records[j].targets.iter();
-                targets.any(|c| overlap(p.side(), (&c.target, &c.old, &c.new)))
+            .map(|&k| {
+                let p = &plans[k];
+                let (others, foreign) = other_writes(p, records, run);
+                let decision = if is_list(&p.target) {
+                    decide_list(doc, p, &others, &foreign, records)
+                } else {
+                    decide(doc, p, &foreign, records)
+                };
+                (p, decision, foreign.last().map(|&j| records[j].source))
             })
             .collect();
-        let decision = if is_list(&p.target) {
-            decide_list(doc, p, &others, &foreign, records)
-        } else {
-            decide(doc, p, &foreign, records)
-        };
-        match decision {
-            Decision::Already => out.already.push(p.target.clone()),
-            Decision::Kept(kept) => out.kept.extend(kept),
-            Decision::Revert { value, items, kept } => {
-                out.kept.extend(kept);
-                match put(doc, &p.target, &value) {
-                    Ok(()) => out.reverted.extend(item_list(&p.target, items)),
-                    Err(error) => waiting.push(Waiting {
+        let whole = decided.iter().all(|(_, d, _)| match d {
+            Decision::Already => true,
+            Decision::Kept(_) => false,
+            Decision::Revert { kept, .. } => kept.is_empty(),
+        });
+        let mut puts = Vec::new();
+        for (p, decision, by) in decided {
+            match decision {
+                Decision::Already => out.already.push(p.target.clone()),
+                Decision::Kept(kept) => out.kept.extend(kept),
+                Decision::Revert { value, items, kept } if whole || unit.len() == 1 => {
+                    out.kept.extend(kept);
+                    puts.push((p.target.clone(), value, items));
+                }
+                // A part of a section edit is kept: so is the rest of it.
+                Decision::Revert { items, kept, .. } => {
+                    out.kept.extend(kept);
+                    out.kept.extend(items.into_iter().map(|item| KeptTarget {
                         target: p.target.clone(),
-                        value,
-                        items,
-                        error,
-                    }),
+                        item,
+                        reason: KeptReason::ChangedLater,
+                        by,
+                        message: None,
+                    }));
                 }
             }
+        }
+        if puts.is_empty() {
+            continue;
+        }
+        match put_all(doc, &puts) {
+            Ok(()) => out.reverted.extend(reverted_items(puts)),
+            Err(error) => waiting.push(Waiting { puts, error }),
         }
     }
     // A refused revert may go through once others are written.
@@ -186,8 +214,8 @@ pub fn undo_run(
         let before = waiting.len();
         let mut still = Vec::new();
         for w in waiting {
-            match put(doc, &w.target, &w.value) {
-                Ok(()) => out.reverted.extend(item_list(&w.target, w.items)),
+            match put_all(doc, &w.puts) {
+                Ok(()) => out.reverted.extend(reverted_items(w.puts)),
                 Err(error) => still.push(Waiting { error, ..w }),
             }
         }
@@ -198,15 +226,56 @@ pub fn undo_run(
     }
     for w in waiting {
         let message = refusal(&w.error);
-        out.kept.extend(w.items.into_iter().map(|item| KeptTarget {
-            target: w.target.clone(),
-            item,
-            reason: KeptReason::StillUsed,
-            by: None,
-            message: Some(message.clone()),
-        }));
+        for (target, _, items) in w.puts {
+            out.kept.extend(items.into_iter().map(|item| KeptTarget {
+                target: target.clone(),
+                item,
+                reason: KeptReason::StillUsed,
+                by: None,
+                message: Some(message.clone()),
+            }));
+        }
     }
     Ok(out)
+}
+
+/// The other writes since the run first changed `p`'s target, and those
+/// of them that touch it.
+fn other_writes(p: &Plan, records: &[ActionRecord], run: &str) -> (Vec<usize>, Vec<usize>) {
+    let others: Vec<usize> = (p.first + 1..records.len())
+        .filter(|&j| records[j].run.as_deref() != Some(run))
+        .collect();
+    let foreign = others
+        .iter()
+        .copied()
+        .filter(|&j| {
+            let mut targets = records[j].targets.iter();
+            targets.any(|c| overlap(p.side(), (&c.target, &c.old, &c.new)))
+        })
+        .collect();
+    (others, foreign)
+}
+
+/// The plans of the run's section edit: the sections, and every
+/// placement and lane target a record of the run changed together with
+/// the sections. Empty when the run changed no section.
+fn section_group(plans: &[Plan], records: &[ActionRecord], mine: &[usize]) -> Vec<usize> {
+    let Some(sections) = plans.iter().position(|p| p.target == Target::Sections) else {
+        return Vec::new();
+    };
+    let section_records: Vec<&ActionRecord> = mine
+        .iter()
+        .map(|&i| &records[i])
+        .filter(|r| r.targets.iter().any(|c| c.target == Target::Sections))
+        .collect();
+    let mut group = vec![sections];
+    group.extend((0..plans.len()).filter(|&k| {
+        is_list(&plans[k].target)
+            && section_records
+                .iter()
+                .any(|r| r.targets.iter().any(|c| c.target == plans[k].target))
+    }));
+    group
 }
 
 /// The run's targets, in the order the run first changed them. A change
@@ -450,22 +519,39 @@ fn refusal(e: &EditError) -> String {
     }
 }
 
-/// Puts `value` at `target` on a copy of `doc`, keeping the copy when the
-/// song takes it.
-fn put(doc: &mut SongDoc, target: &Target, value: &Value) -> Result<(), EditError> {
-    let mut copy = doc.clone();
-    copy.put(target, value)?;
+/// One revert: a target, its value, and the items it reverts.
+type Put = (Target, Value, Vec<Option<Value>>);
+
+/// Puts each value at its target on one copy of `doc`, keeping the copy
+/// when the song takes all of them. Each put must leave a valid song, so
+/// a section edit's sections go last (the placements move back inside the
+/// longer song first), else first (the song grows back before they move).
+fn put_all(doc: &mut SongDoc, puts: &[Put]) -> Result<(), EditError> {
+    let in_order = |order: Vec<&Put>| -> Result<SongDoc, EditError> {
+        let mut copy = doc.clone();
+        for (target, value, _) in order {
+            copy.put(target, value)?;
+        }
+        Ok(copy)
+    };
+    let (sections, rest): (Vec<&Put>, Vec<&Put>) =
+        puts.iter().partition(|p| p.0 == Target::Sections);
+    let copy = match in_order(puts.iter().collect()) {
+        Ok(copy) => copy,
+        Err(e) if sections.is_empty() => return Err(e),
+        Err(e) => in_order(sections.into_iter().chain(rest).collect()).map_err(|_| e)?,
+    };
     *doc = copy;
     Ok(())
 }
 
-fn item_list(target: &Target, items: Vec<Option<Value>>) -> Vec<TargetItem> {
-    let target = target.clone();
-    items
-        .into_iter()
-        .map(|item| TargetItem {
-            target: target.clone(),
-            item,
+fn reverted_items(puts: Vec<Put>) -> Vec<TargetItem> {
+    puts.into_iter()
+        .flat_map(|(target, _, items)| {
+            items.into_iter().map(move |item| TargetItem {
+                target: target.clone(),
+                item,
+            })
         })
         .collect()
 }

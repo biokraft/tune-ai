@@ -1073,3 +1073,76 @@ fn an_effect_the_producer_made_again_gets_no_old_lanes() {
     assert_eq!(u.already, vec![target("tracks.acid.fx")]);
     assert_eq!(s.text(), text);
 }
+
+// ----- review round 1: a section edit reverts whole or not at all -----
+
+/// p5: the producer changed one placement the run's section edit moved:
+/// reverting the rest would shift everything but that placement and leave
+/// the section in. The whole section edit is kept and listed.
+#[test]
+fn a_section_edit_with_one_part_changed_later_is_kept_whole() {
+    let mut s = open();
+    s.agent(
+        "r1",
+        &[Action::AddSection {
+            name: "break".into(),
+            bars: 2,
+            index: Some(1),
+        }],
+    );
+    s.human(Action::ResizePlacement {
+        track: "kick".into(),
+        at: 5,
+        bars: 1,
+    });
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(s.text(), text);
+    assert!(
+        u.kept.iter().all(|k| k.reason == KeptReason::ChangedLater),
+        "{:?}",
+        u.kept
+    );
+    let mut targets: Vec<String> = u.kept.iter().map(|k| k.target.to_string()).collect();
+    targets.dedup();
+    targets.sort();
+    assert_eq!(
+        targets,
+        [
+            "automation.acid.acid303.cutoff",
+            "sections",
+            "tracks.acid.play",
+            "tracks.hat.play",
+            "tracks.kick.play",
+        ]
+    );
+    // Each moved placement and stretch is listed: what the run added, and
+    // what it took away.
+    assert_eq!(u.kept.len(), 1 + 2 * 4, "{:?}", u.kept);
+    let kick: Vec<&KeptTarget> = u
+        .kept
+        .iter()
+        .filter(|k| k.target == target("tracks.kick.play"))
+        .collect();
+    assert!(kick.iter().all(|k| k.by == Some(Source::Human)), "{kick:?}");
+}
+
+/// A section edit refused while its clip is gone goes through once the
+/// clip is back, all of it in one write.
+#[test]
+fn a_section_edit_reverts_once_its_clip_is_back() {
+    let mut s = open();
+    s.agent(
+        "r1",
+        &[Action::AddSection {
+            name: "break".into(),
+            bars: 2,
+            index: Some(1),
+        }],
+    );
+    s.agent("r1", &[Action::RemoveClip { clip: "a1".into() }]);
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(target_changes(&fixture_song(), s.core.song()), vec![]);
+}
