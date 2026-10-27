@@ -276,9 +276,8 @@ fn other_writes(p: &Plan, records: &[ActionRecord], run: &str) -> (Vec<usize>, V
 }
 
 /// The source of the first other write, after the run's first section
-/// edit, that changed any placements, lane stretches, sections or whole
-/// track; `None`
-/// when there is none (or the run changed no section).
+/// edit, that changed any placements, lane stretches, sections or a whole
+/// track; `None` when there is none (or the run changed no section).
 fn rearranged_since(records: &[ActionRecord], mine: &[usize], run: &str) -> Option<Source> {
     let changes_sections = |i: usize| {
         let mut targets = records[i].targets.iter();
