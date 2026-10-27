@@ -350,14 +350,24 @@ fn the_running_studio_hot_reloads_without_a_click() {
 
     let before = max_jump(&left[call_at - RATE / 10..call_at]);
     let after = max_jump(&left[call_at..]);
-    assert!(before > 0.0, "the held note is silent before the call");
+    let head = rms(&left[call_at - RATE / 10..call_at]);
+    assert!(
+        head > 1e-3,
+        "the 100 ms before the call are silent (rms {head})"
+    );
     assert!(
         after <= 1.5 * before,
         "click: largest jump {after} after the call, {before} in the 100 ms before"
     );
     let tail = rms(&left[left.len() - RATE / 10..]);
     assert!(tail > 1e-3, "the last 100 ms are silent (rms {tail})");
-    assert!(fs::read_to_string(&e.song).unwrap().contains("eq"));
+    let song = parse_song(&e.text()).unwrap();
+    let fx: Vec<&str> = song.tracks["acid"]
+        .fx
+        .iter()
+        .map(|d| d.id.as_str())
+        .collect();
+    assert_eq!(fx, ["eq"]);
     r.handle.shutdown();
 }
 
@@ -406,7 +416,14 @@ fn an_agent_run_is_undone_keeping_a_later_human_edit() {
     assert_eq!(kept[0]["target"], "tracks.acid.acid303.cutoff", "{v}");
     assert_eq!(kept[0]["by"], "human", "{v}");
 
-    let song = parse_song(&e.text()).unwrap();
+    let deadline = Instant::now() + WAIT;
+    let song = loop {
+        let song = parse_song(&e.text()).unwrap();
+        if song.bpm == 120.0 || Instant::now() > deadline {
+            break song;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
     assert_eq!(song.tracks["acid"].instrument.params["cutoff"], 700.0);
     assert_eq!(song.tracks["acid"].gain_db, 0.0);
     assert_eq!(song.bpm, 120.0);
