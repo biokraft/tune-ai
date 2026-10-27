@@ -1120,12 +1120,15 @@ fn a_section_edit_with_one_part_changed_later_is_kept_whole() {
     // Each moved placement and stretch is listed: what the run added, and
     // what it took away.
     assert_eq!(u.kept.len(), 1 + 2 * 4, "{:?}", u.kept);
-    let kick: Vec<&KeptTarget> = u
-        .kept
-        .iter()
-        .filter(|k| k.target == target("tracks.kick.play"))
-        .collect();
-    assert!(kick.iter().all(|k| k.by == Some(Source::Human)), "{kick:?}");
+    // The producer's change to kick's placement keeps all of it: each part
+    // names the producer, the sections too.
+    assert!(
+        u.kept.iter().all(|k| k.by == Some(Source::Human)),
+        "{:?}",
+        u.kept
+    );
+    let sections = u.kept.iter().find(|k| k.target == Target::Sections);
+    assert_eq!(sections.and_then(|k| k.by), Some(Source::Human));
 }
 
 /// A section edit refused while its clip is gone goes through once the
