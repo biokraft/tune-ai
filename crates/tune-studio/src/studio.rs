@@ -317,6 +317,8 @@ struct Player {
     /// Session actions checked but not sent yet, oldest first: each goes
     /// once the newest swap plays (see [`Actor::send_cues`]).
     cues: VecDeque<Action>,
+    /// The playing generation the actor last saw, to notice a swap landing.
+    landed: u64,
 }
 
 impl Player {
@@ -802,6 +804,7 @@ impl Actor {
             retry: None,
             loop_unsent: false,
             cues: first.into_iter().collect(),
+            landed: 0,
         });
         self.send_cues();
         let stream = match self.audio.start(processor) {
@@ -919,13 +922,10 @@ impl Actor {
             ) {
                 return Ok(Value::Null);
             }
-            self.play(None, Some(action.clone()))?;
+            self.play(None, Some(action))?;
         } else if let Some(player) = &mut self.player {
-            player.cues.push_back(action.clone());
+            player.cues.push_back(action);
             self.send_cues();
-        }
-        if let Some(song) = &self.song {
-            self.off_arrangement.apply(&action, song.core.song());
         }
         Ok(Value::Null)
     }
@@ -1060,9 +1060,6 @@ impl Actor {
         let total = self.total_bars();
         self.cursor_bar = self.cursor_bar.min(total.saturating_sub(1));
         self.loop_bars = clamp_loop(self.loop_bars, total);
-        if let Some(song) = &self.song {
-            self.off_arrangement.retain(song.core.song());
-        }
         let Some(player) = &mut self.player else {
             return;
         };
@@ -1112,8 +1109,9 @@ impl Actor {
     /// last swap's generation and the engine drops one stamped with
     /// another, and a cue's indices must name the song the engine plays.
     /// A cue that no longer resolves (an edit since took its scene or track
-    /// away) is dropped with an error event; a full queue leaves the rest
-    /// for the next tick.
+    /// away, or emptied its slot) is dropped with an error event; a full
+    /// queue leaves the rest for the next tick. Only a sent cue changes
+    /// which tracks are off the arrangement.
     fn send_cues(&mut self) {
         let Some(player) = &mut self.player else {
             return;
@@ -1125,13 +1123,13 @@ impl Actor {
             let Some(action) = player.cues.pop_front() else {
                 break;
             };
-            let song = player.latest();
-            let Some(cue) = session::resolve(song, &action) else {
-                errors.push(session::dropped(song, &action));
+            let song = player.latest().clone();
+            let Some(cue) = session::resolve(&song, &action) else {
+                errors.push(session::dropped(&song, &action));
                 continue;
             };
             match player.controller.cue(cue) {
-                Ok(()) => {}
+                Ok(()) => self.off_arrangement.apply(&action, &song),
                 Err(LiveError::QueueFull) => {
                     player.cues.push_front(action);
                     break;
@@ -1141,6 +1139,22 @@ impl Actor {
         }
         for message in errors {
             self.emit(Event::Error { message });
+        }
+    }
+
+    /// Once a swap lands, forgets the tracks the song now playing no longer
+    /// has: the engine compares the ids of the songs that land, so a renamed
+    /// or new track follows the arrangement (a swap replaced before it
+    /// landed never counts).
+    fn follow_landed_swap(&mut self) {
+        let Some(player) = &mut self.player else {
+            return;
+        };
+        let generation = player.controller.playing_generation();
+        if generation != player.landed {
+            player.landed = generation;
+            let song = player.playing().clone();
+            self.off_arrangement.retain(&song);
         }
     }
 
@@ -1210,6 +1224,7 @@ impl Actor {
                     beat: (step % 16 / 4) as u32,
                     playing: true,
                 });
+                self.follow_landed_swap();
                 self.send_swap();
                 self.send_cues();
                 self.send_loop();

@@ -102,16 +102,16 @@ fn empty_slot(scene: &str, track: &str) -> EditOpError {
 pub(crate) struct OffArrangement(BTreeSet<String>);
 
 impl OffArrangement {
-    /// Notes what a checked session action does to the tracks of `song`:
-    /// `launch_clip` and `stop_clip` take their track off the arrangement,
-    /// `launch_scene` every track, `back_to_arrangement` sends one or all
-    /// back.
-    pub(crate) fn apply(&mut self, action: &Action, song: &Song) {
+    /// Notes what a session action sent to the engine does to the tracks of
+    /// `song`, the song it was resolved against: `launch_clip` and
+    /// `stop_clip` take their track off the arrangement, `launch_scene`
+    /// every track, `back_to_arrangement` sends one or all back.
+    pub(crate) fn apply(&mut self, action: &Action, song: &CompiledSong) {
         match action {
             Action::LaunchClip { track, .. } | Action::StopClip { track } => {
                 self.0.insert(track.clone());
             }
-            Action::LaunchScene { .. } => self.0.extend(song.tracks.keys().cloned()),
+            Action::LaunchScene { .. } => self.0.extend(song.tracks.iter().map(|t| t.id.clone())),
             Action::BackToArrangement { track: Some(track) } => {
                 self.0.remove(track);
             }
@@ -124,10 +124,10 @@ impl OffArrangement {
         self.0.contains(track)
     }
 
-    /// Drops ids the song no longer has: a renamed or new track follows the
-    /// arrangement.
-    pub(crate) fn retain(&mut self, song: &Song) {
-        self.0.retain(|t| song.tracks.contains_key(t));
+    /// Drops ids `song`, the song now playing, no longer has: a renamed or
+    /// new track follows the arrangement.
+    pub(crate) fn retain(&mut self, song: &CompiledSong) {
+        self.0.retain(|t| song.track_index(t).is_some());
     }
 
     pub(crate) fn clear(&mut self) {
@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn off_arrangement_follows_the_actions() {
-        let song = song();
+        let song = CompiledSong::new(&song(), 48_000);
         let mut off = OffArrangement::default();
         off.apply(&launch_clip("acid", "groove"), &song);
         off.apply(
@@ -266,9 +266,9 @@ mod tests {
             &song,
         );
         assert!(["kick", "acid", "hat"].iter().all(|t| off.contains(t)));
-        let mut fewer = song.clone();
+        let mut fewer = self::song();
         fewer.tracks.shift_remove("kick");
-        off.retain(&fewer);
+        off.retain(&CompiledSong::new(&fewer, 48_000));
         assert!(!off.contains("kick") && off.contains("acid"));
         off.clear();
         assert!(!off.contains("acid"));

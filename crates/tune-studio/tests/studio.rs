@@ -10,7 +10,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tune_engine::{AudioOut, CompiledSong, LiveProcessor, RenderOptions, render};
+use tune_engine::{AudioOut, CompiledSong, LiveProcessor, RenderOptions, TrackPlay, render};
 use tune_song::parse_song;
 use tune_studio::{
     Action, Command, EditLog, Event, Origin, RunTag, SongPath, Source, StudioCommand, StudioConfig,
@@ -1317,7 +1317,9 @@ fn a_knob_release_on_a_launched_track_writes() {
     f.disk_until(WAIT, "took the cutoff", |t| {
         acid_value(t, "acid303.cutoff") == 900.0
     });
-    // Back on the arrangement, the lane drives it again.
+    // Back on the arrangement, the lane drives it again (once the swap of
+    // the write played, so the return is sent at once).
+    land(&f);
     f.call(live(back(Some("acid"))));
     assert_eq!(
         f.call(knob("acid303.cutoff", 800.0, true)),
@@ -1360,24 +1362,137 @@ fn a_waiting_cue_whose_scene_went_is_dropped() {
     );
 }
 
-/// A track renamed away and back is a new track to the engine, which
-/// plays it from the arrangement: the lane drives its knob again.
+/// What the engine plays on track `track` (an index into the song).
+fn engine_play(f: &Fixture, track: usize) -> TrackPlay {
+    let slot = lock(&f.slot);
+    let processor = slot.as_ref().expect("audio is playing");
+    processor.session(track).expect("a track of the song").0
+}
+
+/// The acid track's index in the session fixture.
+const ACID: usize = 1;
+
+/// Lets a swap sent by the last edit land (it lands at the next step) and
+/// the actor's tick see it.
+fn land(f: &Fixture) {
+    f.pull(6_000);
+    sleep(Duration::from_millis(150));
+}
+
+fn rename_track(f: &Fixture, track: &str, to: &str) {
+    f.call(Command::Action(Action::RenameTrack {
+        track: track.into(),
+        to: to.into(),
+    }));
+}
+
+/// A track renamed away and back, each rename landing, is a new track to
+/// the engine, which plays it from the arrangement: the lane drives its
+/// knob again.
 #[test]
 fn a_renamed_track_follows_the_arrangement_again() {
     let f = fixture(SESSION);
     f.call(play(Some(0)));
     f.call(live(launch_clip("acid", "groove")));
     f.pull(2 * 96_000 + 6_000);
-    for (track, to) in [("acid", "lead"), ("lead", "acid")] {
-        f.call(Command::Action(Action::RenameTrack {
-            track: track.into(),
-            to: to.into(),
-        }));
-    }
+    assert!(matches!(engine_play(&f, ACID), TrackPlay::Clip(_)));
+    rename_track(&f, "acid", "lead");
+    land(&f);
+    rename_track(&f, "lead", "acid");
+    land(&f);
+    assert_eq!(engine_play(&f, ACID), TrackPlay::Arrangement);
     assert_eq!(
         f.call(knob("acid303.cutoff", 900.0, true)),
         json!({ "automated": true })
     );
+}
+
+/// Review I2: two renames within one step collapse into one swap, which
+/// takes the engine from a song with `acid` to a song with `acid`, so the
+/// track keeps its launched clip; the studio agrees and the release
+/// writes.
+#[test]
+fn a_rename_and_back_within_one_step_keeps_the_launched_clip() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.call(live(launch_clip("acid", "groove")));
+    f.pull(2 * 96_000 + 6_000);
+    rename_track(&f, "acid", "lead");
+    rename_track(&f, "lead", "acid");
+    land(&f);
+    assert!(matches!(engine_play(&f, ACID), TrackPlay::Clip(_)));
+    assert_eq!(f.call(knob("acid303.cutoff", 900.0, true)), Value::Null);
+    f.disk_until(WAIT, "took the cutoff", |t| {
+        acid_value(t, "acid303.cutoff") == 900.0
+    });
+}
+
+/// A cue dropped before it was sent took no track off the arrangement.
+#[test]
+fn a_dropped_cue_marks_nothing() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.pull(BLOCK);
+    f.call(Command::Action(Action::SetTrackMix {
+        track: "hat".into(),
+        gain_db: Some(-12.0),
+        pan: None,
+        mute: None,
+        solo: None,
+    }));
+    f.call(live(launch_clip("acid", "groove")));
+    f.call(Command::Action(Action::RemoveScene {
+        scene: "groove".into(),
+    }));
+    land(&f);
+    let want = "dropped `launch_clip`: there is no scene `groove` any more";
+    f.wait(
+        "the dropped cue",
+        |e| matches!(e, Event::Error { message } if message == want),
+    );
+    f.pull(2 * 96_000);
+    assert_eq!(engine_play(&f, ACID), TrackPlay::Arrangement);
+    assert_eq!(
+        f.call(knob("acid303.cutoff", 900.0, true)),
+        json!({ "automated": true })
+    );
+}
+
+/// A return to the arrangement still waiting to be sent leaves the track
+/// off it: the engine still plays the launched clip, and a release there
+/// writes until the return is sent.
+#[test]
+fn a_waiting_return_keeps_the_track_off_the_arrangement_until_sent() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.call(live(launch_clip("acid", "groove")));
+    f.pull(2 * 96_000 + 6_000);
+    f.call(Command::Action(Action::SetTrackMix {
+        track: "hat".into(),
+        gain_db: Some(-12.0),
+        pan: None,
+        mute: None,
+        solo: None,
+    }));
+    // The swap has not played, so the return waits.
+    f.call(live(back(Some("acid"))));
+    assert_eq!(f.call(knob("acid303.cutoff", 900.0, true)), Value::Null);
+    land(&f);
+    // Sent: the lane drives the cutoff again (from the next bar line).
+    assert_eq!(
+        f.call(knob("acid303.cutoff", 800.0, true)),
+        json!({ "automated": true })
+    );
+}
+
+/// A launch that starts playback takes its tracks off the arrangement too.
+#[test]
+fn a_launch_that_starts_playback_marks_its_track() {
+    let f = fixture(SESSION);
+    assert_eq!(f.call(live(launch_clip("acid", "groove"))), Value::Null);
+    f.pull(2 * 96_000 + 6_000);
+    assert!(matches!(engine_play(&f, ACID), TrackPlay::Clip(_)));
+    assert_eq!(f.call(knob("acid303.cutoff", 900.0, true)), Value::Null);
 }
 
 /// A device that plays its first block the moment it starts, as `NullOut`
