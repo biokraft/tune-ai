@@ -379,6 +379,42 @@ fn session_clips_keep_their_phase_across_a_wrap_and_a_seek() {
 }
 
 #[test]
+fn a_session_clip_slides_across_a_whole_song_loop() {
+    // An acid clip that slides on its last step, looped over the whole
+    // song: at step 63 it slides into the loop start's step 0, as the same
+    // clip placed on the arrangement does.
+    let jam = variant_of(MINI, |s| {
+        drop_lane(s, "acid", "acid303.cutoff");
+        common::unplay(s, "acid");
+        let s16 = tune_dsp::acid303::AcidPattern::parse("C2 . . . . . . . . . . . . . . C3~")
+            .expect("a pattern");
+        s.clips.insert("s16".into(), Clip::Acid(s16));
+    });
+    let s = compile_song(&jam);
+    let s16 = s.clip_index("s16").expect("s16");
+    let mut session = Engine::new(s);
+    session.set_loop(Some(0..4));
+    session.cue(SessionCue::Launch {
+        track: ACID,
+        clip: s16,
+    });
+    let session = render(&mut session, SONG + BAR);
+    let placed = variant_of(&jam.to_toml(), |s| {
+        set_play(s, "acid", vec![placement(0, 4, "s16", 0)]);
+    });
+    let mut arranged = Engine::new(compile_song(&placed));
+    arranged.set_loop(Some(0..4));
+    let arranged = render(&mut arranged, SONG + BAR);
+    let first_difference = session
+        .iter()
+        .zip(&arranged)
+        .position(|(a, b)| a.to_bits() != b.to_bits())
+        .map(|i| i / 2);
+    assert_eq!(first_difference, None, "the first frame that differs");
+    assert_eq!(session.len(), arranged.len());
+}
+
+#[test]
 fn bad_cues_are_ignored() {
     let mut e = Engine::new(compiled(MINI));
     for cue in [

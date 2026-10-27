@@ -1223,11 +1223,14 @@ impl Engine {
                 let cell = cell_at(song, src, step);
                 // The step a note slides into never looks at cues: an
                 // arrangement track reads the arrangement's next step, a
-                // session clip plays on in its own time.
+                // session clip plays on in its own time. Across a loop wrap
+                // the clip plays its phase at `step + 1` from the loop start
+                // (see `rebase`), even when the loop ends at the song's end.
                 let next = match rt.play {
                     TrackPlay::Arrangement => {
                         cell_at(song, source(song, rt.play, next_region, t), next_step)
                     }
+                    _ if next_step != step + 1 => clip_cell(song, src, step + 1),
                     _ => cell_at(song, src, step + 1),
                 };
                 let mut on = rt.seq.step(instrument, cell, next, &ctx, self.gate_samples);
@@ -1537,6 +1540,12 @@ fn cell_at(song: &CompiledSong, src: Option<CellSource>, step: u64) -> &Cell {
     if step >= 16 * u64::from(song.total_bars) {
         return &REST;
     }
+    clip_cell(song, src, step)
+}
+
+/// Like [`cell_at`] without the song-end check: the cell of `src`'s clip
+/// at `step`, wherever the song ends.
+fn clip_cell(song: &CompiledSong, src: Option<CellSource>, step: u64) -> &Cell {
     match src {
         None => &REST,
         Some(source) => {
