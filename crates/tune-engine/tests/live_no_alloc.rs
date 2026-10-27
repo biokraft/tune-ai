@@ -4,7 +4,8 @@
 //! crossfade between the clipper and the limiter, and swaps that add,
 //! reorder, replace or remove devices or move a placement, swaps that edit
 //! a note clip while its notes are held, and structural swaps that
-//! crossfade a track's old and new paths), a seek, a loop wrap, the song
+//! crossfade a track's old and new paths, an instrument swap among them),
+//! a seek, a loop wrap, the song
 //! end and knob overrides on tracks, strips and the mix.
 //!
 //! A counting global allocator counts every allocation, reallocation and
@@ -547,6 +548,35 @@ fn structural_swaps_fade_without_alloc() {
             fx[0].settings[0] = "hard";
             s.tracks.shift_remove("hat");
             s.clips.shift_remove("h");
+        }),
+        // An eq on the kick, then its instrument swapped for a clap: the
+        // old kick plays inside the fade (`Cross { own_instrument: true }`)
+        // through a stand-in of the kept eq.
+        with(&|s| {
+            let fx = &mut s.tracks.get_mut("acid").unwrap().fx;
+            fx.push(eq2.clone());
+            fx.swap(1, 2);
+            fx[0].settings[0] = "hard";
+            s.tracks.shift_remove("hat");
+            s.clips.shift_remove("h");
+            s.tracks
+                .get_mut("kick")
+                .unwrap()
+                .fx
+                .push(Device::new("eq", &EQ));
+        }),
+        with(&|s| {
+            let fx = &mut s.tracks.get_mut("acid").unwrap().fx;
+            fx.push(eq2.clone());
+            fx.swap(1, 2);
+            fx[0].settings[0] = "hard";
+            s.tracks.shift_remove("hat");
+            s.clips.shift_remove("h");
+            let kick = s.tracks.get_mut("kick").unwrap();
+            kick.fx.push(Device::new("eq", &EQ));
+            kick.instrument = Device::new("clap", &CLAP);
+            // The acid still ducks under the track, now a clap.
+            s.mix.duck_source = Some("kick".into());
         }),
     ];
     let (mut ctl, mut p) = live(compiled(MIXED), 0, None);
