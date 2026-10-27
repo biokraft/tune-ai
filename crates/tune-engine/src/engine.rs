@@ -16,7 +16,7 @@ use tune_song::{TICKS_PER_STEP, lane_value};
 use crate::clock::hit_seed;
 use crate::compile::{
     Cell, CellSource, CompiledClip, CompiledDevice, CompiledSong, CompiledTrack, MIX_TRACK,
-    ParamTarget,
+    NoteClipEvents, ParamTarget,
 };
 use crate::live::SongUpdate;
 use crate::mixer::{Meter, MixRuntime, Strip};
@@ -180,10 +180,12 @@ impl Sequencer {
     /// At the start of step `ctx.step`, before its events: sends `AllOff`
     /// when a note-clip note may still sound and the track does not play
     /// on from step `ctx.step - 1` of the same placement `src` (after a
-    /// seek, a loop wrap, a placement's end or a change of placement), then
-    /// remembers `src` at this step. Events of the step before still in the
-    /// cursor (none: every tick of a step starts before the next step) go
-    /// first when due; the rest are dropped.
+    /// seek, a loop wrap, a placement's end, a change of placement or a
+    /// swap that ended the notes, see [`carry_over`](Self::carry_over)),
+    /// then remembers `src` at this step. A track with no `last` never
+    /// plays on, not even into no placement. Events of the step before
+    /// still in the cursor (none: every tick of a step starts before the
+    /// next step) go first when due; the rest are dropped.
     fn cut(
         &mut self,
         instrument: &mut dyn Instrument,
@@ -193,12 +195,56 @@ impl Sequencer {
     ) {
         self.deliver_notes(instrument, song, ctx.pos);
         self.cursor = None;
-        let continuous = self.last == src.map(|s| (s, ctx.step.wrapping_sub(1)));
+        let continuous =
+            self.last.is_some() && self.last == src.map(|s| (s, ctx.step.wrapping_sub(1)));
         if !continuous && self.notes_live {
             instrument.note(&NoteEvent::AllOff, ctx);
             self.notes_live = false;
         }
         self.last = src.map(|s| (s, ctx.step));
+    }
+
+    /// On a swap from `old` to `new` at step boundary `step`, for a track
+    /// whose instrument (and so this sequencer) the swap keeps, as track
+    /// `t` of `new`: held note-clip notes play on only when the last source
+    /// played a notes clip and the new song's source at `step` has the same
+    /// `start_step` and `offset_steps` and a clip with the same events (id,
+    /// events and length; compared by content, since clip indices of two
+    /// songs say nothing about each other). Then `last` and the cursor
+    /// point into the new song's clip. Otherwise `last` is `None`, so the
+    /// cut at `step` sends `AllOff` if a note may sound, and the cursor is
+    /// cleared, so that cut never reads the new song through an index into
+    /// the old one. `cut` still checks that `last` was the step before
+    /// `step` (a swap that jumps to the loop start ends the notes).
+    /// Comparisons only: never allocates.
+    fn carry_over(&mut self, old: &CompiledSong, new: &CompiledSong, t: usize, step: u64) {
+        let src = (step < 16 * u64::from(new.total_bars))
+            .then(|| new.regions[region_of(new, step)].cells[t])
+            .flatten();
+        fn notes(song: &CompiledSong, s: CellSource) -> Option<&NoteClipEvents> {
+            match song.clips.get(s.clip) {
+                Some(CompiledClip::Notes(clip)) => Some(clip),
+                _ => None,
+            }
+        }
+        let kept = match (self.last, src) {
+            (Some((was, at)), Some(now))
+                if was.start_step == now.start_step
+                    && was.offset_steps == now.offset_steps
+                    && notes(old, was).is_some_and(|a| notes(new, now) == Some(a)) =>
+            {
+                Some((now, at))
+            }
+            _ => None,
+        };
+        self.last = kept;
+        self.cursor = match (kept, self.cursor) {
+            (Some((now, _)), Some(cur)) => Some(NoteCursor {
+                clip: now.clip,
+                ..cur
+            }),
+            _ => None,
+        };
     }
 
     /// When placement `src` plays a notes clip: queues the events of song
@@ -563,6 +609,10 @@ impl Engine {
     ///   goes, and a master-mode switch crossfades between the clipper and
     ///   the limiter without a silent frame (see
     ///   [`MixRuntime::take_units`]);
+    /// - a track that keeps its instrument keeps its held note-clip notes
+    ///   only when its placement at `k` starts and is offset as before and
+    ///   plays a clip with the same events; otherwise they get `AllOff` at
+    ///   `k` (see `Sequencer::carry_over`);
     /// - the new clock takes over at step `k` (the step index survives a bpm
     ///   change) and static params are re-applied;
     /// - the loop is clamped to the new end, and dropped when it starts at
@@ -937,7 +987,10 @@ impl Engine {
                     let mut kept =
                         std::mem::replace(&mut self.tracks[i], TrackRuntime::placeholder());
                     let mut unused = fresh;
-                    if !same_device(&old.instrument, &new.instrument) {
+                    if same_device(&old.instrument, &new.instrument) {
+                        // Held note-clip notes play on or end here.
+                        kept.seq.carry_over(&self.song, &u.song, j, self.step);
+                    } else {
                         std::mem::swap(&mut kept.instrument, &mut unused.instrument);
                         std::mem::swap(&mut kept.overrides, &mut unused.overrides);
                         std::mem::swap(&mut kept.seq, &mut unused.seq);

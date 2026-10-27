@@ -2,7 +2,8 @@
 //! nor free memory, even across blocks that apply a swap (one that keeps the
 //! mix, one that rebuilds the delay for a new bpm, master-mode switches that
 //! crossfade between the clipper and the limiter, and swaps that add,
-//! reorder, replace or remove devices or move a placement), a seek, a loop
+//! reorder, replace or remove devices or move a placement, and swaps that
+//! edit a note clip while its notes are held), a seek, a loop
 //! wrap, the song end and knob overrides on tracks, strips and the mix.
 //!
 //! A counting global allocator counts every allocation, reallocation and
@@ -422,6 +423,70 @@ fn device_and_placement_swaps_never_allocate() {
         v2_song(&format!("{EQ2}, {EQ}"), 2),
     ];
     let (mut ctl, mut p) = live(v2_song(&format!("{EQ}, {EQ2}"), 1), 0, None);
+    let mut out = vec![0.0f32; 2 * 4096];
+    audio(&mut p, &mut out, 1000, 512);
+    for (i, next) in songs.into_iter().enumerate() {
+        ctl.swap(next).unwrap();
+        audio(&mut p, &mut out, STEP, 512);
+        assert_eq!(ctl.swaps_applied(), 1 + i as u64);
+        assert_eq!(ctl.collect_garbage(), 1);
+    }
+    assert_no_alloc();
+}
+
+/// A v2 song whose `lead` holds a note from every step of 0 to 6 (each to
+/// step 16) in a notes clip of `bars` bars, plus one at `other`, at
+/// `gain_db`; with `extra`, the lead plays the clip again from bar 3.
+fn notes_song(bars: u32, other: u32, extra: bool, gain_db: i32) -> Arc<CompiledSong> {
+    let mut notes: Vec<String> = (0..7)
+        .map(|s| format!(r#"{{ start = {s}, pitch = "C2", len = {} }}"#, 16 - s))
+        .collect();
+    notes.push(format!(r#"{{ start = {other}, pitch = "G2", len = 2 }}"#));
+    let extra = if extra {
+        r#", { at = 3, clip = "n", bars = 2 }"#
+    } else {
+        ""
+    };
+    compiled(&format!(
+        r#"
+[song]
+version = 2
+name = "notes"
+bpm = 120
+seed = 7
+
+[tracks.lead]
+instrument = "acid303"
+gain_db = {gain_db}
+play = [{{ at = 1, clip = "n", bars = 2 }}{extra}]
+
+[clips.n]
+kind = "notes"
+bars = {bars}
+notes = [{}]
+
+[[sections]]
+name = "a"
+bars = 4
+"#,
+        notes.join(", ")
+    ))
+}
+
+#[test]
+fn note_clip_swaps_never_allocate() {
+    const STEP: u64 = 6000;
+    let songs = [
+        // A note moved (the held one ends).
+        notes_song(2, 11, false, 0),
+        // The clip's length changed.
+        notes_song(1, 11, false, 0),
+        // A notes-clip placement added.
+        notes_song(1, 11, true, 0),
+        // Only a gain (the held note goes on).
+        notes_song(1, 11, true, -3),
+    ];
+    let (mut ctl, mut p) = live(notes_song(2, 10, false, 0), 0, None);
     let mut out = vec![0.0f32; 2 * 4096];
     audio(&mut p, &mut out, 1000, 512);
     for (i, next) in songs.into_iter().enumerate() {

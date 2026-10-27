@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use common::{SharedLog, bits, compiled, probe_engine, rms, run, run_stems};
 use tune_engine::{
-    Clock, CompiledSong, Engine, EventCtx, NOTE_CLIP_IDS, NoteEvent, NoteId, hit_seed, track_seed,
+    Clock, CompiledSong, Engine, EventCtx, NOTE_CLIP_IDS, NoteEvent, NoteId, SongUpdate, hit_seed,
+    track_seed,
 };
 
 /// The song seed of every probe song.
@@ -469,4 +470,149 @@ fn note_clip_hits_drive_the_ducker() {
     assert!(rms(&b) > 1e-3, "the acid sounds");
     assert_eq!(bits(&a[..3000]), bits(&b[..3000]));
     assert_ne!(bits(&a[3000..3010]), bits(&b[3000..3010]));
+}
+
+/// One track `t` (acid303, `gain_db`) playing `play`, with the clips
+/// `clips` (TOML), in a v2 song of `bars` bars at 120 BPM.
+fn swap_song(bars: u32, gain_db: i32, play: &str, clips: &str) -> Arc<CompiledSong> {
+    compiled(&song_src(
+        120,
+        bars,
+        &format!(
+            "[tracks.t]\ninstrument = \"acid303\"\ngain_db = {gain_db}\n\
+             play = [{play}]\n\n{clips}"
+        ),
+    ))
+}
+
+/// The 16-step note of the swap tests, note 0 of a 2-bar clip.
+const LONG: &str = r#"{ start = 0, pitch = "C2", len = 16 }"#;
+
+/// Note 0 of the swap tests' clip as it starts.
+fn long_on() -> NoteEvent {
+    NoteEvent::On {
+        id: id(0),
+        pitch: 36,
+        velocity: 100,
+        accent: false,
+        slide: false,
+    }
+}
+
+/// Runs `from` on a probe engine (track `t` probed) up to `queue_at`, queues
+/// a swap to `to` there (it lands at the next step boundary), runs on to
+/// `until` and returns every note event the probe saw.
+fn swap_events(
+    from: &Arc<CompiledSong>,
+    to: &Arc<CompiledSong>,
+    queue_at: u64,
+    until: u64,
+) -> Vec<(u64, NoteEvent)> {
+    let (mut engine, log) = probe_engine(from, "t");
+    run(&mut engine, queue_at);
+    assert!(engine.queue_swap(SongUpdate::new(to.clone())).is_none());
+    run(&mut engine, until - queue_at);
+    assert_eq!(engine.swaps_applied(), 1);
+    events(&log)
+}
+
+#[test]
+fn a_value_swap_keeps_a_held_note() {
+    let play = r#"{ at = 1, clip = "c", bars = 2 }"#;
+    let clip = notes_clip("c", 2, &[LONG]);
+    let from = swap_song(2, 0, play, &clip);
+    let louder = swap_song(2, -3, play, &clip);
+    // The same clip behind another one in the file: its index moves, its
+    // content does not.
+    let moved = swap_song(2, 0, play, &format!("{}\n{clip}", notes_clip("a", 1, &[])));
+    for to in [&louder, &moved] {
+        assert_eq!(
+            swap_events(&from, to, 4 * STEP + 100, 2 * BAR),
+            [
+                (0, long_on()),
+                (
+                    16 * STEP,
+                    NoteEvent::Off {
+                        id: id(0),
+                        pitch: 36
+                    }
+                ),
+            ],
+            "the note runs to its own end"
+        );
+    }
+}
+
+#[test]
+fn a_clip_edit_ends_held_notes() {
+    let play = r#"{ at = 1, clip = "c", bars = 2 }"#;
+    let other = |start: u32| format!(r#"{{ start = {start}, pitch = "G2", len = 2 }}"#);
+    let from = swap_song(2, 0, play, &notes_clip("c", 2, &[LONG, &other(20)]));
+    let to = swap_song(2, 0, play, &notes_clip("c", 2, &[LONG, &other(22)]));
+    let g2 = NoteEvent::On {
+        id: id(1),
+        pitch: 43,
+        velocity: 100,
+        accent: false,
+        slide: false,
+    };
+    assert_eq!(
+        swap_events(&from, &to, 4 * STEP + 100, 2 * BAR),
+        [
+            (0, long_on()),
+            (to.clock.step_start(5), NoteEvent::AllOff),
+            // The new clip's events from step 5 on.
+            (
+                16 * STEP,
+                NoteEvent::Off {
+                    id: id(0),
+                    pitch: 36
+                }
+            ),
+            (22 * STEP, g2),
+            (
+                24 * STEP,
+                NoteEvent::Off {
+                    id: id(1),
+                    pitch: 43
+                }
+            ),
+        ]
+    );
+}
+
+#[test]
+fn moving_the_placement_ends_held_notes() {
+    let clip = notes_clip("c", 2, &[LONG]);
+    // One bar later: no placement plays at the swap step.
+    let from = swap_song(3, 0, r#"{ at = 1, clip = "c", bars = 2 }"#, &clip);
+    let to = swap_song(3, 0, r#"{ at = 2, clip = "c", bars = 2 }"#, &clip);
+    assert_eq!(
+        swap_events(&from, &to, 4 * STEP + 100, 3 * BAR),
+        [
+            (0, long_on()),
+            (5 * STEP, NoteEvent::AllOff),
+            (BAR, long_on()),
+            (
+                BAR + 16 * STEP,
+                NoteEvent::Off {
+                    id: id(0),
+                    pitch: 36
+                }
+            ),
+        ]
+    );
+    // One bar earlier: a placement plays at the swap step, from another
+    // start.
+    let from = swap_song(4, 0, r#"{ at = 2, clip = "c", bars = 2 }"#, &clip);
+    let to = swap_song(4, 0, r#"{ at = 1, clip = "c", bars = 3 }"#, &clip);
+    assert_eq!(
+        swap_events(&from, &to, BAR + 4 * STEP + 100, 4 * BAR),
+        [
+            (BAR, long_on()),
+            (BAR + 5 * STEP, NoteEvent::AllOff),
+            (2 * BAR, long_on()),
+            (3 * BAR, NoteEvent::AllOff),
+        ]
+    );
 }
