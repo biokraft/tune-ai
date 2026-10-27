@@ -613,3 +613,35 @@ fn analyze_sections_agree_on_v1_and_v2() {
         assert_eq!(x["integrated_lufs"], y["integrated_lufs"]);
     }
 }
+
+/// A v1 song compared with a reference is read as v2 in memory: `ours`
+/// says so (`migrated_from` and a note), the reference does not, and text
+/// mode prints the note on stderr.
+#[test]
+fn compare_notes_a_v1_song_under_ours() {
+    let dir = tempfile::tempdir().unwrap();
+    write_sine(&dir.path().join("ref.wav"), 48_000, 2, 4, -14.0);
+    let m = mini();
+    let song = m.to_str().unwrap();
+    let v = compare_json(dir.path(), &[song, "ref.wav"]);
+    assert_eq!(v["ours"]["migrated_from"], 1);
+    let notes = v["ours"]["notes"].as_array().unwrap();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.as_str().unwrap().contains("tune migrate")),
+        "{notes:?}"
+    );
+    assert!(v["reference"].get("migrated_from").is_none(), "{v}");
+    assert!(v["reference"].get("notes").is_none(), "{v}");
+
+    let out = compare_out(dir.path(), &[song, "ref.wav"]);
+    assert!(out.status.success());
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        stderr.lines().any(|l| l.starts_with("note: ")
+            && l.contains("is a version 1 song file")
+            && l.contains("tune migrate")),
+        "{stderr}"
+    );
+}
