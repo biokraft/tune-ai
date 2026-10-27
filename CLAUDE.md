@@ -263,9 +263,9 @@ The producer may have the studio (app or browser) open on the same song.
   If the studio does not answer, the command fails rather than writing the
   file behind its back; check the studio before retrying. The studio's
   endpoint files live under `~/.tune/studios` (`TUNE_STUDIO_DIR` moves
-  them; a directory with any group or other permission bit is not
-  trusted, as if no studio ran); they hold a secret, so never read or
-  print them.
+  them and must be an absolute path, else `do` and `set` refuse; a
+  directory with any group or other permission bit is not trusted, as if
+  no studio ran); they hold a secret, so never read or print them.
   Tag the edits of one piece of work with a run: `--run ID --run-title TEXT`
   (or `TUNE_RUN`, `TUNE_RUN_TITLE`; the flags win). `tune changes` shows
   `(run ID)` on those entries. `tune set` takes the same flags and is a

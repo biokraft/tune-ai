@@ -235,6 +235,63 @@ fn bad_runs_are_refused() {
     assert_eq!(e.log(), "");
 }
 
+/// A `TUNE_STUDIO_DIR` the command cannot use is refused, not taken as
+/// "no studio": a studio started with a good one may have the song open.
+#[test]
+fn an_unusable_studio_dir_is_refused() {
+    let e = fixture();
+    let song = e.song.to_str().unwrap();
+    let text = fs::read_to_string(&e.song).unwrap();
+    let relative = |c: &mut Command| {
+        c.env("TUNE_STUDIO_DIR", "studios");
+    };
+    let mut cmd = e.tune();
+    relative(&mut cmd);
+    let err = fails(cmd.args(["do", song, "set_value", "path=song.bpm", "value=130"]));
+    assert!(
+        err.contains("TUNE_STUDIO_DIR must be an absolute path"),
+        "{err}"
+    );
+    let mut cmd = e.tune();
+    relative(&mut cmd);
+    let err = fails(cmd.args(["set", song, "song.bpm=130", "--json"]));
+    assert!(
+        err.contains("TUNE_STUDIO_DIR must be an absolute path"),
+        "{err}"
+    );
+    assert_eq!(fs::read_to_string(&e.song).unwrap(), text);
+    assert_eq!(e.log(), "");
+}
+
+/// Without `HOME` (and no `TUNE_STUDIO_DIR`) no studio can be found: the
+/// edit goes into the file, with one warning.
+#[test]
+fn no_home_edits_the_file_with_a_warning() {
+    let e = fixture();
+    let song = e.song.to_str().unwrap();
+    for args in [
+        vec!["do", song, "set_value", "path=song.bpm", "value=130"],
+        vec!["set", song, "song.bpm=131"],
+    ] {
+        let out = e
+            .tune()
+            .env_remove("TUNE_STUDIO_DIR")
+            .env_remove("HOME")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            err.matches("HOME is not set; a running studio cannot be found")
+                .count(),
+            1,
+            "{err}"
+        );
+    }
+    assert!(fs::read_to_string(&e.song).unwrap().contains("bpm = 131"));
+}
+
 #[test]
 fn set_takes_a_run() {
     let e = fixture();
