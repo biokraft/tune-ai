@@ -9,7 +9,7 @@ use tune_dsp::{DrumPattern, DrumPatternError, ParamSpec, STRIP_DUCK_DEPTH, STRIP
 use tune_modules::ClipKind;
 
 use super::tracks::{TrackShape, find_in, or_list, param_ids, spec_ids, unknown_param};
-use super::{BARS, Duck, check_id, unknown_track};
+use super::{BARS, Duck, MAX_SONG_BARS, check_id, unknown_track};
 use crate::error::Errors;
 use crate::model::{
     Clip, Lane, MIX_TRACK_ID, MixUnit, Placement, Section, Track, section_bars_error,
@@ -23,9 +23,6 @@ pub(super) struct Arrangement {
     pub sections: Vec<Section>,
     pub automation: Vec<Lane>,
 }
-
-/// The highest `offset` of a placement, in bars.
-const MAX_OFFSET: i64 = 1024;
 
 /// Reads a v1 arrangement: each pattern becomes a clip of the kind its
 /// track plays, and each section's `play` entries become placements over
@@ -429,11 +426,16 @@ fn placements(
         }
         let offset = match &p.offset {
             None => Some(0),
-            Some(o) if (0..=MAX_OFFSET).contains(&o.value) => Some(o.value),
+            // As long as the longest song: a split of a placement that
+            // starts at offset 0 never takes it past that.
+            Some(o) if (0..=MAX_SONG_BARS).contains(&o.value) => Some(o.value),
             Some(o) => {
                 errors.at(
                     &o.span,
-                    format!("offset must be 0 to {MAX_OFFSET}, got {}", o.value),
+                    format!(
+                        "offset must be 0 to {MAX_SONG_BARS} (the most bars a song can have), got {}",
+                        o.value
+                    ),
                 );
                 None
             }
