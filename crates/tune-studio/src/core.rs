@@ -857,7 +857,7 @@ fn holds(whole: &SongPath, part: &SongPath) -> bool {
             | SongPath::TrackParam { track: t, .. }
             | SongPath::SectionPlay { track: t, .. },
         ) => t == track,
-        (SongPath::Scenes, SongPath::Scene { .. } | SongPath::SceneSlot { .. }) => true,
+        (SongPath::Scenes, SongPath::Scene { .. }) => true,
         (SongPath::Scene { scene }, SongPath::SceneSlot { scene: s, .. }) => s == scene,
         _ => false,
     }
