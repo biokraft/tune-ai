@@ -767,13 +767,16 @@ fn put_slot(mut scene: Slot<'_>, track: &str, clip: Option<&str>) -> Option<()> 
     Some(())
 }
 
-/// Removes `track` from a `slots` table and says whether it is empty then.
-/// An inline table keeps the space before its closing brace.
+/// Removes `track` from a `slots` table and says whether the `slots` key
+/// should go too: only an inline table that this removal emptied (a `slots`
+/// table with a header keeps its header and comments, and an already empty
+/// one is left as it is). An inline table keeps the space before its closing
+/// brace.
 fn remove_slot(slots: Slot<'_>, track: &str) -> bool {
     match slots {
         Slot::Table(t) => {
             t.remove(track);
-            t.is_empty()
+            false
         }
         Slot::Inline(t) => {
             let was_last = t.iter().last().is_some_and(|(k, _)| k == track);
@@ -781,7 +784,9 @@ fn remove_slot(slots: Slot<'_>, track: &str) -> bool {
                 .get(track)
                 .and_then(|v| v.decor().suffix().and_then(|s| s.as_str()))
                 .map(str::to_owned);
-            t.remove(track);
+            if t.remove(track).is_none() {
+                return false;
+            }
             if let (true, Some(suffix), Some((_, last))) = (was_last, suffix, t.iter_mut().last()) {
                 last.decor_mut().set_suffix(suffix);
             }

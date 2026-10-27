@@ -1602,3 +1602,43 @@ fn slot_errors() {
     assert!(matches!(err, EditError::ReadOnly(_)), "{err}");
     assert_eq!(d.text(), SESSION);
 }
+
+#[test]
+fn clearing_an_absent_slot_changes_no_text() {
+    let inline = SESSION.replace("slots = { hat = \"h\" }", "slots = {}");
+    let tabled = SESSION.replace("slots = { hat = \"h\" }", "[scenes.break.slots] # none");
+    for text in [inline, tabled] {
+        let mut d = SongDoc::parse(&text).unwrap();
+        d.set(&path("scenes.break.slots.hat"), &Value::Null)
+            .unwrap();
+        assert_eq!(d.text(), text);
+    }
+}
+
+#[test]
+fn clearing_the_last_slot_of_a_table_keeps_the_table() {
+    let tabled = SESSION.replace(
+        "slots = { hat = \"h\" }",
+        "[scenes.break.slots] # the hats\nhat = \"h\"",
+    );
+    let mut d = SongDoc::parse(&tabled).unwrap();
+    d.set(&path("scenes.break.slots.hat"), &Value::Null)
+        .unwrap();
+    assert_eq!(d.text(), tabled.replace("hat = \"h\"\n", ""));
+    assert!(d.text().contains("[scenes.break.slots] # the hats"));
+    assert!(d.song().scenes["break"].slots.is_empty());
+}
+
+#[test]
+fn clearing_a_non_last_inline_slot_keeps_the_rest() {
+    let mut d = session();
+    d.set(&path("scenes.groove.slots.kick"), &Value::Null)
+        .unwrap();
+    assert_eq!(
+        d.text(),
+        SESSION.replace(
+            "slots = { kick = \"k4\", acid = \"a1\" }",
+            "slots = { acid = \"a1\" }"
+        )
+    );
+}
