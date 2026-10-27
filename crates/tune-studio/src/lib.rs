@@ -20,6 +20,7 @@ mod log;
 mod path;
 mod set;
 mod studio;
+mod target;
 mod view;
 mod wire;
 
@@ -42,6 +43,7 @@ pub use set::{
     write_atomic,
 };
 pub use studio::{Event, PLAYHEAD_INTERVAL, Studio, StudioConfig, StudioHandle};
+pub use target::{Target, TargetChange, target_changes, target_value};
 pub use view::{
     AcidStepView, FxView, LaneView, MixView, NoteView, ParamView, PatternView, SectionView,
     SongView, StudioState, TrackView,
