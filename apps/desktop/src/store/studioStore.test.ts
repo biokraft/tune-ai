@@ -181,6 +181,23 @@ describe("createStudioStore", () => {
     expect(store.get().runUndo).toBeNull();
   });
 
+  it("undoRun sends one undo_run for a burst of clicks", async () => {
+    const client = new FakeClient();
+    const store = createStudioStore(client);
+    client.emit(stateEvent());
+    client.emit({
+      event: "applied",
+      source: "claude",
+      changes: [{ path: "tracks.acid.acid303.cutoff", old: 500, new: 820 }],
+      run: { id: "r1", title: null },
+    });
+    const answer = { run: "r1", title: null, reverted: [], kept: [], already: [] };
+    client.results.undo_run = answer;
+    await Promise.all([store.undoRun("r1"), store.undoRun("r1")]);
+    expect(client.named("undo_run")).toHaveLength(1);
+    expect(store.get().runUndo).toEqual(answer);
+  });
+
   it("a later human edit keeps the notice but takes back its Undo", () => {
     const client = new FakeClient();
     const store = createStudioStore(client);
