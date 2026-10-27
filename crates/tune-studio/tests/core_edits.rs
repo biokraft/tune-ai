@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tune_studio::{
-    Action, Command, DrumHitDto, EditEntry, EditError, EditLog, Source, StudioCommand, StudioCore,
-    StudioError, text_hash,
+    Action, Command, DrumHitDto, EditEntry, EditError, EditLog, Origin, RunTag, Source,
+    StudioCommand, StudioCore, StudioError, Via, text_hash,
 };
 
 const FIXTURE: &str = include_str!("fixtures/commented.toml");
@@ -993,4 +993,49 @@ fn the_log_names_each_change_s_action() {
             row("clips.h.steps", "redo"),
         ]
     );
+}
+
+/// An agent's actions write the pending burst first, as its own `human`
+/// step, then their own `claude` step; no debounce is involved (nothing here
+/// flushes but `apply_now`).
+#[test]
+fn apply_now_writes_pending_edits_first_as_their_own_step() {
+    let s = song();
+    let mut core = open(&s);
+    core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
+    assert_eq!(disk(&s), FIXTURE, "the knob is pending");
+    let bpm = Action::SetValue {
+        path: "song.bpm".parse().unwrap(),
+        value: json!(130),
+    };
+    let run = RunTag::new("r1", None).unwrap();
+    let out = core.apply_now(&[bpm], &Origin::claude(Some(run))).unwrap();
+    assert_eq!(out.via, Via::Studio);
+    assert!(core.pending().is_empty());
+    let entries: Vec<_> = log(&s)
+        .iter()
+        .map(|e| (e.source, e.path.clone(), e.action.clone(), e.run.clone()))
+        .collect();
+    assert_eq!(
+        entries,
+        vec![
+            (
+                Source::Human,
+                "tracks.acid.acid303.cutoff".to_owned(),
+                Some("set_param".to_owned()),
+                None
+            ),
+            (
+                Source::Claude,
+                "song.bpm".to_owned(),
+                Some("set_value".to_owned()),
+                Some("r1".to_owned())
+            ),
+        ]
+    );
+    core.undo(Source::Human).unwrap();
+    assert!(disk(&s).contains("\"acid303.cutoff\" = 820"));
+    assert!(disk(&s).contains("bpm = 120"));
+    core.undo(Source::Human).unwrap();
+    assert_eq!(disk(&s), FIXTURE);
 }

@@ -17,7 +17,8 @@ use tune_engine::{AudioOut, CompiledSong, LiveProcessor, RenderOptions, render};
 use tune_song::parse_song;
 use tune_studio::{
     Action, Command, ControlServer, EditLog, Event, Origin, RunTag, SongPath, Source,
-    StudioCommand, StudioConfig, StudioError, StudioHandle, StudioLink, Via, find_studio,
+    StudioCommand, StudioConfig, StudioError, StudioHandle, StudioLink, Via, WRITE_DEBOUNCE,
+    find_studio,
 };
 
 const COMMENTED: &str = include_str!("fixtures/commented.toml");
@@ -519,9 +520,20 @@ fn actions_through_the_link_are_one_undo_step_each() {
 #[test]
 fn pending_human_edits_are_written_before_an_agent_action() {
     let f = fixture(COMMENTED);
+    let start = Instant::now();
+    let knob_at = jiff::Timestamp::now();
     f.call(Command::Action(knob("acid303.cutoff", 820.0, true)));
     f.agent(&[set("song.bpm", json!(130))], None).unwrap();
-    let log: Vec<(Source, String)> = f.log().iter().map(|e| (e.source, e.path.clone())).collect();
+    let took = start.elapsed();
+    let entries = f.log();
+    // `tests/core_edits.rs` checks this without the actor's clock. Here: an
+    // agent call back inside the debounce means only `apply_now`'s flush
+    // can have written the knob, before the debounce was due.
+    if took < WRITE_DEBOUNCE {
+        let due = knob_at + WRITE_DEBOUNCE;
+        assert!(entries[0].ts < due, "{} written after {due}", entries[0].ts);
+    }
+    let log: Vec<(Source, String)> = entries.iter().map(|e| (e.source, e.path.clone())).collect();
     assert_eq!(
         log,
         [
