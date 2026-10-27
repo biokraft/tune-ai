@@ -773,6 +773,56 @@ fn insert_section_at_the_ends() {
     assert_eq!(bars(&a.song), names(&[("s0", 2), ("s1", 2), ("outro", 4)]));
 }
 
+/// m29: a placement ending exactly at the insert point stays whole where
+/// it is, and one starting there moves whole: neither is split.
+#[test]
+fn insert_section_at_a_placement_boundary() {
+    let s = song(
+        &[2, 2],
+        &kick_hat(&[(0, 2, "c", 0), (2, 2, "d", 0)], &[]),
+        "",
+    );
+    let a = insert_section(&s, 1, "break", 3).unwrap();
+    assert_eq!(
+        plays(&a.song, "kick"),
+        ps(&[(0, 2, "c", 0), (5, 2, "d", 0)])
+    );
+}
+
+/// m29: a stretch ending exactly at the insert point stays, one starting
+/// there moves whole; no piece is split off either.
+#[test]
+fn insert_section_at_a_lane_boundary() {
+    let s = song(
+        &[2, 2],
+        &kick_hat(&[], &[]),
+        &(lane("kick.kick.tune", 0, 2, &[(0.0, 0.2), (2.0, 0.4)])
+            + &lane("kick.kick.tune", 2, 2, &[(0.0, 0.6), (2.0, 0.8)])),
+    );
+    let a = insert_section(&s, 1, "break", 3).unwrap();
+    assert_eq!(
+        lanes(&a.song),
+        [
+            l("kick.tune", 0, 2, &[(0.0, 0.2), (2.0, 0.4)]),
+            l("kick.tune", 5, 2, &[(0.0, 0.6), (2.0, 0.8)]),
+        ]
+    );
+    assert_eq!(a.lanes, [Kept(0), Kept(1)]);
+}
+
+/// m29: a crossing placement that starts into its clip keeps its phase:
+/// the piece after the new section starts as far into the clip as the
+/// bars before the split took it.
+#[test]
+fn insert_section_splits_a_placement_with_an_offset() {
+    let s = song(&[2, 2], &kick_hat(&[(0, 3, "c", 1)], &[]), "");
+    let a = insert_section(&s, 1, "break", 2).unwrap();
+    assert_eq!(
+        plays(&a.song, "kick"),
+        ps(&[(0, 2, "c", 1), (4, 1, "c", 3)])
+    );
+}
+
 #[test]
 fn insert_section_refusals() {
     let s = song(&[2, 2], &kick_hat(&[], &[]), "");
