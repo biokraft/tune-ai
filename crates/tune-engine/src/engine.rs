@@ -1032,12 +1032,17 @@ impl Engine {
             let TrackPlay::Clip(src) = &mut rt.play else {
                 continue;
             };
+            debug_assert!(
+                src.clip < song.clips.len(),
+                "session clip {} is outside the song",
+                src.clip
+            );
             let len = match song.clips.get(src.clip) {
                 Some(CompiledClip::Steps(cells)) => cells.len() as u64,
                 Some(CompiledClip::Notes(clip)) => clip.steps,
                 None => continue,
             };
-            src.offset_steps = (from - src.start_step + src.offset_steps) % len.max(1);
+            src.offset_steps = (from - src.start_step + src.offset_steps) % len;
             src.start_step = to;
         }
     }
@@ -1090,16 +1095,16 @@ impl Engine {
     ///    params (tracks, strips and mix) on a region change (or the first
     ///    step after `new`/`seek`); apply the region's lanes for this sample
     ///    (a track's lanes only while it plays the arrangement); apply the
-    ///    knob overrides; deliver note events on every track in order, each
-    ///    from what it plays: the arrangement, its session clip or nothing
-    ///    (a step note's scheduled Off
-    ///    still pending; `AllOff` when a note-clip note may sound and the
-    ///    track does not play on from the previous step (the same notes
-    ///    clip at the next clip step, whichever placement plays it), as
-    ///    after a seek, a loop wrap or a placement's end;
-    ///    then the step's: an On for a note or a hit, the Off of a note that
-    ///    slid into this step, or the note-clip events of the step that
-    ///    land on this sample, the rest waiting in the track's cursor); if
+    ///    knob overrides; deliver note events on every track in order (a
+    ///    step note's scheduled Off still pending; `AllOff` when a note-clip
+    ///    note may sound and the track does not play on from the previous
+    ///    step (the same notes clip at the next clip step, whichever
+    ///    placement plays it), as after a seek, a loop wrap or a placement's
+    ///    end; then the step's: an On for a note or a hit, the Off of a note
+    ///    that slid into this step, or the note-clip events of the step that
+    ///    land on this sample, the rest waiting in the track's cursor), each
+    ///    track from what it plays: the arrangement, its session clip or
+    ///    nothing; if
     ///    the duck source got an On (muted or not), trigger every track's
     ///    ducker; advance the step.
     ///    Elsewhere: apply the region's lanes, then the overrides, for this
