@@ -1273,3 +1273,38 @@ fn an_addition_on_a_track_the_producer_rebuilt_is_kept() {
         json!([placement(1, "a1", 1), placement(3, "a1", 2)])
     );
 }
+
+// ----- review round 3 -----
+
+/// r1: the producer moved the placement between two of the run's moves of
+/// it. The list's state before the run's later move is the producer's, not
+/// known element by element, so the whole list is kept: the producer's
+/// move is never undone.
+#[test]
+fn a_list_the_producer_edited_between_the_runs_edits_is_kept() {
+    let mut s = open();
+    let shift = |at, to| Action::MovePlacement {
+        track: "acid".into(),
+        at,
+        to,
+    };
+    s.human(Action::ResizePlacement {
+        track: "acid".into(),
+        at: 3,
+        bars: 1,
+    });
+    s.agent("r1", &[shift(3, 1)]);
+    s.human(shift(1, 2));
+    s.agent("r1", &[shift(2, 4)]);
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let kept_at = |at| {
+        kept_item(
+            "tracks.acid.play",
+            placement(at, "a1", 1),
+            Some(Source::Human),
+        )
+    };
+    assert_eq!(u.kept, vec![kept_at(4), kept_at(3)]);
+    assert_eq!(s.value("tracks.acid.play"), json!([placement(4, "a1", 1)]));
+}

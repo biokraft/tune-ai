@@ -363,7 +363,9 @@ The producer may have the studio (app or browser) open on the same song.
   ⌘⇧Z, an identical placement made again) is kept, and so is one, added
   or removed, when another write rebuilt what it belongs to (its track,
   its clip or the sections for a placement; its track, the track's
-  instrument or effects, or the sections for a lane stretch). A section
+  instrument or effects, or the sections for a lane stretch). A list
+  another edit touched while the run was still working on it is kept
+  whole. A section
   edit (`add_section`, `move_section`, `resize_section` and the like)
   goes back whole with the placements and stretches it moved, or is kept
   whole when any part of it changed later, and also when any other edit
