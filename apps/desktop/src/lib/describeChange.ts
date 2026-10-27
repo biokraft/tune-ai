@@ -67,6 +67,7 @@ const MIX = /^mix\.(.+)$/;
 const TRACK = /^tracks\.([^.]+)(?:\.(.+))?$/;
 const SECTION = /^sections\[(\d+)\]\.(bars|name|lanes|play\.(.+))$/;
 const PATTERN = /^clips\.(.+)\.steps$/;
+const NOTE_CLIP = /^clips\.(.+)\.(notes|bars)$/;
 
 /** One change in a few plain words, for the change notice. */
 export function describeChange(c: Change, song: SongView | null): string {
@@ -88,6 +89,11 @@ export function describeChange(c: Change, song: SongView | null): string {
     }
     const n = changedSteps(c.old, c.new).length;
     return `${id} pattern (${n} ${n === 1 ? "step" : "steps"})`;
+  }
+
+  const noteClip = NOTE_CLIP.exec(c.path);
+  if (noteClip) {
+    return `Changed the ${noteClip[2] === "notes" ? "notes" : "length"} of ${noteClip[1]}`;
   }
 
   const section = SECTION.exec(c.path);

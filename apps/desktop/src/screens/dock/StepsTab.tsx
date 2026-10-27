@@ -123,6 +123,13 @@ export const StepsTab = memo(function StepsTab({
       </p>
     );
   }
+  if (pattern.kind === "notes") {
+    return (
+      <p className={empty}>
+        {track.id} plays the note clip {pattern.id} in {song.sections[section]?.name} (read only).
+      </p>
+    );
+  }
   if (pattern.kind === "acid") {
     return (
       <div className="min-h-0 overflow-x-auto overscroll-none p-3">

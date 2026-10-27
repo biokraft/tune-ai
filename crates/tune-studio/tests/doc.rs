@@ -1419,3 +1419,21 @@ fn clip_notes_refuse_bad_values_and_kinds() {
         EditError::NoSuchTarget(_)
     ));
 }
+
+#[test]
+fn views_show_note_clips() {
+    let doc = SongDoc::parse(NOTE_SONG).expect("note song parses");
+    let view = serde_json::to_value(tune_studio::SongView::from(doc.song())).unwrap();
+    assert_eq!(
+        view["patterns"][1],
+        json!({
+            "kind": "notes",
+            "id": "lead",
+            "bars": 1,
+            "notes": [
+                {"start": 0.0, "pitch": 48, "len": 3.0, "vel": 100},
+                {"start": 2.5, "pitch": 51, "len": 2.0, "vel": 120},
+            ],
+        })
+    );
+}

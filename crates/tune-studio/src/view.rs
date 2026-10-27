@@ -4,7 +4,9 @@
 use indexmap::IndexMap;
 use serde::Serialize;
 use tune_dsp::{Curve, ParamSpec, STRIP_PARAMS};
-use tune_song::{Clip, ClipKind, Device, Lane, MasterMode, MixUnit, Placement, SectionPlay, Song};
+use tune_song::{
+    Clip, ClipKind, Device, Lane, MasterMode, MixUnit, Placement, SectionPlay, Song, TICKS_PER_STEP,
+};
 
 use crate::command::DrumHitDto;
 use crate::diff::Change;
@@ -72,7 +74,7 @@ pub struct TrackView {
     /// The instrument's device id: the module name unless the file names
     /// another, and the prefix of its param ids.
     pub instrument_id: String,
-    /// The clip kinds the instrument plays (`"acid"`, `"drum"`).
+    /// The clip kinds the instrument plays (`"acid"`, `"drum"`, `"notes"`).
     pub plays: Vec<String>,
     pub gain_db: f64,
     pub pan: f64,
@@ -147,6 +149,21 @@ pub enum PatternView {
         id: String,
         hits: Vec<DrumHitDto>,
     },
+    Notes {
+        id: String,
+        bars: u32,
+        notes: Vec<NoteView>,
+    },
+}
+
+/// One note of a note clip, positions in 16th steps.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct NoteView {
+    pub start: f64,
+    /// MIDI note.
+    pub pitch: u8,
+    pub len: f64,
+    pub vel: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -219,13 +236,11 @@ impl From<&Song> for SongView {
                     placements: t.play.iter().map(|p| placement_view(song, id, p)).collect(),
                 })
                 .collect(),
-            // Note clips stay out of `patterns` until the studio can show
-            // them (a later task adds their view).
             patterns: song
                 .clips
                 .iter()
-                .filter_map(|(id, p)| match p {
-                    Clip::Acid(a) => Some(PatternView::Acid {
+                .map(|(id, p)| match p {
+                    Clip::Acid(a) => PatternView::Acid {
                         id: id.clone(),
                         steps: a
                             .steps()
@@ -236,12 +251,25 @@ impl From<&Song> for SongView {
                                 slide: s.slide,
                             })
                             .collect(),
-                    }),
-                    Clip::Drum(d) => Some(PatternView::Drum {
+                    },
+                    Clip::Drum(d) => PatternView::Drum {
                         id: id.clone(),
                         hits: d.hits().iter().map(|&h| h.into()).collect(),
-                    }),
-                    Clip::Notes(_) => None,
+                    },
+                    Clip::Notes(n) => PatternView::Notes {
+                        id: id.clone(),
+                        bars: n.bars,
+                        notes: n
+                            .notes
+                            .iter()
+                            .map(|note| NoteView {
+                                start: f64::from(note.start) / f64::from(TICKS_PER_STEP),
+                                pitch: note.pitch,
+                                len: f64::from(note.len) / f64::from(TICKS_PER_STEP),
+                                vel: note.velocity,
+                            })
+                            .collect(),
+                    },
                 })
                 .collect(),
             sections: song
