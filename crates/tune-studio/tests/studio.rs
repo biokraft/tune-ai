@@ -1574,3 +1574,121 @@ fn a_launch_that_starts_playback_lands_at_the_cursor_on_an_eager_device() {
     let want = render_bars(&acid_launched_at_bar_1(&hat), 1, 4);
     assert_same(&frames, &want, "groove from the first block");
 }
+
+// ---------------- undo during session play ----------------
+
+fn run_r1(f: &Fixture, actions: Vec<Action>) {
+    let r1 = RunTag::new("r1", None).expect("a run");
+    f.studio
+        .run_actions(actions, Origin::claude(Some(r1)))
+        .expect("runs");
+}
+
+/// ⌘Z of a run that removed a launched track: the engine plays the restored
+/// track from the arrangement, and the actor agrees (its lane drives the
+/// cutoff again).
+#[test]
+fn undo_of_a_removed_launched_track_restores_it_to_the_arrangement() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.call(live(launch_clip("acid", "groove")));
+    f.pull(2 * 96_000 + 6_000);
+    assert!(matches!(engine_play(&f, ACID), TrackPlay::Clip(_)));
+    run_r1(
+        &f,
+        vec![Action::RemoveTrack {
+            track: "acid".into(),
+        }],
+    );
+    land(&f);
+    f.call(Command::Action(Action::Undo));
+    land(&f);
+    let p = engine_play(&f, ACID);
+    let r = f.call(knob("acid303.cutoff", 900.0, true));
+    assert_eq!(p, TrackPlay::Arrangement);
+    assert_eq!(r, json!({ "automated": true }));
+}
+
+/// The same through `undo_run`: the removed launched track comes back on the
+/// arrangement, in the engine and in the actor.
+#[test]
+fn undo_run_of_a_removed_launched_track_restores_it_to_the_arrangement() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.call(live(launch_clip("acid", "groove")));
+    f.pull(2 * 96_000 + 6_000);
+    run_r1(
+        &f,
+        vec![Action::RemoveTrack {
+            track: "acid".into(),
+        }],
+    );
+    land(&f);
+    f.studio
+        .run_actions(
+            vec![Action::UndoRun { run: "r1".into() }],
+            Origin::claude(None),
+        )
+        .expect("undo run");
+    land(&f);
+    let p = engine_play(&f, ACID);
+    let r = f.call(knob("acid303.cutoff", 900.0, true));
+    assert_eq!(p, TrackPlay::Arrangement);
+    assert_eq!(r, json!({ "automated": true }));
+}
+
+/// A scene launch queued behind a move_scene swap resolves against the
+/// moved order: groove (acid a1) must launch, not the scene now at groove's
+/// old row (break, where acid is empty and stops).
+#[test]
+fn a_launch_behind_a_scene_move_names_the_right_scene() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.pull(BLOCK);
+    f.call(Command::Action(Action::MoveScene {
+        scene: "break".into(),
+        index: 0,
+    }));
+    f.call(live(launch_scene("groove")));
+    land(&f);
+    f.pull(2 * 96_000);
+    let p = engine_play(&f, ACID);
+    assert!(matches!(p, TrackPlay::Clip(_)), "{p:?}");
+}
+
+/// `undo_run` of a pure scene reorder while playing reaches the engine (the
+/// scene-order trap through run undo and the actor).
+#[test]
+fn undo_run_of_a_scene_move_reaches_the_engine() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.pull(BLOCK);
+    run_r1(
+        &f,
+        vec![Action::MoveScene {
+            scene: "break".into(),
+            index: 0,
+        }],
+    );
+    land(&f);
+    let applied_before = {
+        let s = lock(&f.slot);
+        s.as_ref().unwrap().swaps_applied()
+    };
+    f.studio
+        .run_actions(
+            vec![Action::UndoRun { run: "r1".into() }],
+            Origin::claude(None),
+        )
+        .expect("undo run");
+    land(&f);
+    let applied_after = {
+        let s = lock(&f.slot);
+        s.as_ref().unwrap().swaps_applied()
+    };
+    assert!(applied_after > applied_before, "no swap for the order undo");
+    f.call(live(launch_scene("groove")));
+    land(&f);
+    f.pull(2 * 96_000);
+    assert!(matches!(engine_play(&f, ACID), TrackPlay::Clip(_)));
+}
