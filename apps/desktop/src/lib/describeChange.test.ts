@@ -87,6 +87,9 @@ describe("describeChange on scenes", () => {
     expect(change("scenes", ["a"], ["b", "a"])).toBe("Scene order");
     expect(change("scenes.groove", null, { slots: {} })).toBe("Scene groove added");
     expect(change("scenes.groove", { slots: {} }, null)).toBe("Scene groove removed");
+    expect(change("scenes.groove", { slots: {} }, { slots: { hat: "h" } })).toBe(
+      "Scene groove changed",
+    );
     expect(change("scenes.groove.slots.hat", null, "h")).toBe("hat in scene groove none → h");
     expect(change("scenes.groove.slots.hat", "h", "a1")).toBe("hat in scene groove h → a1");
     expect(change("scenes.groove.slots.hat", "h", null)).toBe("hat in scene groove h → none");

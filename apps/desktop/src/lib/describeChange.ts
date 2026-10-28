@@ -91,7 +91,10 @@ function describeWith(c: Change, song: SongView | null, span: Span): string {
   if (c.path === "scenes") return "Scene order";
 
   const scene = SCENE.exec(c.path);
-  if (scene) return c.new === null ? `Scene ${scene[1]} removed` : `Scene ${scene[1]} added`;
+  if (scene) {
+    const what = c.old === null ? "added" : c.new === null ? "removed" : "changed";
+    return `Scene ${scene[1]} ${what}`;
+  }
   const slot = SCENE_SLOT.exec(c.path);
   if (slot) return `${slot[2]} in scene ${slot[1]} ${span(c.old, c.new)}`.trim();
 
