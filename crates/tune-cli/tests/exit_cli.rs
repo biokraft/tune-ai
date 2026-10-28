@@ -517,31 +517,31 @@ fn a_running_studio_launches_and_returns_at_bar_lines() {
     let v = e.do_json(&["play"]);
     assert_eq!(v["via"], "studio", "{v}");
     // Half a bar in, a scene launched mid-bar lands at bar 1 (frame 96 000).
-    let mut left = r.pull(RATE);
+    let mut frames = r.pull(RATE);
     let v = e.do_json(&["launch_scene", "scene=groove"]);
     assert_eq!(v["via"], "studio", "{v}");
-    assert_eq!(v["result"], Value::Null, "{v}");
-    left.extend(r.pull(2 * RATE));
+    assert_eq!(v["results"], json!([null]), "{v}");
+    frames.extend(r.pull(2 * RATE));
     // Mid bar 1: hat's break clip lands at bar 2 (frame 192 000).
     let v = e.do_json(&["launch_clip", "track=hat", "scene=break"]);
     assert_eq!(v["via"], "studio", "{v}");
-    assert_eq!(v["result"], Value::Null, "{v}");
-    left.extend(r.pull(2 * RATE));
+    assert_eq!(v["results"], json!([null]), "{v}");
+    frames.extend(r.pull(2 * RATE));
     // Mid bar 2: every track goes back to the arrangement at bar 3.
     let v = e.do_json(&["back_to_arrangement"]);
     assert_eq!(v["via"], "studio", "{v}");
-    assert_eq!(v["result"], Value::Null, "{v}");
-    left.extend(r.pull(3 * RATE));
-    assert_eq!(left.len(), reference.len());
+    assert_eq!(v["results"], json!([null]), "{v}");
+    frames.extend(r.pull(3 * RATE));
+    assert_eq!(frames.len(), reference.len());
 
-    let first = left.iter().zip(&reference).position(|(a, b)| a != b);
+    let first = frames.iter().zip(&reference).position(|(a, b)| a != b);
     assert!(
         first.is_none(),
         "first differing sample {first:?}, frame {:?} (bar {:?})",
         first.map(|i| i / 2),
         first.map(|i| i / 2 / 96_000)
     );
-    assert!(rms(&left[2 * 96_000..]) > 1e-3, "silent session");
+    assert!(rms(&frames[2 * 96_000..]) > 1e-3, "silent session");
     assert_eq!(e.text(), song_before, "the song file changed");
     assert_eq!(
         fs::read_to_string(&log).ok(),
