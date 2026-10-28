@@ -133,7 +133,13 @@ Notation:
 - Automation: `[[automation]]` with `param = "<track>.<device>.<param>"` (or
   `<track>.send.delay`, `mix.<param id>`), `at`, `bars` and
   `points = [[bar_offset, normalized_0_to_1], ...]`; offsets are relative to
-  `at`. Outside every stretch of a param, its static value plays.
+  `at`. Outside every stretch of a param, its static value plays. In the
+  studio a knob shows the lane's value where a stretch drives it, and the
+  producer's release there moves the whole stretch under the playhead (or
+  the cursor) by the step from the lane's value there to the knob's, each
+  point held to 0..1 and the step rounded to 4 decimals: one
+  `set_lane_points`, logged `human`, one undo step. `set_param` from
+  `tune do` still writes the static value.
 - `tune migrate <song>` rewrites a v1 file as v2, keeping comments.
   `tune set` also writes a v1 file back as v2 when it changes a value, and
   `tune serve` and the studio rewrite it as v2 on open (logged `external`,

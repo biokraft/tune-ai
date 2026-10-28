@@ -631,14 +631,19 @@ fn live_actions_through_the_link() {
 #[test]
 fn agent_set_param_ignores_automation() {
     let f = fixture(COMMENTED);
-    // Bar 3 (0-based 2) lies in the cutoff lane.
+    // Bar 3 (0-based 2) lies in the cutoff lane: the producer's knob moves
+    // the stretch there, the agent's `set_param` writes the static value.
     f.call(Command::Action(Action::SeekBar { bar: 2 }));
     assert_eq!(
         f.call(Command::Action(knob("acid303.cutoff", 900.0, true))),
-        json!({ "automated": true })
+        Value::Null
     );
-    sleep(Duration::from_millis(300));
-    assert_eq!(f.disk(), COMMENTED);
+    let shifted = f.disk_until("the shifted stretch", |t| t != COMMENTED);
+    assert!(
+        !shifted.contains("points = [[0, 0.1], [2, 0.8]]"),
+        "{shifted}"
+    );
+    assert_eq!(value_at(&shifted, "tracks.acid.acid303.cutoff"), json!(500));
     f.agent(&[knob("acid303.cutoff", 820.0, true)], None)
         .unwrap();
     assert_eq!(

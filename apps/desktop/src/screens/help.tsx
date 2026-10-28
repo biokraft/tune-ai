@@ -11,7 +11,7 @@ import {
 } from "react";
 import { sentenceCase } from "../lib/song";
 
-/** How long a knob note (e.g. "automated here") stays on the help line. */
+/** How long a knob note stays on the help line. */
 const NOTE_MS = 6000;
 
 export type Help = {

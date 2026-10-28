@@ -1,7 +1,14 @@
 import { stateEvent } from "../client/fakeClient";
 import type { StudioState } from "../client/protocol";
 import type { StudioView } from "../store/studioStore";
-import { currentSection, highlightedSteps, loopSectionName, patternGlyph } from "./song";
+import {
+  currentSection,
+  highlightedSteps,
+  knobStep,
+  laneValueAt,
+  loopSectionName,
+  patternGlyph,
+} from "./song";
 
 function view(patch: Partial<StudioView> = {}, edit: (s: StudioState) => void = () => {}) {
   const { event: _, ...state } = stateEvent();
@@ -38,6 +45,33 @@ describe("currentSection", () => {
 
   it("a selected section always wins", () => {
     expect(currentSection(view({ selectedSection: 1 }))).toBe(1);
+  });
+});
+
+describe("laneValueAt", () => {
+  // Section b (bars 2-3) has the acid cutoff stretch [[0, 0.1], [2, 0.8]].
+  const song = stateEvent().song!;
+
+  it("reads the stretch under the step, between its points", () => {
+    expect(laneValueAt(song, "acid", "acid303.cutoff", 32)).toBeCloseTo(0.1, 12);
+    expect(laneValueAt(song, "acid", "acid303.cutoff", 48)).toBeCloseTo(0.45, 12);
+    expect(laneValueAt(song, "acid", "acid303.cutoff", 56)).toBeCloseTo(0.625, 12);
+  });
+
+  it("is null where no stretch of the param covers the step", () => {
+    expect(laneValueAt(song, "acid", "acid303.cutoff", 31)).toBeNull();
+    expect(laneValueAt(song, "acid", "acid303.cutoff", 64)).toBeNull();
+    expect(laneValueAt(song, "acid", "acid303.resonance", 40)).toBeNull();
+    expect(laneValueAt(song, "hat", "acid303.cutoff", 40)).toBeNull();
+  });
+});
+
+describe("knobStep", () => {
+  it("is the playhead while playing, else the cursor's bar line", () => {
+    expect(knobStep(view({}, (s) => (s.cursor_bar = 3)))).toBe(48);
+    expect(
+      knobStep(view({ playhead: { step: 37, bar: 2, beat: 1 } }, (s) => (s.playing = true))),
+    ).toBe(37);
   });
 });
 

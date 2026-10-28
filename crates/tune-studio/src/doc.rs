@@ -475,6 +475,19 @@ pub fn placement_json(p: &Placement) -> Value {
 }
 
 /// A number as JSON, exact integers as integers (`-6`, not `-6.0`).
+/// The spec of a lane's param: `param` of track `track`, or the mix param
+/// `param` when `track` is [`MIX_TRACK_ID`]. `None` for a setting or an
+/// unknown param.
+pub(crate) fn lane_param_spec(song: &Song, track: &str, param: &str) -> Option<&'static ParamSpec> {
+    if track == MIX_TRACK_ID {
+        return find_mix_param(param).map(|(_, _, spec)| spec);
+    }
+    match locate(song.tracks.get(track)?, param)? {
+        Target::Param(_, _, spec) | Target::Strip(spec) => Some(spec),
+        Target::Setting(..) => None,
+    }
+}
+
 pub(crate) fn num(v: f64) -> Value {
     match as_integer(v) {
         Some(i) => Value::from(i),
