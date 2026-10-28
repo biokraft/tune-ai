@@ -805,6 +805,32 @@ fn scenes_from_the_cli() {
 }
 
 #[test]
+fn removing_an_empty_scene_prints_no_raw_json() {
+    let e = fixture();
+    let session =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/session.toml");
+    fs::copy(session, &e.song).unwrap();
+    let song = e.song.to_str().unwrap();
+    json_out(
+        e.tune()
+            .args(["do", song, "add_scene", "scene=empty", "--json"]),
+    );
+    let out = e
+        .tune()
+        .args(["do", song, "remove_scene", "scene=empty"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    // The change line says the scene went; no result line follows it.
+    assert_eq!(
+        text.trim(),
+        "set scenes.empty {\"slots\":{}} -> null",
+        "{text}"
+    );
+}
+
+#[test]
 fn removed_slots_are_printed() {
     let e = fixture();
     let session =

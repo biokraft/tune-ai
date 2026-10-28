@@ -160,7 +160,9 @@ fn result_lines(result: &Value) -> Vec<String> {
             lines.push(format!("cleared duck source {src}"));
         }
     }
-    if lines.is_empty() && !result.is_null() {
+    // A `removed` result with nothing listed says nothing more than the
+    // change line above it.
+    if lines.is_empty() && !result.is_null() && result.get("removed").is_none() {
         lines.push(result.to_string());
     }
     lines
