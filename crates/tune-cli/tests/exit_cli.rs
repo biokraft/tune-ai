@@ -149,16 +149,20 @@ fn start_studio(e: &Env) -> Running {
 }
 
 impl Running {
-    /// Pulls `frames` stereo frames from the playing processor and returns
-    /// the left channel.
-    fn pull_left(&self, frames: usize) -> Vec<f32> {
+    /// Pulls `frames` stereo frames from the playing processor, interleaved.
+    fn pull(&self, frames: usize) -> Vec<f32> {
         let mut out = vec![0.0_f32; 2 * frames];
         let mut slot = lock(&self.slot);
         let processor = slot.as_mut().expect("audio is playing");
         for block in out.chunks_mut(2 * BLOCK) {
             processor.process(block);
         }
-        out.chunks(2).map(|f| f[0]).collect()
+        out
+    }
+
+    /// Like [`Running::pull`], keeping the left channel.
+    fn pull_left(&self, frames: usize) -> Vec<f32> {
+        self.pull(frames).chunks(2).map(|f| f[0]).collect()
     }
 }
 
@@ -453,29 +457,45 @@ fn cut(text: &str, from: &str, to: Option<&str>) -> String {
     format!("{}{}", &text[..start], &text[end..])
 }
 
+/// `text` with the one occurrence of `from` replaced; panics if it is absent
+/// or repeated, so an edit that stops matching the fixture fails loudly.
+fn replace_once(text: &str, from: &str, to: &str) -> String {
+    assert_eq!(text.matches(from).count(), 1, "fixture lost {from:?}");
+    text.replacen(from, to, 1)
+}
+
 /// Spec §11 exit 3: a running studio, driven by `tune do`, launches a scene
 /// and a clip and goes back to the arrangement, each at a bar line, and the
 /// audio equals an arrangement that has those bars written out.
 #[test]
 fn a_running_studio_launches_and_returns_at_bar_lines() {
-    // S: the fixture without its automation; the engine plays it live.
+    // S: the fixture without its automation, hat's second placement playing
+    // the kick pattern; the engine plays it live.
     let s = cut(SESSION, "# the filter opens", None);
-    // R: the arrangement the session should sound like, bar by bar.
+    let s = replace_once(
+        &s,
+        "play = [\n  { at = 1, clip = \"h\", bars = 2 },\n  { at = 3, clip = \"h\", bars = 2 },\n]",
+        "play = [\n  { at = 1, clip = \"h\", bars = 2 },\n  { at = 3, clip = \"k4\", bars = 2 },\n]",
+    );
+    // R: the arrangement the session should sound like, bar by bar. Hat
+    // plays the launched `h` at bar 3 and the arrangement's `k4` after the
+    // return at bar 4, so a late, early or missing return is audible.
     let r = cut(&s, "# jam rows", Some("[[sections]]"));
-    let r = r
-        .replace(
-            "play = [\n  { at = 1, clip = \"k4\", bars = 2 },\n  { at = 3, clip = \"k4\", bars = 2 },\n]",
-            "play = [{ at = 1, clip = \"k4\", bars = 4 }]",
-        )
-        .replace(
-            "play = [{ at = 3, clip = \"a1\", bars = 2 }]",
-            "play = [{ at = 2, clip = \"a1\", bars = 3 }]",
-        )
-        .replace(
-            "play = [\n  { at = 1, clip = \"h\", bars = 2 },\n  { at = 3, clip = \"h\", bars = 2 },\n]",
-            "play = [\n  { at = 1, clip = \"h\", bars = 1 },\n  { at = 3, clip = \"h\", bars = 2 },\n]",
-        );
-    assert_ne!(r, s, "the reference must differ from the session song");
+    let r = replace_once(
+        &r,
+        "play = [\n  { at = 1, clip = \"k4\", bars = 2 },\n  { at = 3, clip = \"k4\", bars = 2 },\n]",
+        "play = [{ at = 1, clip = \"k4\", bars = 4 }]",
+    );
+    let r = replace_once(
+        &r,
+        "play = [{ at = 3, clip = \"a1\", bars = 2 }]",
+        "play = [{ at = 2, clip = \"a1\", bars = 3 }]",
+    );
+    let r = replace_once(
+        &r,
+        "play = [\n  { at = 1, clip = \"h\", bars = 2 },\n  { at = 3, clip = \"k4\", bars = 2 },\n]",
+        "play = [\n  { at = 1, clip = \"h\", bars = 1 },\n  { at = 3, clip = \"h\", bars = 1 },\n  { at = 4, clip = \"k4\", bars = 1 },\n]",
+    );
     let reference = {
         let song = parse_song(&r).unwrap();
         let compiled = Arc::new(CompiledSong::new(&song, 48_000));
@@ -484,10 +504,9 @@ fn a_running_studio_launches_and_returns_at_bar_lines() {
             end_bar: 4,
             stems: false,
         };
-        let mix = render(compiled, &opts).unwrap().mix;
-        mix.chunks(2).map(|f| f[0]).collect::<Vec<f32>>()
+        render(compiled, &opts).unwrap().mix
     };
-    assert_eq!(reference.len(), 4 * 2 * RATE);
+    assert_eq!(reference.len(), 2 * 4 * 96_000);
 
     let e = env_with(&s);
     let song_before = e.text();
@@ -498,28 +517,31 @@ fn a_running_studio_launches_and_returns_at_bar_lines() {
     let v = e.do_json(&["play"]);
     assert_eq!(v["via"], "studio", "{v}");
     // Half a bar in, a scene launched mid-bar lands at bar 1 (frame 96 000).
-    let mut left = r.pull_left(RATE);
+    let mut left = r.pull(RATE);
     let v = e.do_json(&["launch_scene", "scene=groove"]);
     assert_eq!(v["via"], "studio", "{v}");
     assert_eq!(v["result"], Value::Null, "{v}");
-    left.extend(r.pull_left(2 * RATE));
+    left.extend(r.pull(2 * RATE));
     // Mid bar 1: hat's break clip lands at bar 2 (frame 192 000).
     let v = e.do_json(&["launch_clip", "track=hat", "scene=break"]);
     assert_eq!(v["via"], "studio", "{v}");
-    left.extend(r.pull_left(2 * RATE));
+    assert_eq!(v["result"], Value::Null, "{v}");
+    left.extend(r.pull(2 * RATE));
     // Mid bar 2: every track goes back to the arrangement at bar 3.
     let v = e.do_json(&["back_to_arrangement"]);
     assert_eq!(v["via"], "studio", "{v}");
-    left.extend(r.pull_left(3 * RATE));
-    assert_eq!(left.len(), 384_000);
+    assert_eq!(v["result"], Value::Null, "{v}");
+    left.extend(r.pull(3 * RATE));
+    assert_eq!(left.len(), reference.len());
 
     let first = left.iter().zip(&reference).position(|(a, b)| a != b);
     assert!(
         first.is_none(),
-        "first differing frame {first:?} (bar {:?})",
-        first.map(|f| f / 96_000)
+        "first differing sample {first:?}, frame {:?} (bar {:?})",
+        first.map(|i| i / 2),
+        first.map(|i| i / 2 / 96_000)
     );
-    assert!(rms(&left[96_000..]) > 1e-3, "silent session");
+    assert!(rms(&left[2 * 96_000..]) > 1e-3, "silent session");
     assert_eq!(e.text(), song_before, "the song file changed");
     assert_eq!(
         fs::read_to_string(&log).ok(),
