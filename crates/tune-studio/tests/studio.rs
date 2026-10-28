@@ -17,7 +17,7 @@ use tune_studio::{
     StudioState, set_paths,
 };
 
-const MINI: &str = include_str!("../../tune-song/tests/fixtures/mini.toml");
+const MINI: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
 /// The longest any test waits for one thing.
 // Generous: FSEvents delivery can take seconds while the machine is busy
 // (e.g. under `task verify`), and a deadline only costs time on failure.
@@ -201,17 +201,20 @@ fn render_bars(text: &str, start: u32, end: u32) -> Vec<f32> {
 
 /// The param value the file sets on the acid track.
 fn acid_value(text: &str, param: &str) -> f64 {
-    parse_song(text).expect("valid song").tracks["acid"].params[param]
+    let local = param.strip_prefix("acid303.").expect("an acid303 param");
+    parse_song(text).expect("valid song").tracks["acid"]
+        .instrument
+        .params[local]
 }
 
 /// `mini`, with the acid also playing in section `a` (bars 0..2), where no
 /// lane drives the cutoff: a knob there is both audible and writable.
 fn acid_in_a() -> String {
-    let from = "play = { kick = \"k4\", hat = \"h\" }";
+    let from = "play = [{ at = 3, clip = \"a1\", bars = 2 }]";
     assert!(MINI.contains(from));
     MINI.replacen(
         from,
-        "play = { kick = \"k4\", acid = \"a1\", hat = \"h\" }",
+        "play = [\n  { at = 1, clip = \"a1\", bars = 2 },\n  { at = 3, clip = \"a1\", bars = 2 },\n]",
         1,
     )
 }
@@ -234,6 +237,65 @@ fn subscribe_starts_with_state() {
     }
     let second = f.studio.subscribe();
     assert!(matches!(second.recv_timeout(WAIT), Ok(Event::State(_))));
+}
+
+#[test]
+fn state_reports_migrated_from_after_opening_v1() {
+    let v1 = include_str!("fixtures/commented-v1.toml");
+    let f = fixture(v1);
+    match f.events.recv_timeout(WAIT).expect("first event") {
+        Event::State(s) => {
+            assert_eq!(s.migrated_from, Some(1));
+            assert!(s.can_undo, "the migration is an undo step");
+        }
+        other => panic!("expected State, got {other:?}"),
+    }
+    assert_eq!(f.disk(), include_str!("fixtures/commented.toml"));
+    // A v2 song has none.
+    let f = fixture(MINI);
+    match f.events.recv_timeout(WAIT).expect("first event") {
+        Event::State(s) => assert_eq!(s.migrated_from, None),
+        other => panic!("expected State, got {other:?}"),
+    }
+}
+
+/// A v1 song whose folder cannot be written opens migrated in memory and
+/// says why it was not saved: to a listener on subscribing, and again
+/// after `get_state`, for a transport that drops the first events (Tauri
+/// does) and asks for the state instead.
+#[cfg(unix)]
+#[test]
+fn get_state_repeats_a_migration_that_could_not_be_saved() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("song.toml");
+    fs::write(&path, include_str!("fixtures/commented-v1.toml")).expect("write song");
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o555)).unwrap();
+    let config = StudioConfig {
+        audio: Box::new(CaptureOut {
+            slot: Slot::default(),
+        }),
+        songs_root: dir.path().to_owned(),
+    };
+    let studio = tune_studio::Studio::spawn(config, Some(path.clone()));
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    let studio = studio.expect("opens");
+    let events = studio.subscribe();
+    let next = || events.recv_timeout(WAIT).expect("an event");
+    assert!(matches!(next(), Event::State(s) if s.migrated_from.is_none()));
+    let unsaved = |e: Event| match e {
+        Event::Error { message } => assert!(
+            message.starts_with(
+                "the song was upgraded to the new file format in memory but not saved: "
+            ),
+            "{message}"
+        ),
+        other => panic!("expected the migration error, got {other:?}"),
+    };
+    unsaved(next());
+    studio.call(Command::GetState).expect("get_state");
+    unsaved(next());
 }
 
 #[test]
@@ -326,7 +388,7 @@ fn release_commits() {
     let start = Instant::now();
     assert_eq!(f.call(knob("acid303.cutoff", 823.456, true)), Value::Null);
     let text = f.disk_until(Duration::from_millis(500), "held 823.5", |t| {
-        parse_song(t).is_ok_and(|s| s.tracks["acid"].params["acid303.cutoff"] == 823.5)
+        parse_song(t).is_ok_and(|s| s.tracks["acid"].instrument.params["cutoff"] == 823.5)
     });
     assert!(start.elapsed() <= Duration::from_millis(500));
     assert_eq!(acid_value(&text, "acid303.resonance"), 70.0);
@@ -435,7 +497,7 @@ fn external_edit_during_drag_keeps_gesture() {
     // Release at bar 0, where nothing automates the cutoff.
     assert_eq!(f.call(knob("acid303.cutoff", 2000.0, true)), Value::Null);
     let text = f.disk_until(WAIT, "held both edits", |t| {
-        parse_song(t).is_ok_and(|s| s.tracks["acid"].params["acid303.cutoff"] == 2000.0)
+        parse_song(t).is_ok_and(|s| s.tracks["acid"].instrument.params["cutoff"] == 2000.0)
     });
     assert_eq!(acid_value(&text, "acid303.resonance"), 90.0);
 
@@ -463,7 +525,7 @@ fn live_value_after_release_is_dropped() {
     // The stale live value from the same gesture, arriving late.
     assert_eq!(f.call(knob("acid303.cutoff", 300.0, false)), Value::Null);
     let text = f.disk_until(WAIT, "held 2000", |t| {
-        parse_song(t).is_ok_and(|s| s.tracks["acid"].params["acid303.cutoff"] == 2000.0)
+        parse_song(t).is_ok_and(|s| s.tracks["acid"].instrument.params["cutoff"] == 2000.0)
     });
 
     // Let the release's swap land, then compare a fresh bar with the file.

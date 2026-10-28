@@ -54,6 +54,49 @@ describe("StepsTab", () => {
     expect(screen.queryByRole("group", { name: "303 step sequencer" })).toBeNull();
   });
 
+  it("says the docked track plays part of a clip in a section that shows none", () => {
+    const loose: SongView = {
+      ...song,
+      tracks: song.tracks.map((t) =>
+        t.id === "acid"
+          ? {
+              ...t,
+              placements: [{ start_bar: 1, bars: 2, clip: "a1", offset: 1, in_section: null }],
+            }
+          : t,
+      ),
+      sections: song.sections.map((s) => {
+        const { acid: _, ...play } = s.play;
+        return { ...s, play };
+      }),
+    };
+    setup("acid", 0, loose);
+    expect(
+      screen.getByText(
+        "acid plays part of a1 in a (read only). Pick a pattern above to replace it.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "303 step sequencer" })).toBeNull();
+  });
+
+  it("a note clip shows as read only", () => {
+    const s = structuredClone(song);
+    s.patterns.push({
+      kind: "notes",
+      id: "lead",
+      bars: 1,
+      notes: [{ start: 0, pitch: 48, len: 3, vel: 100 }],
+    });
+    s.sections[1]!.play.acid = "lead";
+    setup("acid", 1, s);
+    const name = s.sections[1]!.name;
+    expect(
+      screen.getByText(`acid plays the note clip lead in ${name} (read only).`),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "303 step sequencer" })).toBeNull();
+    expect(screen.queryAllByRole("button", { name: /Step \d+/ })).toHaveLength(0);
+  });
+
   it("says so when no section is under the playhead", () => {
     setup("kick", null);
     expect(

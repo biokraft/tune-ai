@@ -16,10 +16,15 @@ use tune_song::MIX_TRACK_ID;
 pub enum SongPath {
     /// `song.bpm`
     Bpm,
+    /// `song.version` (read-only: the file's format version, which changes
+    /// only when a file is migrated)
+    Version,
     /// `tracks.<t>.gain_db|pan|mute|solo`
     TrackField { track: String, field: TrackField },
-    /// `tracks.<t>.<param id>`, an instrument, strip or fx param such as
-    /// `acid303.cutoff`, `send.delay` or `dist.drive`.
+    /// `tracks.<t>.<device>.<name>`: a param of the instrument or an fx
+    /// device such as `acid303.cutoff` or `dist.drive`, else a setting of
+    /// that device such as `dist.mode`; or a strip param such as
+    /// `send.delay`.
     TrackParam { track: String, param: String },
     /// `mix.<param id>`, a delay, reverb or master param such as
     /// `delay.feedback`.
@@ -29,12 +34,16 @@ pub enum SongPath {
     /// `mix.duck_source`: a track id, or `null` for the default (the first
     /// kick).
     MixDuckSource,
-    /// `tracks.<t>.dist.mode`
-    FxMode { track: String },
     /// `tracks.<t>` (read-only: the track as a whole)
     Track { track: String },
-    /// `patterns.<p>.steps`
-    Pattern { pattern: String },
+    /// `clips.<c>.steps`; `patterns.<c>.steps`, the version 1 spelling,
+    /// parses to it too.
+    Clip { clip: String },
+    /// `clips.<c>.notes`: a notes clip's notes, an array of `{start, pitch,
+    /// len, vel}` (`start` and `len` in 16th steps).
+    ClipNotes { clip: String },
+    /// `clips.<c>.bars`: a notes clip's length in whole bars.
+    ClipBars { clip: String },
     /// `sections[<i>].bars`
     SectionBars(usize),
     /// `sections[<i>].name`
@@ -103,7 +112,7 @@ impl SongPath {
     pub fn is_read_only(&self) -> bool {
         matches!(
             self,
-            Self::Track { .. } | Self::SectionLanes(_) | Self::Sections
+            Self::Version | Self::Track { .. } | Self::SectionLanes(_) | Self::Sections
         )
     }
 }
@@ -112,14 +121,16 @@ impl fmt::Display for SongPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Bpm => f.write_str("song.bpm"),
+            Self::Version => f.write_str("song.version"),
             Self::TrackField { track, field } => write!(f, "tracks.{track}.{field}"),
             Self::TrackParam { track, param } => write!(f, "tracks.{track}.{param}"),
             Self::MixParam { param } => write!(f, "mix.{param}"),
             Self::MixMaster => f.write_str("mix.master"),
             Self::MixDuckSource => f.write_str("mix.duck_source"),
-            Self::FxMode { track } => write!(f, "tracks.{track}.dist.mode"),
             Self::Track { track } => write!(f, "tracks.{track}"),
-            Self::Pattern { pattern } => write!(f, "patterns.{pattern}.steps"),
+            Self::Clip { clip } => write!(f, "clips.{clip}.steps"),
+            Self::ClipNotes { clip } => write!(f, "clips.{clip}.notes"),
+            Self::ClipBars { clip } => write!(f, "clips.{clip}.bars"),
             Self::SectionBars(i) => write!(f, "sections[{i}].bars"),
             Self::SectionName(i) => write!(f, "sections[{i}].name"),
             Self::SectionPlay { section, track } => write!(f, "sections[{section}].play.{track}"),
@@ -136,7 +147,7 @@ impl FromStr for SongPath {
         parse(s).ok_or_else(|| {
             format!(
                 "unknown path `{s}` (expected e.g. song.bpm, tracks.<track>.gain_db, \
-                 tracks.<track>.<param id>, mix.<param id>, patterns.<pattern>.steps, \
+                 tracks.<track>.<param id>, mix.<param id>, clips.<clip>.steps|notes|bars, \
                  sections[<i>].bars)"
             )
         })
@@ -147,6 +158,9 @@ fn parse(s: &str) -> Option<SongPath> {
     if s == "song.bpm" {
         return Some(SongPath::Bpm);
     }
+    if s == "song.version" {
+        return Some(SongPath::Version);
+    }
     if s == "sections" {
         return Some(SongPath::Sections);
     }
@@ -156,10 +170,25 @@ fn parse(s: &str) -> Option<SongPath> {
     if let Some(rest) = s.strip_prefix("mix.") {
         return parse_mix(rest);
     }
-    if let Some(rest) = s.strip_prefix("patterns.") {
-        let pattern = rest.strip_suffix(".steps")?;
-        return is_id(pattern).then(|| SongPath::Pattern {
-            pattern: pattern.to_owned(),
+    if let Some(rest) = s.strip_prefix("clips.") {
+        let (clip, field) = rest.rsplit_once('.')?;
+        if !is_id(clip) {
+            return None;
+        }
+        let clip = clip.to_owned();
+        return match field {
+            "steps" => Some(SongPath::Clip { clip }),
+            "notes" => Some(SongPath::ClipNotes { clip }),
+            "bars" => Some(SongPath::ClipBars { clip }),
+            _ => None,
+        };
+    }
+    if let Some(clip) = s
+        .strip_prefix("patterns.")
+        .and_then(|rest| rest.strip_suffix(".steps"))
+    {
+        return is_id(clip).then(|| SongPath::Clip {
+            clip: clip.to_owned(),
         });
     }
     if let Some(rest) = s.strip_prefix("sections[") {
@@ -198,9 +227,6 @@ fn parse_track(rest: &str) -> Option<SongPath> {
     if let Some(field) = TrackField::from_key(field) {
         return Some(SongPath::TrackField { track, field });
     }
-    if field == "dist.mode" {
-        return Some(SongPath::FxMode { track });
-    }
     is_param_id(field).then(|| SongPath::TrackParam {
         track,
         param: field.to_owned(),
@@ -218,7 +244,7 @@ fn parse_mix(rest: &str) -> Option<SongPath> {
     }
 }
 
-/// A param id is `<prefix>.<name>`, e.g. `acid303.cutoff`.
+/// A param id is `<device or strip>.<name>`, e.g. `acid303.cutoff`.
 fn is_param_id(s: &str) -> bool {
     s.split_once('.')
         .is_some_and(|(prefix, name)| is_id(prefix) && is_id(name))
@@ -232,7 +258,7 @@ fn parse_index(s: &str) -> Option<usize> {
     canonical.then(|| s.parse().ok()).flatten()
 }
 
-/// Track, pattern and param-name ids match `[a-z0-9_]+`.
+/// Track, clip and param-name ids match `[a-z0-9_]+`.
 fn is_id(s: &str) -> bool {
     !s.is_empty()
         && s.bytes()
@@ -278,6 +304,9 @@ mod tests {
             "tracks.acid.acid303.cut.off",
             "patterns.a1",
             "patterns.a1.track",
+            "clips.a1",
+            "clips.a1.kind",
+            "song.versions",
             "sections[0]",
             "sections[0].play",
             "sections[0].play.",

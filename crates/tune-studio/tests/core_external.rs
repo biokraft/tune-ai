@@ -123,6 +123,75 @@ fn external_edit_logged_and_undoable() {
     assert_eq!(core.song().bpm, 120.0);
 }
 
+/// A pending resize of section 0 moves section 1's partial placement; an
+/// external edit of only that placement does not conflict with it.
+#[test]
+fn resize_merges_with_an_edit_of_a_later_partial_placement() {
+    let partial = FIXTURE.replacen(
+        "play = [{ at = 3, clip = \"a1\", bars = 2 }]",
+        "play = [{ at = 3, clip = \"a1\", bars = 1, offset = 1 }]",
+        1,
+    );
+    assert_ne!(partial, FIXTURE);
+    let s = song();
+    fs::write(&s.path, &partial).unwrap();
+    let mut core = open(&s);
+    core.apply_edit(
+        &Command::ResizeSection { index: 0, bars: 6 },
+        Instant::now(),
+    )
+    .unwrap();
+    let text = partial.replacen("bars = 1, offset = 1 }", "bars = 1 }", 1);
+    fs::write(&s.path, &text).unwrap();
+
+    let ext = core.on_disk_text(text).expect("a change");
+    let changes: Vec<String> = ext.changes.iter().map(|c| c.path.to_string()).collect();
+    assert_eq!(changes, ["sections[1].play.acid"]);
+    let merged: Vec<String> = ext.merged.iter().map(|c| c.path.to_string()).collect();
+    assert_eq!(merged, ["sections[0].bars"]);
+    assert!(ext.offered.is_empty(), "{:?}", ext.offered);
+    let now = disk(&s);
+    assert!(
+        now.contains("play = [{ at = 7, clip = \"a1\", bars = 1 }]"),
+        "{now}"
+    );
+}
+
+/// A v1 text from outside is read migrated in memory, not written back,
+/// and its change list says the version on disk changed.
+#[test]
+fn v1_text_from_outside_is_read_migrated() {
+    let s = song();
+    let mut core = open(&s);
+    let v1 = bpm_121(include_str!("fixtures/commented-v1.toml"));
+    fs::write(&s.path, &v1).unwrap();
+    let ext = core.on_disk_text(v1.clone()).expect("an external change");
+    let changes: Vec<(String, serde_json::Value, serde_json::Value)> = ext
+        .changes
+        .iter()
+        .map(|c| (c.path.to_string(), c.old.clone(), c.new.clone()))
+        .collect();
+    assert_eq!(
+        changes,
+        [
+            ("song.version".into(), json!(2), json!(1)),
+            ("song.bpm".into(), json!(120), json!(121)),
+        ]
+    );
+    assert_eq!(disk(&s), v1, "not written back");
+    assert_eq!(core.song().bpm, 121.0);
+
+    // The next edit writes v2 again.
+    core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
+    let written = core.flush().unwrap();
+    assert_eq!(written[0].path, SongPath::Version);
+    let now = disk(&s);
+    assert!(
+        now.contains("[song]\nversion = 2\n") && now.contains("bpm = 121"),
+        "{now}"
+    );
+}
+
 #[test]
 fn claude_edit_attributed() {
     let s = song();
@@ -284,8 +353,9 @@ fn conflict_and_merge_together() {
 
     let ext = core.on_disk_text(text).expect("a change");
     assert_eq!(ext.offered.len(), 1);
-    assert_eq!(ext.merged.len(), 1);
-    assert_eq!(ext.merged[0].path, SongPath::SectionBars(0));
+    // The resize moves section 1's lane stretch too, unchanged within it.
+    let merged: Vec<&SongPath> = ext.merged.iter().map(|c| &c.path).collect();
+    assert_eq!(merged, [&SongPath::SectionBars(0)]);
     let now = disk(&s);
     assert!(
         now.contains("\"acid303.cutoff\" = 700") && now.contains("bars = 4"),

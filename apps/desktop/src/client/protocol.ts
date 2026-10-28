@@ -1,13 +1,16 @@
 // Hand-written mirror of the studio wire protocol (crates/tune-studio: command.rs,
 // view.rs, studio.rs, core.rs). The golden file crates/tune-studio/tests/fixtures/protocol.json
 // pins the format for both sides; protocol.test.ts checks the names against it.
-import type { AcidStep, DrumHit, ParamSpecView, SectionView } from "@tune/ui";
+import type { AcidStep, DrumHit, ParamSpecView, PlacementView, SectionView } from "@tune/ui";
 
 // ---- Commands -------------------------------------------------------------------------------
 
 export type Command =
   | { cmd: "list_songs" }
-  /** Resolves with the current `StudioState`; changes nothing. */
+  /**
+   * Resolves with the current `StudioState`; changes nothing. A migration the studio could not
+   * save is sent again as an `error` event, for a transport that dropped the first one.
+   */
   | { cmd: "get_state" }
   | { cmd: "open_song"; args: { path: string } }
   /** `from_bar` is 0-based; null starts at the cursor. */
@@ -20,7 +23,8 @@ export type Command =
       cmd: "set_param";
       args: { track: string; param: string; value: number; commit: boolean };
     }
-  | { cmd: "set_fx_mode"; args: { track: string; mode: string } }
+  /** Sets the mode of the track's fx device `device` (its id, e.g. `dist`). */
+  | { cmd: "set_fx_mode"; args: { track: string; device: string; mode: string } }
   | {
       cmd: "set_acid_step";
       args: {
@@ -92,11 +96,27 @@ export type ErrorView = { line: number | null; column: number | null; message: s
 
 export type ParamView = ParamSpecView;
 
-export type FxView = { kind: string; mode: string; modes: string[]; params: ParamView[] };
+export type FxView = {
+  /** The device id (`eq`, `eq2`): the prefix of its param ids. */
+  id: string;
+  /** The module name (`distortion`, `eq`). */
+  kind: string;
+  /** The distortion mode; empty for a device without one. */
+  mode: string;
+  modes: string[];
+  params: ParamView[];
+};
+
+export type { PlacementView };
 
 export type TrackView = {
   id: string;
+  /** The instrument's module name (`acid303`). */
   instrument: string;
+  /** The instrument's device id: the prefix of its param ids. */
+  instrument_id: string;
+  /** The clip kinds the instrument plays (`"acid"`, `"drum"`). */
+  plays: string[];
   gain_db: number;
   pan: number;
   mute: boolean;
@@ -105,6 +125,8 @@ export type TrackView = {
   /** The strip params (sends and ducking), in `STRIP_PARAMS` order. */
   strip: ParamView[];
   fx: FxView[];
+  /** What the track plays, in time order. */
+  placements: PlacementView[];
 };
 
 /** The `[mix]` table: the master stage, the duck source and the shared buses. */
@@ -123,9 +145,13 @@ export type MixView = {
   reverb_active: boolean;
 };
 
+/** One note of a note clip; `start` and `len` are in 16th steps. */
+export type NoteView = { start: number; pitch: number; len: number; vel: number };
+
 export type PatternView =
-  | { kind: "acid"; id: string; track: string; steps: AcidStep[] }
-  | { kind: "drum"; id: string; track: string; hits: DrumHit[] };
+  | { kind: "acid"; id: string; steps: AcidStep[] }
+  | { kind: "drum"; id: string; hits: DrumHit[] }
+  | { kind: "notes"; id: string; bars: number; notes: NoteView[] };
 
 export type SongView = {
   name: string;
@@ -151,6 +177,8 @@ export type StudioState = {
   offered: Change[];
   /** Problems in the song file on disk; edits wait until they are fixed. */
   file_errors: ErrorView[];
+  /** The format version the song file was migrated from when opened, while one undo reverts it. */
+  migrated_from: number | null;
 };
 
 export type Source = "human" | "claude" | "external";

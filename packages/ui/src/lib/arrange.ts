@@ -1,10 +1,53 @@
+/** One automation stretch as one section shows it. */
+export type LaneView = {
+  track: string;
+  param: string;
+  /** `[bar offset from the section start, normalized value]`; may lie outside the section. */
+  points: [number, number][];
+  /** The stretch's part of the section, in bars from its start: `0 <= from < to <= bars`. */
+  from: number;
+  to: number;
+};
+
 export type SectionView = {
   name: string;
   start_bar: number;
   bars: number;
+  /**
+   * Track id to clip id, for each track that plays one clip over the whole section: one placement
+   * that starts at the section start from the clip's first step (offset 0).
+   */
   play: Record<string, string>;
-  lanes: { track: string; param: string; points: [number, number][] }[];
+  /** The stretches that overlap the section. */
+  lanes: LaneView[];
 };
+
+/** One clip placed on a track. */
+export type PlacementView = {
+  /** 0-based. */
+  start_bar: number;
+  bars: number;
+  clip: string;
+  /** Bars into the clip at which the placement starts playing it. */
+  offset: number;
+  /** The section whose `play` shows this placement, or null when none does. */
+  in_section: number | null;
+};
+
+/**
+ * The bars of placement `p` that no section's block shows, as half-open `[start, end)` ranges: all
+ * of it when no section shows it, else what runs past the end of the one section that does. A
+ * section shows a placement only when it starts there from the clip's first step, so the part of a
+ * placement inside any later section is loose.
+ */
+export function loosePieces(p: PlacementView, sections: SectionView[]): [number, number][] {
+  const start = p.start_bar;
+  const end = p.start_bar + p.bars;
+  const shown = p.in_section === null ? undefined : sections[p.in_section];
+  if (!shown) return [[start, end]];
+  const from = shown.start_bar + shown.bars;
+  return from < end ? [[from, end]] : [];
+}
 
 /** Bar width when nothing is measured (jsdom, first paint). */
 export const PX_PER_BAR = 12;
@@ -64,16 +107,32 @@ export function formatTime(bar: number, beat: number, bpm: number): string {
 }
 
 /**
- * Lane points as drawn: x clamped to the section, held flat from the section
- * start to the first point and from the last point to the section end, like
- * the engine. A single point becomes a flat line across the section.
+ * The lane's value at bar `x` of `points` (bars never decreasing), as the engine reads it: the
+ * first point's value before it, linear between points, the last point's value after it, and the
+ * later point where two share a bar.
  */
-export function holdPoints(points: [number, number][], bars: number): [number, number][] {
-  if (points.length === 0) return [];
-  const pts = points.map(([x, v]): [number, number] => [Math.min(bars, Math.max(0, x)), v]);
-  const first = pts[0]!;
-  const last = pts[pts.length - 1]!;
-  if (first[0] > 0) pts.unshift([0, first[1]]);
-  if (last[0] < bars) pts.push([bars, last[1]]);
-  return pts;
+export function laneValue(points: [number, number][], x: number): number {
+  let i = 0;
+  while (i < points.length && points[i]![0] <= x) i += 1;
+  if (i === 0) return points[0]![1];
+  if (i === points.length) return points[i - 1]![1];
+  const [b0, v0] = points[i - 1]!;
+  const [b1, v1] = points[i]!;
+  return v0 + ((v1 - v0) * (x - b0)) / (b1 - b0);
+}
+
+/**
+ * Lane points as drawn over a stretch's part of a section, `[from, to]` in bars from the section
+ * start: the value at `from`, the points strictly inside, then the value at `to`. Before the
+ * first point and after the last the value holds flat, like the engine, so a single point is a
+ * flat line across the part.
+ */
+export function holdPoints(
+  points: [number, number][],
+  from: number,
+  to: number,
+): [number, number][] {
+  if (points.length === 0 || !(to > from)) return [];
+  const inside = points.filter(([x]) => x > from && x < to);
+  return [[from, laneValue(points, from)], ...inside, [to, laneValue(points, to)]];
 }

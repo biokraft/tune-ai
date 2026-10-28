@@ -48,14 +48,37 @@ function implied(song: SongView | null, track: string): boolean {
   return acids.length === 1 && acids[0]!.id === track;
 }
 
+const MODE = /^([^.]+)\.mode$/;
+
+/**
+ * "distortion" (or "distortion d2" for one with another id) when `rest` is the mode of a
+ * distortion on `track`. Without the song, only the default id `dist` is known to be one.
+ */
+function distortionMode(song: SongView | null, track: string, rest: string): string | null {
+  const id = MODE.exec(rest)?.[1];
+  if (id === undefined) return null;
+  const fx = song?.tracks.find((x) => x.id === track)?.fx.find((f) => f.id === id);
+  const isDistortion = fx ? fx.kind === "distortion" : song === null && id === "dist";
+  if (!isDistortion) return null;
+  return id === "dist" ? "distortion" : `distortion ${id}`;
+}
+
 const MIX = /^mix\.(.+)$/;
 const TRACK = /^tracks\.([^.]+)(?:\.(.+))?$/;
 const SECTION = /^sections\[(\d+)\]\.(bars|name|lanes|play\.(.+))$/;
-const PATTERN = /^patterns\.(.+)\.steps$/;
+const PATTERN = /^clips\.(.+)\.steps$/;
+const NOTE_CLIP = /^clips\.(.+)\.(notes|bars)$/;
 
 /** One change in a few plain words, for the change notice. */
 export function describeChange(c: Change, song: SongView | null): string {
   if (c.path === "song.bpm") return `Tempo ${span(c.old, c.new, "BPM")}`;
+  if (c.path === "song.version") {
+    // Back to an older version: an undo of the migration, or the old text put back.
+    if (typeof c.old === "number" && typeof c.new === "number" && c.new < c.old) {
+      return `Restored the song file to format version ${show(c.new)}`;
+    }
+    return `Upgraded the song file to format version ${show(c.new)} (comments kept)`;
+  }
   if (c.path === "sections") return "Arrangement";
 
   const pattern = PATTERN.exec(c.path);
@@ -66,6 +89,11 @@ export function describeChange(c: Change, song: SongView | null): string {
     }
     const n = changedSteps(c.old, c.new).length;
     return `${id} pattern (${n} ${n === 1 ? "step" : "steps"})`;
+  }
+
+  const noteClip = NOTE_CLIP.exec(c.path);
+  if (noteClip) {
+    return `Changed the ${noteClip[2] === "notes" ? "notes" : "length"} of ${noteClip[1]}`;
   }
 
   const section = SECTION.exec(c.path);
@@ -80,6 +108,10 @@ export function describeChange(c: Change, song: SongView | null): string {
       case "lanes":
         return `${name} automation`;
       default:
+        // Placements that are not one clip over the section have no short form.
+        if (Array.isArray(c.old) || Array.isArray(c.new)) {
+          return `Changed what ${section[3]} plays in ${name}`;
+        }
         return `${name} ${section[3]} ${span(c.old, c.new)}`;
     }
   }
@@ -97,7 +129,11 @@ export function describeChange(c: Change, song: SongView | null): string {
   const track = TRACK.exec(c.path);
   if (track) {
     const [, t, rest] = track as unknown as [string, string, string | undefined];
-    if (rest === undefined) return c.old === null ? `Track ${t} added` : `Track ${t} removed`;
+    if (rest === undefined) {
+      if (c.old === null) return `Track ${t} added`;
+      if (c.new === null) return `Track ${t} removed`;
+      return `Changed the devices on ${t}`;
+    }
     switch (rest) {
       case "gain_db":
         return `${t} gain ${span(c.old, c.new, "dB")}`;
@@ -107,9 +143,9 @@ export function describeChange(c: Change, song: SongView | null): string {
         return c.new ? `${t} muted` : `${t} unmuted`;
       case "solo":
         return c.new ? `${t} soloed` : `${t} unsoloed`;
-      case "dist.mode":
-        return `${t} distortion ${span(c.old, c.new)}`;
     }
+    const mode = distortionMode(song, t, rest);
+    if (mode !== null) return `${t} ${mode} ${span(c.old, c.new)}`;
     const p = findParam(song, t, rest);
     if (!p) return `${t} ${rest} ${span(c.old, c.new)}`;
     const label = sentenceCase(p.label);

@@ -4617,6 +4617,7 @@ dependencies = [
  "tune-audio",
  "tune-dsp",
  "tune-engine",
+ "tune-modules",
  "tune-song",
  "tune-studio",
  "ureq",
@@ -4648,12 +4649,21 @@ name = "tune-engine"
 version = "0.1.0"
 dependencies = [
  "hound",
+ "indexmap 2.14.2",
  "rtrb",
  "tempfile",
  "thiserror 2.0.21",
  "tune-analysis",
  "tune-dsp",
+ "tune-modules",
  "tune-song",
+]
+
+[[package]]
+name = "tune-modules"
+version = "0.1.0"
+dependencies = [
+ "tune-dsp",
 ]
 
 [[package]]
@@ -4666,7 +4676,9 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "toml 1.1.2+spec-1.1.0",
+ "toml_edit 0.25.17+spec-1.1.0",
  "tune-dsp",
+ "tune-modules",
 ]
 
 [[package]]

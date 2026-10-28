@@ -9,9 +9,15 @@ use tempfile::TempDir;
 use tune_studio::text_hash;
 
 fn fixture() -> (TempDir, PathBuf) {
+    fixture_of("commented.toml")
+}
+
+/// A temp copy of the studio fixture `name` as `song.toml`.
+fn fixture_of(name: &str) -> (TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let src =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-studio/tests/fixtures/commented.toml");
+    let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tune-studio/tests/fixtures")
+        .join(name);
     let song = dir.path().join("song.toml");
     fs::copy(src, &song).unwrap();
     (dir, song)
@@ -41,6 +47,7 @@ fn set_writes_and_logs_claude() {
         "--json",
     ]));
     assert_eq!(v["ok"], true);
+    assert!(v.get("migrated_from").is_none(), "{v}");
     assert_eq!(v["changes"][0]["old"], 500);
     assert_eq!(v["changes"][0]["new"], 820);
     let text = fs::read_to_string(&song).unwrap();
@@ -103,7 +110,143 @@ fn set_empty_value_removes_play() {
     ]));
     assert_eq!(v["changes"][0]["old"], "a1");
     assert_eq!(v["changes"][0]["new"], Value::Null);
-    assert!(!fs::read_to_string(&song).unwrap().contains("acid = \"a1\""));
+    assert!(!fs::read_to_string(&song).unwrap().contains("clip = \"a1\""));
+}
+
+/// Re-setting the clip a placement already plays, on a section that
+/// placement enters mid-clip, restarts the clip there: a change, logged.
+#[test]
+fn set_same_clip_on_a_phase_shifted_section_is_a_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let song = dir.path().join("song.toml");
+    let k3 = "x...".repeat(12);
+    fs::write(
+        &song,
+        format!(
+            "[song]\nversion = 2\nname = \"phase\"\nbpm = 120\nseed = 1\n\n\
+             [tracks.k]\ninstrument = \"kick\"\nplay = [{{ at = 1, clip = \"k3\", bars = 4 }}]\n\n\
+             [clips.k3]\nkind = \"drum\"\nsteps = \"{k3}\"\n\n\
+             [[sections]]\nname = \"a\"\nbars = 2\n\n[[sections]]\nname = \"b\"\nbars = 2\n"
+        ),
+    )
+    .unwrap();
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "sections[1].play.k=k3",
+        "--json",
+    ]));
+    assert_eq!(v["changes"][0]["path"], "sections[1].play.k");
+    assert_eq!(
+        v["changes"][0]["old"],
+        serde_json::json!([{ "at": 1, "clip": "k3", "bars": 4, "offset": 0 }])
+    );
+    assert_eq!(v["changes"][0]["new"], "k3");
+    let text = fs::read_to_string(&song).unwrap();
+    assert!(
+        text.contains("{ at = 3, clip = \"k3\", bars = 2 }"),
+        "{text}"
+    );
+    let log = fs::read_to_string(dir.path().join("edits.jsonl")).unwrap();
+    let last: Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+    assert_eq!(
+        (&last["source"], &last["path"]),
+        (&"claude".into(), &"sections[1].play.k".into())
+    );
+    assert_eq!(last["file_hash"], text_hash(&text));
+}
+
+/// Resizing a late section of a long song splits a placement that runs
+/// into it far into its clip; the split's offset is still valid.
+#[test]
+fn set_bars_splits_a_long_placement() {
+    let dir = tempfile::tempdir().unwrap();
+    let song = dir.path().join("song.toml");
+    fs::write(
+        &song,
+        "[song]\nversion = 2\nname = \"long\"\nbpm = 200\nseed = 1\n\n\
+         [tracks.k]\ninstrument = \"kick\"\nplay = [{ at = 1, clip = \"k4\", bars = 1210 }]\n\n\
+         [clips.k4]\nkind = \"drum\"\nsteps = \"x...x...x...x...\"\n\n\
+         [[sections]]\nname = \"a\"\nbars = 1000\n\n[[sections]]\nname = \"b\"\nbars = 200\n\n\
+         [[sections]]\nname = \"c\"\nbars = 10\n",
+    )
+    .unwrap();
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "sections[2].bars=8",
+        "--json",
+    ]));
+    assert_eq!(v["changes"][0]["path"], "sections[2].bars");
+    let text = fs::read_to_string(&song).unwrap();
+    assert!(
+        text.contains("{ at = 1201, clip = \"k4\", bars = 8, offset = 1200 }"),
+        "{text}"
+    );
+}
+
+#[test]
+fn set_on_v1_migrates_and_says_so() {
+    let (dir, song) = fixture_of("commented-v1.toml");
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "tracks.acid.acid303.cutoff=820",
+        "--json",
+    ]));
+    assert_eq!(v["migrated_from"], 1);
+    assert_eq!(v["changes"][0]["path"], "song.version");
+    assert_eq!(
+        (&v["changes"][0]["old"], &v["changes"][0]["new"]),
+        (&1.into(), &2.into())
+    );
+    assert_eq!(v["changes"][1]["path"], "tracks.acid.acid303.cutoff");
+    let text = fs::read_to_string(&song).unwrap();
+    let parsed = tune_song::parse(&text).expect("the file parses");
+    assert_eq!(parsed.version, 2);
+    assert!(text.contains("# the filter opens over the section\n[[automation]]"));
+    let log = fs::read_to_string(dir.path().join("edits.jsonl")).unwrap();
+    let first: Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
+    assert_eq!(
+        (&first["source"], &first["path"]),
+        (&"claude".into(), &"song.version".into())
+    );
+
+    // Text mode says it too.
+    let (_d, song) = fixture_of("commented-v1.toml");
+    let out = tune()
+        .args([
+            "set",
+            song.to_str().unwrap(),
+            "tracks.acid.acid303.cutoff=820",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "migrated the file from version 1 to 2\nset tracks.acid.acid303.cutoff 500 -> 820"
+    );
+}
+
+#[test]
+fn set_noop_on_v1_writes_nothing() {
+    let (dir, song) = fixture_of("commented-v1.toml");
+    let before = fs::read(&song).unwrap();
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "tracks.acid.acid303.cutoff=500",
+        "--json",
+    ]));
+    assert_eq!(v["changes"], serde_json::json!([]));
+    assert!(v.get("migrated_from").is_none(), "{v}");
+    assert_eq!(
+        v["file_hash"],
+        text_hash(&String::from_utf8(before.clone()).unwrap())
+    );
+    assert_eq!(fs::read(&song).unwrap(), before, "the file stays v1");
+    assert!(!dir.path().join("edits.jsonl").exists());
 }
 
 #[test]
@@ -203,7 +346,8 @@ fn changes_missing_log() {
 
 fn mixed_copy() -> (TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/mixed.toml");
+    let src =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/v2/mixed.toml");
     let song = dir.path().join("song.toml");
     fs::copy(src, &song).unwrap();
     (dir, song)
@@ -244,4 +388,56 @@ fn set_mix_errors() {
     assert_eq!(out.status.code(), Some(2));
     let e = String::from_utf8_lossy(&out.stderr);
     assert!(e.contains("unknown master mode"), "{e}");
+}
+
+#[test]
+fn set_clip_notes_from_the_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let song = dir.path().join("song.toml");
+    fs::write(
+        &song,
+        r#"[song]
+version = 2
+name = "notes"
+bpm = 120
+
+[tracks.acid]
+instrument = "acid303"
+play = [{ at = 1, clip = "lead", bars = 1 }]
+
+[clips.lead]
+kind = "notes"
+bars = 1
+notes = [
+  { start = 0, pitch = "C3", len = 3 },
+  { start = 2.5, pitch = "D#3", len = 2, vel = 120 },
+]
+
+[[sections]]
+name = "a"
+bars = 1
+"#,
+    )
+    .unwrap();
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "clips.lead.notes=[{ start = 0, pitch = \"C3\", len = 2 }]",
+        "--json",
+    ]));
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["changes"][0]["path"], "clips.lead.notes");
+    let text = fs::read_to_string(&song).unwrap();
+    assert!(
+        text.contains("notes = [{ start = 0, pitch = \"C3\", len = 2 }]"),
+        "{text}"
+    );
+    let v = json_out(tune().args(["changes", song.to_str().unwrap(), "--json"]));
+    let entries = v["changes"].as_array().unwrap();
+    assert!(
+        entries
+            .iter()
+            .any(|e| e["path"] == "clips.lead.notes" && e["source"] == "claude"),
+        "{v}"
+    );
 }

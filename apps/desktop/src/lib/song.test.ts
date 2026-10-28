@@ -62,7 +62,6 @@ describe("patternGlyph", () => {
       patternGlyph({
         kind: "drum",
         id: "k",
-        track: "kick",
         hits: hits as ("rest" | "hit" | "accent")[],
       }),
     ).toEqual([0.6, 0, 0, 0, 1, 0, 0, 0]);
@@ -76,20 +75,52 @@ describe("patternGlyph", () => {
       patternGlyph({
         kind: "acid",
         id: "a",
-        track: "acid",
         steps: [c2, rest, { ...c2, accent: true }, rest],
       }),
     ).toEqual([0.6, 0, 1, 0]);
+  });
+
+  it("a note clip's glyph marks its note starts", () => {
+    const glyph = patternGlyph({
+      kind: "notes",
+      id: "lead",
+      bars: 1,
+      notes: [
+        { start: 0, pitch: 48, len: 3, vel: 100 },
+        { start: 2.5, pitch: 51, len: 2, vel: 120 },
+        { start: 15.9, pitch: 48, len: 0.1, vel: 100 },
+      ],
+    });
+    expect(glyph).toHaveLength(16);
+    expect(glyph.map((v, i) => [i, v]).filter(([, v]) => v !== 0)).toEqual([
+      [0, 0.6],
+      [2, 1],
+      [15, 0.6],
+    ]);
+  });
+
+  it("keeps the larger value where two notes start in one step", () => {
+    const glyph = patternGlyph({
+      kind: "notes",
+      id: "lead",
+      bars: 2,
+      notes: [
+        { start: 4, pitch: 48, len: 1, vel: 127 },
+        { start: 4.5, pitch: 55, len: 1, vel: 100 },
+      ],
+    });
+    expect(glyph).toHaveLength(32);
+    expect(glyph[4]).toBe(1);
   });
 });
 
 describe("highlightedSteps", () => {
   it("keeps who changed each step of the pattern", () => {
     const h = new Map([
-      ["patterns.a1.steps[2]", "claude" as const],
-      ["patterns.a1.steps[5]", "external" as const],
-      ["patterns.a10.steps[1]", "claude" as const],
-      ["patterns.a1.length", "external" as const],
+      ["clips.a1.steps[2]", "claude" as const],
+      ["clips.a1.steps[5]", "external" as const],
+      ["clips.a10.steps[1]", "claude" as const],
+      ["clips.a1.length", "external" as const],
     ]);
     expect(highlightedSteps(h, "a1")).toEqual(
       new Map([

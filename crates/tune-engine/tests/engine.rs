@@ -5,7 +5,8 @@ use common::{
 };
 use tune_dsp::DIST_PARAMS;
 use tune_dsp::acid303::ACID303_PARAMS;
-use tune_engine::{CLIP_KNEE, Cell, Engine, ParamTarget};
+use tune_engine::{CLIP_KNEE, Engine, EventCtx, NoteEvent, NoteId, ParamTarget};
+use tune_modules::DRUM_PITCH;
 
 /// One bar at 120 BPM and 48 kHz.
 const BAR: u64 = 96_000;
@@ -31,21 +32,49 @@ play = { p = "x" }
     assert_eq!(s.end_sample(), 5_084_690);
     let (mut engine, log) = probe_engine(&s, "p");
     run(&mut engine, s.end_sample());
-    let steps = log.lock().unwrap().steps();
-    assert_eq!(steps.len(), 1024);
-    for (k, (sample, cell, ctx)) in steps.iter().enumerate() {
+    let log = log.lock().unwrap();
+    let (ons, offs) = (log.ons(), log.offs());
+    assert_eq!(ons.len(), 1024);
+    assert_eq!(offs.len(), 1024);
+    let gate = u64::try_from(s.clock.gate_samples()).unwrap();
+    for (k, ((sample, event, ctx), (off_at, off, _))) in ons.iter().zip(&offs).enumerate() {
         let k = k as u64;
         assert_eq!(*sample, s.clock.step_start(k), "step {k}");
         assert_eq!(ctx.step, k);
-        assert_eq!(*cell, Cell::Hit { accent: false });
-        assert_eq!(ctx.gate_samples, s.clock.gate_samples());
+        let id = NoteId(k as u32);
+        assert_eq!(
+            *event,
+            NoteEvent::On {
+                id,
+                pitch: DRUM_PITCH,
+                velocity: 100,
+                accent: false,
+                slide: false
+            }
+        );
+        assert_eq!(*off_at, sample + gate, "step {k}");
+        assert_eq!(
+            *off,
+            NoteEvent::Off {
+                id,
+                pitch: DRUM_PITCH
+            }
+        );
     }
 }
 
-/// Note of the acid cell at `step` in the probe's log.
-fn note_at(steps: &[(u64, Cell, tune_engine::StepCtx)], step: u64) -> Option<u8> {
-    match &steps[step as usize].1 {
-        Cell::Note(s) => s.note,
+/// The On of `step` in a probe's notes.
+fn on_at(notes: &[(u64, NoteEvent, EventCtx)], step: u64) -> Option<(u64, NoteEvent)> {
+    notes
+        .iter()
+        .find(|(_, e, ctx)| ctx.step == step && matches!(e, NoteEvent::On { .. }))
+        .map(|&(sample, e, _)| (sample, e))
+}
+
+/// Pitch of the acid note at `step` in the probe's log.
+fn note_at(notes: &[(u64, NoteEvent, EventCtx)], step: u64) -> Option<u8> {
+    match on_at(notes, step)?.1 {
+        NoteEvent::On { pitch, .. } => Some(pitch),
         _ => None,
     }
 }
@@ -75,7 +104,7 @@ play = { acid = "p13" }
     );
     let (mut engine, log) = probe_engine(&s, "acid");
     run(&mut engine, s.end_sample());
-    let steps = log.lock().unwrap().steps();
+    let steps = log.lock().unwrap().ons();
     assert_eq!(steps.len(), 32);
     for k in [0, 13, 16] {
         assert_eq!(note_at(&steps, k), Some(36), "step {k}");
@@ -115,14 +144,16 @@ bars = 1
     )
 }
 
+/// Whether step 15's On (a `C2~`) slides into the next step.
 fn next_has_gate_at_15(second: &str) -> bool {
     let s = compiled(&slide_song(second));
     let (mut engine, log) = probe_engine(&s, "acid");
     run(&mut engine, s.end_sample());
-    let steps = log.lock().unwrap().steps();
-    let (_, cell, ctx) = &steps[15];
-    assert!(matches!(cell, Cell::Note(n) if n.slide));
-    ctx.next_has_gate
+    let notes = log.lock().unwrap().notes();
+    match on_at(&notes, 15) {
+        Some((_, NoteEvent::On { slide, .. })) => slide,
+        other => panic!("step 15 holds no note: {other:?}"),
+    }
 }
 
 #[test]
@@ -138,9 +169,48 @@ fn slide_on_last_step_of_song_sees_no_gate() {
     let s = compiled(&slide_song(r#"play = { acid = "last_slide" }"#));
     let (mut engine, log) = probe_engine(&s, "acid");
     run(&mut engine, s.end_sample() + 10);
-    let steps = log.lock().unwrap().steps();
-    assert_eq!(steps.len(), 32);
-    assert!(!steps[31].2.next_has_gate);
+    let notes = log.lock().unwrap().notes();
+    // Steps 0 and 15 of each bar hold a note.
+    assert_eq!(log.lock().unwrap().ons().len(), 4);
+    assert!(matches!(
+        on_at(&notes, 31),
+        Some((_, NoteEvent::On { slide: false, .. }))
+    ));
+}
+
+#[test]
+fn step_notes_end_after_the_gate() {
+    let s = compiled(&slide_song(r#"play = { acid = "note_first" }"#));
+    let (mut engine, log) = probe_engine(&s, "acid");
+    run(&mut engine, s.end_sample());
+    let notes = log.lock().unwrap().notes();
+    let gate = u64::try_from(s.clock.gate_samples()).unwrap();
+    let off_of = |id: u32| {
+        notes
+            .iter()
+            .position(|(_, e, _)| matches!(e, NoteEvent::Off { id: i, .. } if *i == NoteId(id)))
+    };
+    // Step 0's note ends half a step after it starts.
+    let off0 = off_of(0).expect("step 0 ends");
+    assert_eq!(notes[off0].0, s.clock.step_start(0) + gate);
+    assert_eq!(
+        notes[off0].1,
+        NoteEvent::Off {
+            id: NoteId(0),
+            pitch: 36
+        }
+    );
+    // Step 15 (`C2~` into a note) sounds until step 16's On, whose sample
+    // its Off shares, right after it.
+    let on16 = notes
+        .iter()
+        .position(|(_, e, ctx)| ctx.step == 16 && matches!(e, NoteEvent::On { .. }))
+        .expect("step 16 plays");
+    let off15 = off_of(15).expect("step 15 ends");
+    assert_eq!(off15, on16 + 1);
+    assert_eq!(notes[off15].0, s.clock.step_start(16));
+    assert_eq!(notes[off15].0, notes[on16].0);
+    assert_eq!(notes[off15].2.step, 16);
 }
 
 #[test]
@@ -322,7 +392,7 @@ play = { acid = "a" }
         log.events
             .iter()
             .filter(|e| match e {
-                Event::Step { sample: n, .. } | Event::Param { sample: n, .. } => *n == sample,
+                Event::Note { sample: n, .. } | Event::Param { sample: n, .. } => *n == sample,
                 Event::Reset { .. } => false,
             })
             .cloned()
@@ -343,13 +413,25 @@ play = { acid = "a" }
             plain: spec.to_plain(0.25)
         }
     );
-    assert!(matches!(first[n_params + 1], Event::Step { .. }));
+    assert!(matches!(
+        first[n_params + 1],
+        Event::Note {
+            event: NoteEvent::On { .. },
+            ..
+        }
+    ));
 
     // A later step boundary in the section: the lane value, then the step.
     let step1 = at(s.clock.step_start(1));
     assert_eq!(step1.len(), 2);
     assert!(matches!(step1[0], Event::Param { index: 2, .. }));
-    assert!(matches!(step1[1], Event::Step { .. }));
+    assert!(matches!(
+        step1[1],
+        Event::Note {
+            event: NoteEvent::On { .. },
+            ..
+        }
+    ));
 
     // The next section (no lane): static params, then the step.
     let b = at(BAR);
@@ -362,7 +444,13 @@ play = { acid = "a" }
             plain: ACID303_PARAMS[2].default
         }
     );
-    assert!(matches!(b[n_params], Event::Step { .. }));
+    assert!(matches!(
+        b[n_params],
+        Event::Note {
+            event: NoteEvent::On { .. },
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -391,7 +479,7 @@ param = "acid.acid303.cutoff"
 points = [[0, 0.5]]
 "#,
     );
-    let lanes = &s.sections[0].lanes;
+    let lanes = &s.regions[0].lanes;
     assert_eq!(lanes[0].track, 0);
     assert_eq!(lanes[0].target, ParamTarget::Fx { slot: 0, index: 0 });
     assert_eq!(lanes[0].spec.id, "dist.drive");
@@ -439,10 +527,7 @@ fn mute_and_solo() {
 
     let mut removed = base.clone();
     removed.tracks.shift_remove("kick");
-    removed.patterns.shift_remove("k4");
-    for section in &mut removed.sections {
-        section.play.shift_remove("kick");
-    }
+    removed.clips.shift_remove("k4");
     let s = compile_song(&removed);
     assert_eq!(s.track_index("kick"), None);
     let reference = run(&mut Engine::new(s), frames);
@@ -482,9 +567,12 @@ fn loop_wraps_without_reset() {
     let log = log.lock().unwrap();
     assert!(!log.events.iter().any(|e| matches!(e, Event::Reset { .. })));
     // Step 0 fires again at the wrap.
-    let steps = log.steps();
-    assert_eq!(steps[16].0, BAR);
-    assert_eq!(steps[16].2.step, 0);
+    let ons = log.ons();
+    let wrap = ons
+        .iter()
+        .find(|(sample, ..)| *sample == BAR)
+        .expect("a hit at the wrap");
+    assert_eq!(wrap.2.step, 0);
 }
 
 #[test]
@@ -598,8 +686,36 @@ play = { acid = "p" }
     let (mut e, log) = probe_engine(&rest, "acid");
     e.set_loop(Some(0..1));
     run(&mut e, 2 * BAR);
-    let steps = log.lock().unwrap().steps();
-    assert_eq!(steps[31].2.step, 15);
-    assert!(!steps[31].2.next_has_gate);
-    assert!(!steps[15].2.next_has_gate);
+    let ons = log.lock().unwrap().ons();
+    assert_eq!(ons.len(), 2);
+    for (n, (sample, on, ctx)) in ons.iter().enumerate() {
+        assert_eq!(*sample, n as u64 * BAR + rest.clock.step_start(15));
+        assert_eq!(ctx.step, 15);
+        assert!(matches!(on, NoteEvent::On { slide: false, .. }));
+    }
+}
+
+/// The distortion's `mode` setting reaches the voice: the same hot acid
+/// through `soft` and through `hard` sounds different, so a setting dropped
+/// between the song and the factory fails here.
+#[test]
+fn distortion_mode_reaches_the_voice() {
+    let mode = |m: &'static str| {
+        let mut s = song(MINI);
+        let acid = s.tracks.get_mut("acid").unwrap();
+        acid.fx[0].settings[0] = m;
+        acid.fx[0].params.insert("drive".into(), 36.0);
+        compile_song(&s)
+    };
+    let (soft, hard) = (mode("soft"), mode("hard"));
+    assert_eq!(hard.tracks[1].fx[0].settings, ["hard"]);
+    // Section `b` (bars 2 and 3) plays the acid.
+    let acid_bars = |s| {
+        let mut e = Engine::new(s);
+        e.seek(2);
+        run_stems(&mut e, BAR).1.swap_remove(1)
+    };
+    let (a, b) = (acid_bars(soft), acid_bars(hard));
+    assert!(rms(&a) > 0.01, "the acid plays");
+    assert!(a != b, "soft and hard clip the same hot input differently");
 }

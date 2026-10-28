@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use tune_dsp::DistortionMode;
 use tune_dsp::acid303::AcidPattern;
 use tune_dsp::drums::DrumPattern;
+use tune_modules::{ACID303, EQ, HAT_CLOSED, KICK, RIDE};
 use tune_song::{
-    FxSpec, InstrumentKind, LoadError, MasterMode, Mix, MixUnit, PatternSteps, Song, SongError,
-    load_song, parse_song,
+    Clip, ClipKind, Device, Lane, LoadError, MasterMode, Mix, MixUnit, Placement, Registry,
+    SectionPlay, Song, SongError, lane_value, load_song, parse_song, parse_with,
 };
 
 const MINI: &str = include_str!("fixtures/mini.toml");
@@ -45,106 +45,195 @@ fn parses_mini() {
     assert_eq!(ids, ["kick", "acid", "hat"]);
 
     let kick = &song.tracks["kick"];
-    assert_eq!(kick.instrument, InstrumentKind::Kick);
+    assert_eq!(kick.instrument, Device::new("kick", &KICK));
     assert_eq!(kick.gain_db, -3.0);
     assert_eq!(kick.pan, 0.0);
     assert!(!kick.mute && !kick.solo);
-    assert!(kick.params.is_empty());
+    assert!(kick.strip.is_empty());
     assert!(kick.fx.is_empty());
 
     let acid = &song.tracks["acid"];
-    assert_eq!(acid.instrument, InstrumentKind::Acid303);
+    assert_eq!(acid.instrument.module, &ACID303);
     assert_eq!(acid.gain_db, 0.0);
-    let params: Vec<(&str, f64)> = acid.params.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+    let params: Vec<(&str, f64)> = acid
+        .instrument
+        .params
+        .iter()
+        .map(|(k, v)| (k.as_str(), *v))
+        .collect();
     assert_eq!(
         params,
         [
-            ("acid303.cutoff", 500.0),
-            ("acid303.resonance", 70.0),
-            ("acid303.env_mod", 50.0),
-            ("acid303.decay", 400.0),
-            ("acid303.accent", 55.0),
+            ("cutoff", 500.0),
+            ("resonance", 70.0),
+            ("env_mod", 50.0),
+            ("decay", 400.0),
+            ("accent", 55.0),
         ]
     );
+    assert!(acid.strip.is_empty());
     assert_eq!(acid.fx.len(), 1);
-    let FxSpec::Distortion { mode, params } = &acid.fx[0] else {
-        panic!("expected distortion")
-    };
-    assert_eq!(*mode, DistortionMode::Soft);
-    assert_eq!(params.get("dist.drive"), Some(&12.0));
-    assert_eq!(params.len(), 1);
-    assert_eq!(acid.fx[0].type_name(), "distortion");
+    let dist = &acid.fx[0];
+    assert_eq!(dist.module.name, "distortion");
+    assert_eq!(dist.setting("mode"), Some("soft"));
+    assert_eq!(dist.params.get("drive"), Some(&12.0));
+    assert_eq!(dist.params.len(), 1);
+    assert_eq!(dist.param_id("drive"), "dist.drive");
 
     let hat = &song.tracks["hat"];
-    assert_eq!(hat.instrument, InstrumentKind::HatClosed);
+    assert_eq!(hat.instrument.module, &HAT_CLOSED);
     assert_eq!(hat.gain_db, -10.0);
     assert_eq!(hat.pan, 0.3);
 
-    let pids: Vec<&str> = song.patterns.keys().map(String::as_str).collect();
+    let pids: Vec<&str> = song.clips.keys().map(String::as_str).collect();
     assert_eq!(pids, ["k4", "a1", "h"]);
-    assert_eq!(song.patterns["k4"].track, "kick");
     assert_eq!(
-        song.patterns["k4"].steps,
-        PatternSteps::Drum(DrumPattern::parse("x...x...x...X...").unwrap())
-    );
-    assert_eq!(song.patterns["a1"].track, "acid");
-    assert_eq!(
-        song.patterns["a1"].steps,
-        PatternSteps::Acid(AcidPattern::parse("C2 C2! C3~ C2 . D#2 C2~ G2!").unwrap())
+        song.clips["k4"],
+        Clip::Drum(DrumPattern::parse("x...x...x...X...").unwrap())
     );
     assert_eq!(
-        song.patterns["h"].steps,
-        PatternSteps::Drum(DrumPattern::parse("..x...x...x...x.").unwrap())
+        song.clips["a1"],
+        Clip::Acid(AcidPattern::parse("C2 C2! C3~ C2 . D#2 C2~ G2!").unwrap())
+    );
+    assert_eq!(
+        song.clips["h"],
+        Clip::Drum(DrumPattern::parse("..x...x...x...x.").unwrap())
     );
 
-    assert_eq!(song.sections.len(), 2);
-    let a = &song.sections[0];
-    assert_eq!((a.name.as_str(), a.bars), ("a", 2));
-    let play: Vec<(&str, &str)> = a
-        .play
+    let sections: Vec<(&str, u32)> = song
+        .sections
         .iter()
-        .map(|(t, p)| (t.as_str(), p.as_str()))
+        .map(|s| (s.name.as_str(), s.bars))
         .collect();
-    assert_eq!(play, [("kick", "k4"), ("hat", "h")]);
-    assert!(a.automation.is_empty());
-
-    let b = &song.sections[1];
-    assert_eq!((b.name.as_str(), b.bars), ("b", 2));
-    let play: Vec<(&str, &str)> = b
-        .play
-        .iter()
-        .map(|(t, p)| (t.as_str(), p.as_str()))
-        .collect();
-    assert_eq!(play, [("kick", "k4"), ("acid", "a1"), ("hat", "h")]);
-    assert_eq!(b.automation.len(), 1);
-    let lane = &b.automation[0];
-    assert_eq!(lane.track, "acid");
-    assert_eq!(lane.param, "acid303.cutoff");
-    assert_eq!(lane.points, [(0.0, 0.1), (2.0, 0.8)]);
+    assert_eq!(sections, [("a", 2), ("b", 2)]);
+    assert_eq!(song.section_play(0, "acid"), SectionPlay::Silent);
+    assert_eq!(song.section_play(1, "acid"), SectionPlay::Clip("a1"));
+    assert_eq!(song.section_play(0, "kick"), SectionPlay::Clip("k4"));
+    assert!(song.lanes_in(0).is_empty());
+    let lanes = song.lanes_in(1);
+    assert_eq!(lanes.len(), 1);
+    assert_eq!(lanes[0].track, "acid");
+    assert_eq!(lanes[0].param, "acid303.cutoff");
+    assert_eq!(lanes[0].points, [(0.0, 0.1), (2.0, 0.8)]);
 
     assert_eq!(song.total_bars(), 4);
     assert_eq!(song.section_start_bars(), [0, 2]);
 }
 
 #[test]
-fn instrument_kind_names_round_trip() {
-    for kind in [
-        InstrumentKind::Acid303,
-        InstrumentKind::Kick,
-        InstrumentKind::Clap,
-        InstrumentKind::HatClosed,
-        InstrumentKind::HatOpen,
-        InstrumentKind::Ride,
-    ] {
-        assert_eq!(InstrumentKind::from_name(kind.name()), Some(kind));
-        assert_eq!(kind.is_drum(), kind != InstrumentKind::Acid303);
-        assert!(
-            kind.params()
-                .iter()
-                .all(|p| p.id.starts_with(&format!("{}.", kind.name())))
+fn v1_play_becomes_placements_and_lane_stretches() {
+    let song = mini();
+    let p = |start_bar, bars, clip: &str| Placement {
+        start_bar,
+        bars,
+        clip: clip.to_owned(),
+        offset_bars: 0,
+    };
+    assert_eq!(song.tracks["kick"].play, [p(0, 2, "k4"), p(2, 2, "k4")]);
+    assert_eq!(song.tracks["acid"].play, [p(2, 2, "a1")]);
+    assert_eq!(song.tracks["hat"].play, [p(0, 2, "h"), p(2, 2, "h")]);
+    assert_eq!(
+        song.automation,
+        [Lane {
+            track: "acid".into(),
+            param: "acid303.cutoff".into(),
+            start_bar: 2,
+            bars: 2,
+            points: vec![(0.0, 0.1), (2.0, 0.8)],
+        }]
+    );
+}
+
+#[test]
+fn section_play_and_lanes_derive_from_the_arrangement() {
+    let mut song = mini();
+    let acid = song.tracks.get_mut("acid").unwrap();
+    // Bar 3 only (inside section `b`, bars 2..4).
+    acid.play = vec![Placement {
+        start_bar: 2,
+        bars: 1,
+        clip: "a1".into(),
+        offset_bars: 0,
+    }];
+    match song.section_play(1, "acid") {
+        SectionPlay::Other(ps) => assert_eq!(ps, [&song.tracks["acid"].play[0]]),
+        other => panic!("expected Other, got {other:?}"),
+    }
+    assert_eq!(song.section_play(0, "acid"), SectionPlay::Silent);
+    // One placement over the whole song starts the clip in section `a`
+    // only; `b` plays it from mid-clip.
+    song.tracks.get_mut("acid").unwrap().play = vec![Placement {
+        start_bar: 0,
+        bars: 4,
+        clip: "a1".into(),
+        offset_bars: 0,
+    }];
+    assert_eq!(song.section_play(0, "acid"), SectionPlay::Clip("a1"));
+    match song.section_play(1, "acid") {
+        SectionPlay::Other(ps) => assert_eq!(ps, [&song.tracks["acid"].play[0]]),
+        other => panic!("expected Other, got {other:?}"),
+    }
+    assert_eq!(song.section_play(1, "nope"), SectionPlay::Silent);
+    // An offset makes it `Other` in its first section too.
+    song.tracks.get_mut("acid").unwrap().play[0].offset_bars = 1;
+    assert!(matches!(
+        song.section_play(0, "acid"),
+        SectionPlay::Other(_)
+    ));
+    song.tracks.get_mut("acid").unwrap().play[0].offset_bars = 0;
+
+    // A stretch over bars 1..3 overlaps both sections.
+    song.automation[0].start_bar = 1;
+    assert_eq!(song.lanes_in(0).len(), 1);
+    assert_eq!(song.lanes_in(1).len(), 1);
+    song.automation[0].start_bar = 0;
+    assert_eq!(song.lanes_in(0).len(), 1);
+    assert!(song.lanes_in(1).is_empty());
+}
+
+#[test]
+fn lane_value_shapes() {
+    let ramp = [(0.0, 0.0), (1.0, 1.0)];
+    assert_eq!(lane_value(&ramp, 0.0), 0.0);
+    assert_eq!(lane_value(&ramp, 0.5), 0.5);
+    assert_eq!(lane_value(&ramp, 1.0), 1.0);
+    assert_eq!(lane_value(&ramp, 1.7), 1.0);
+    let single = [(0.5, 0.3)];
+    assert_eq!(lane_value(&single, 0.0), 0.3);
+    assert_eq!(lane_value(&single, 0.9), 0.3);
+    let jump = [(1.0, 0.2), (1.0, 0.9), (2.0, 0.5)];
+    assert_eq!(lane_value(&jump, 0.99), 0.2);
+    assert_eq!(lane_value(&jump, 1.0), 0.9);
+    assert!((lane_value(&jump, 1.5) - 0.7).abs() < 1e-15);
+    assert_eq!(lane_value(&jump, 3.0), 0.5);
+}
+
+#[test]
+fn instruments_come_from_the_registry() {
+    let registry = Registry::builtin();
+    for module in registry.instruments() {
+        assert_eq!(module.plays(ClipKind::Drum), module.name != "acid303");
+        let src = swap(
+            "instrument = \"hat_closed\"",
+            &format!("instrument = \"{}\"", module.name),
+        )
+        .replacen(
+            "\"..x...x...x...x.\"",
+            if module.plays(ClipKind::Drum) {
+                "\"..x...x...x...x.\""
+            } else {
+                "\"C2\""
+            },
+            1,
+        );
+        let song = parse_with(&src, registry)
+            .map(|p| p.song)
+            .unwrap_or_else(|e| panic!("{}", messages(&e)));
+        assert_eq!(
+            song.tracks["hat"].instrument,
+            Device::new(module.name, module)
         );
     }
-    assert_eq!(InstrumentKind::from_name("tuba"), None);
 }
 
 #[test]
@@ -162,7 +251,7 @@ fn lane_on_fx_param_resolves() {
         "param = \"acid.dist.drive\"",
     );
     let song = parse_song(&src).unwrap();
-    assert_eq!(song.sections[1].automation[0].param, "dist.drive");
+    assert_eq!(song.automation[0].param, "dist.drive");
 }
 
 /// Review Focus 5: many mistakes in one file (an unknown key typo, an error
@@ -378,10 +467,8 @@ fn ride_track_parses() {
         .replacen("play = { kick = \"k4\", hat = \"h\" }", "play = { kick = \"k4\", hat = \"h\", ride = \"r\" }", 1);
     let song = parse_song(&src).unwrap_or_else(|e| panic!("{e:?}"));
     let ride = &song.tracks["ride"];
-    assert_eq!(ride.instrument, InstrumentKind::Ride);
-    assert_eq!(ride.params["ride.decay"], 2000.0);
-    assert_eq!(InstrumentKind::ALL.len(), 6);
-    assert_eq!(InstrumentKind::ALL[5], InstrumentKind::Ride);
+    assert_eq!(ride.instrument.module, &RIDE);
+    assert_eq!(ride.instrument.params["decay"], 2000.0);
 
     let bad = src.replacen("\"ride.decay\" = 2000", "\"ride.nope\" = 1", 1);
     let errors = parse_song(&bad).unwrap_err();
@@ -421,21 +508,23 @@ fn mixed_fixture_parses() {
     );
 
     let acid = &song.tracks["acid"];
-    assert_eq!(acid.params["send.delay"], -12.0);
-    assert_eq!(acid.params["send.reverb"], -18.0);
-    assert_eq!(acid.params["duck.depth"], 6.0);
-    assert_eq!(acid.params["acid303.cutoff"], 500.0);
-    let types: Vec<&str> = acid.fx.iter().map(FxSpec::type_name).collect();
+    assert_eq!(acid.strip["send.delay"], -12.0);
+    assert_eq!(acid.strip["send.reverb"], -18.0);
+    assert_eq!(acid.strip["duck.depth"], 6.0);
+    assert_eq!(acid.instrument.params["cutoff"], 500.0);
+    let types: Vec<&str> = acid.fx.iter().map(|d| d.module.name).collect();
     assert_eq!(types, ["distortion", "eq"]);
-    let FxSpec::Eq { params } = &acid.fx[1] else {
-        panic!("expected eq")
-    };
-    assert_eq!(params.get("eq.low_cut"), Some(&85.0));
-    assert_eq!(params.len(), 1);
-    assert_eq!(song.tracks["hat"].params["send.reverb"], -20.0);
-    assert_eq!(song.tracks["ride"].instrument, InstrumentKind::Ride);
+    let eq = &acid.fx[1];
+    assert_eq!(eq.params.get("low_cut"), Some(&85.0));
+    assert_eq!(eq.params.len(), 1);
+    assert!(eq.settings.is_empty());
+    assert_eq!(acid.device("eq"), Some(eq));
+    assert_eq!(acid.device("acid303"), Some(&acid.instrument));
+    assert_eq!(acid.device("nope"), None);
+    assert_eq!(song.tracks["hat"].strip["send.reverb"], -20.0);
+    assert_eq!(song.tracks["ride"].instrument.module, &RIDE);
 
-    let lanes: Vec<(&str, &str)> = song.sections[1]
+    let lanes: Vec<(&str, &str)> = song
         .automation
         .iter()
         .map(|l| (l.track.as_str(), l.param.as_str()))
@@ -493,8 +582,8 @@ fn lane_only_send_is_active() {
         "param = \"acid.send.delay\"",
     );
     let song = must_parse(&src);
-    assert!(!song.tracks["acid"].params.contains_key("send.delay"));
-    assert_eq!(song.sections[1].automation[0].param, "send.delay");
+    assert!(!song.tracks["acid"].strip.contains_key("send.delay"));
+    assert_eq!(song.automation[0].param, "send.delay");
     assert!(song.bus_active(MixUnit::Delay));
     assert!(!song.bus_active(MixUnit::Reverb));
 }
@@ -558,8 +647,8 @@ play = { acid = "a1" }
 param = "mix.delay.fedback"
 points = [[0, 0.1]]
 "#;
-    let acid_known: Vec<&str> = InstrumentKind::Acid303
-        .params()
+    let acid_known: Vec<&str> = ACID303
+        .params
         .iter()
         .chain(tune_dsp::STRIP_PARAMS)
         .map(|s| s.id)
@@ -704,13 +793,8 @@ fn second_eq_is_rejected() {
         1,
     );
     let song = must_parse(&lane);
-    assert_eq!(
-        song.tracks["acid"].fx,
-        [FxSpec::Eq {
-            params: Default::default()
-        }]
-    );
-    assert_eq!(song.sections[1].automation[0].param, "eq.mid_gain");
+    assert_eq!(song.tracks["acid"].fx, [Device::new("eq", &EQ)]);
+    assert_eq!(song.automation[0].param, "eq.mid_gain");
 }
 
 /// Review Focus 3: a lane on the duck source's own `duck.depth` would make
@@ -766,4 +850,100 @@ fn invalid_duck_source_drives_no_self_duck() {
         1,
     );
     assert_eq!(positioned(&lane), expected);
+}
+
+#[test]
+fn tracks_have_devices_with_default_ids() {
+    let song = mini();
+    let acid = &song.tracks["acid"];
+    assert_eq!(acid.instrument.id, "acid303");
+    assert_eq!(acid.instrument.module.name, "acid303");
+    let ids: Vec<&str> = acid.fx.iter().map(|d| d.id.as_str()).collect();
+    assert_eq!(ids, ["dist"]);
+    assert_eq!(acid.fx[0].settings, ["soft"]);
+    assert_eq!(
+        acid.fx[0].params,
+        indexmap::indexmap! {"drive".to_owned() => 12.0}
+    );
+    assert_eq!(acid.instrument.params["cutoff"], 500.0);
+
+    let song = must_parse(MIXED);
+    let acid = &song.tracks["acid"];
+    let ids: Vec<&str> = acid.fx.iter().map(|d| d.id.as_str()).collect();
+    assert_eq!(ids, ["dist", "eq"]);
+    let strip: Vec<(&str, f64)> = acid.strip.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+    assert_eq!(
+        strip,
+        [
+            ("send.delay", -12.0),
+            ("send.reverb", -18.0),
+            ("duck.depth", 6.0)
+        ]
+    );
+}
+
+#[test]
+fn next_device_id_numbers_repeats() {
+    let song = must_parse(MIXED);
+    let mut acid = song.tracks["acid"].clone();
+    assert_eq!(acid.next_device_id(&EQ), "eq2");
+    acid.fx.push(Device::new("eq2", &EQ));
+    assert_eq!(acid.next_device_id(&EQ), "eq3");
+    assert_eq!(mini().tracks["acid"].next_device_id(&EQ), "eq");
+}
+
+/// v1 instruments, fx types and settings are checked against the registry,
+/// with the messages v1 always had.
+#[test]
+fn device_rules_name_what_is_allowed() {
+    const DIST: &str =
+        "fx = [{ type = \"distortion\", mode = \"soft\", params = { \"dist.drive\" = 12 } }]";
+    let rows = [
+        (
+            swap("instrument = \"kick\"", "instrument = \"eq\""),
+            "unknown instrument `eq` (expected one of acid303, kick, clap, hat_closed, hat_open, ride)",
+        ),
+        (
+            swap(DIST, "fx = [{ type = \"chorus\" }]"),
+            "unknown fx type `chorus` (expected one of distortion, eq)",
+        ),
+        (
+            swap(DIST, "fx = [{ type = \"distortion\", mode = \"fuzz\" }]"),
+            "unknown distortion mode `fuzz` (expected soft, hard or overdrive)",
+        ),
+        (
+            swap(DIST, "fx = [{ type = \"distortion\", depth = 1 }]"),
+            "unknown field `depth` in fx 1 of [tracks.acid], expected one of `type`, `mode`, `params`",
+        ),
+        (
+            swap(
+                DIST,
+                "fx = [{ type = \"distortion\", params = { \"eq.low_cut\" = 85 } }]",
+            ),
+            "unknown parameter `eq.low_cut` for distortion (known: dist.drive, dist.mix, dist.output)",
+        ),
+    ];
+    for (src, expected) in &rows {
+        let errors = parse_song(src).expect_err(expected);
+        let got: Vec<&str> = errors.iter().map(|e| e.message.as_str()).collect();
+        assert_eq!(got, [*expected]);
+    }
+    let hard = must_parse(&swap(
+        DIST,
+        "fx = [{ type = \"distortion\", mode = \"hard\" }]",
+    ));
+    assert_eq!(hard.tracks["acid"].fx[0].settings, ["hard"]);
+}
+
+#[test]
+fn patterns_become_clips_with_kinds() {
+    let song = mini();
+    let ids: Vec<&str> = song.clips.keys().map(String::as_str).collect();
+    assert_eq!(ids, ["k4", "a1", "h"]);
+    let kinds: Vec<ClipKind> = song.clips.values().map(Clip::kind).collect();
+    assert_eq!(kinds, [ClipKind::Drum, ClipKind::Acid, ClipKind::Drum]);
+    assert_eq!(
+        song.clips["k4"].steps_text().as_deref(),
+        Some("x... x... x... X...")
+    );
 }

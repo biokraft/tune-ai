@@ -72,7 +72,7 @@ describe("ChangeNotice", () => {
         changes: [
           { path: "sections[1].bars", old: 2, new: 4 },
           { path: "tracks.hat.pan", old: 0.3, new: 0.4 },
-          { path: "patterns.k4.steps", old: "x... x...", new: "x... X..." },
+          { path: "clips.k4.steps", old: "x... x...", new: "x... X..." },
           { path: "song.bpm", old: 120, new: 125 },
         ],
       }),

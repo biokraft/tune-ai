@@ -15,6 +15,8 @@ export {
   PX_PER_BAR,
   rulerStep,
   snapBars,
+  type LaneView,
+  type PlacementView,
   type SectionView,
 } from "./lib/arrange";
 export {

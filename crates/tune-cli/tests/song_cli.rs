@@ -1,5 +1,5 @@
 use assert_cmd::Command;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 fn tune() -> Command {
@@ -132,11 +132,58 @@ fn info_text_has_rows() {
 }
 
 #[test]
+fn info_v2_shows_placement_offsets() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.toml");
+    std::fs::write(
+        &path,
+        r#"[song]
+version = 2
+name = "v2"
+bpm = 120
+
+[tracks.acid]
+instrument = "acid303"
+play = [{ at = 2, clip = "a1", bars = 1, offset = 1 }]
+
+[clips.a1]
+kind = "acid"
+steps = "C2 C3"
+
+[[sections]]
+name = "a"
+bars = 2
+"#,
+    )
+    .unwrap();
+    let out = tune().arg("info").arg(&path).assert().success();
+    let s = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(s.contains("play: acid=a1@2+1(offset=1)"), "{s}");
+    let out = tune()
+        .arg("info")
+        .arg(&path)
+        .arg("--json")
+        .assert()
+        .success();
+    let v = json_of(&out.get_output().stdout);
+    assert_eq!(
+        v["sections"][0]["play"]["acid"],
+        json!([{ "at": 2, "clip": "a1", "bars": 1, "offset": 1 }])
+    );
+}
+
+#[test]
 fn params_json_lists_tables() {
     let out = tune().args(["params", "--json"]).assert().success();
     let v = json_of(&out.get_output().stdout);
     assert_eq!(v["instruments"]["kick"][0]["id"], "kick.tune");
+    assert_eq!(v["plays"]["kick"], json!(["drum", "notes"]));
+    assert_eq!(v["plays"]["acid303"], json!(["acid", "notes"]));
     assert!(!v["effects"]["distortion"].as_array().unwrap().is_empty());
+    assert_eq!(
+        v["settings"]["distortion"][0]["values"],
+        json!(["soft", "hard", "overdrive"])
+    );
     for group in ["instruments", "effects"] {
         for (_, list) in v[group].as_object().unwrap() {
             for p in list.as_array().unwrap() {
@@ -425,6 +472,8 @@ fn limit_mode_does_not_print_clipper_lines() {
     assert!(!err.contains("clipper"), "{err}");
 }
 
+/// Render stdout and stderr, minus the v1 song's migration note (the
+/// limiter and clipper messages are what these tests look at).
 fn render_text(src: &Path) -> (String, String) {
     let dir = tempfile::tempdir().unwrap();
     let a = tune()
@@ -435,10 +484,13 @@ fn render_text(src: &Path) -> (String, String) {
         .assert()
         .success();
     let o = a.get_output();
-    (
-        String::from_utf8(o.stdout.clone()).unwrap(),
-        String::from_utf8(o.stderr.clone()).unwrap(),
-    )
+    let err = String::from_utf8(o.stderr.clone()).unwrap();
+    let err: String = err
+        .lines()
+        .filter(|l| !l.contains("tune migrate"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    (String::from_utf8(o.stdout.clone()).unwrap(), err)
 }
 
 fn mixed_with_gain(db: &str) -> (tempfile::TempDir, PathBuf) {
@@ -486,4 +538,223 @@ fn limit_text_line_leads_with_reduction() {
     assert!(out.starts_with("rendered bars 1.."), "{out}");
     assert!(out.contains("dBFS, limiter reduced peaks by "), "{out}");
     assert!(!out.contains("pre-clip"), "{out}");
+}
+
+fn v2(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tune-song/tests/fixtures/v2")
+        .join(name)
+}
+
+#[test]
+fn validate_v1_says_it_migrated_in_memory() {
+    let out = tune()
+        .arg("validate")
+        .arg(mini())
+        .arg("--json")
+        .assert()
+        .success();
+    assert_eq!(json_of(&out.get_output().stdout)["migrated_from"], 1);
+    let out = tune().arg("validate").arg(mini()).assert().success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("tune migrate"), "{stderr}");
+}
+
+#[test]
+fn validate_v2_has_no_migration_note() {
+    let out = tune()
+        .arg("validate")
+        .arg(v2("mini.toml"))
+        .arg("--json")
+        .assert()
+        .success();
+    assert!(
+        json_of(&out.get_output().stdout)
+            .get("migrated_from")
+            .is_none()
+    );
+    let out = tune()
+        .arg("validate")
+        .arg(v2("mini.toml"))
+        .assert()
+        .success();
+    assert!(out.get_output().stderr.is_empty());
+}
+
+#[test]
+fn info_lists_devices_and_placements() {
+    let out = tune()
+        .arg("info")
+        .arg(v2("mixed.toml"))
+        .arg("--json")
+        .assert()
+        .success();
+    let v = json_of(&out.get_output().stdout);
+    assert!(v.get("migrated_from").is_none());
+    let acid = v["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "acid")
+        .unwrap();
+    assert_eq!(
+        acid["devices"]["fx"],
+        json!([{"id": "dist", "type": "distortion"}, {"id": "eq", "type": "eq"}])
+    );
+    assert_eq!(
+        acid["devices"]["instrument"],
+        json!({"id": "acid303", "type": "acid303"})
+    );
+    assert_eq!(acid["instrument"], "acid303");
+    assert_eq!(
+        acid["placements"][0],
+        json!({"at": 3, "clip": "a1", "bars": 2, "offset": 0})
+    );
+    assert_eq!(
+        v["sections"][1]["play"],
+        json!({"kick": "k4", "acid": "a1", "hat": "h"})
+    );
+}
+
+#[test]
+fn info_text_shows_a_device_id_that_differs_from_its_module_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = std::fs::read_to_string(v2("mixed.toml")).unwrap().replace(
+        "{ type = \"eq\", params = { \"eq.low_cut\" = 85 } }]",
+        "{ type = \"eq\", params = { \"eq.low_cut\" = 85 } }, { type = \"eq\", id = \"eq2\" }]",
+    );
+    assert!(src.contains("eq2"));
+    let song = dir.path().join("song.toml");
+    std::fs::write(&song, &src).unwrap();
+    let out = tune().arg("info").arg(&song).assert().success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(text.contains("fx: distortion eq eq(eq2)"), "{text}");
+}
+
+#[test]
+fn render_v1_reports_migration() {
+    let dir = tempfile::tempdir().unwrap();
+    let wav = dir.path().join("out.wav");
+    let out = tune()
+        .arg("render")
+        .arg(mini())
+        .arg("--out")
+        .arg(&wav)
+        .arg("--json")
+        .assert()
+        .success();
+    assert_eq!(json_of(&out.get_output().stdout)["migrated_from"], 1);
+    let out = tune()
+        .arg("render")
+        .arg(v2("mini.toml"))
+        .arg("--out")
+        .arg(&wav)
+        .arg("--json")
+        .assert()
+        .success();
+    assert!(
+        json_of(&out.get_output().stdout)
+            .get("migrated_from")
+            .is_none()
+    );
+}
+
+#[test]
+fn a_note_clip_song_validates_and_renders() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.toml");
+    std::fs::write(
+        &path,
+        r#"[song]
+version = 2
+name = "notes"
+bpm = 120
+
+[tracks.kick]
+instrument = "kick"
+play = [{ at = 1, clip = "k4", bars = 2 }]
+
+[tracks.acid]
+instrument = "acid303"
+play = [{ at = 1, clip = "lead", bars = 2 }]
+
+[clips.k4]
+kind = "drum"
+steps = "x...x...x...x..."
+
+[clips.lead]
+kind = "notes"
+bars = 2
+notes = [
+  { start = 0, pitch = "C2", len = 3 },
+  { start = 4, pitch = "C3", len = 2, vel = 120 },
+  { start = 8, pitch = "G2", len = 4 },
+  { start = 16, pitch = "D#2", len = 4 },
+  { start = 24, pitch = "F2", len = 4 },
+]
+
+[clips.stab]
+kind = "notes"
+bars = 1
+notes = [{ start = 0, pitch = "C3", len = 1 }]
+
+[[sections]]
+name = "a"
+bars = 2
+"#,
+    )
+    .unwrap();
+    tune().arg("validate").arg(&path).assert().success();
+
+    let out = tune()
+        .arg("info")
+        .arg(&path)
+        .arg("--json")
+        .assert()
+        .success();
+    let v = json_of(&out.get_output().stdout);
+    assert_eq!(
+        v["clips"],
+        json!([
+            { "id": "k4", "kind": "drum", "steps": 16 },
+            { "id": "lead", "kind": "notes", "steps": 32, "bars": 2, "notes": 5 },
+            { "id": "stab", "kind": "notes", "steps": 16, "bars": 1, "notes": 1 },
+        ])
+    );
+    let out = tune().arg("info").arg(&path).assert().success();
+    let s = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(
+        s.contains("clips: k4 drum 16 steps, lead notes 2 bars 5 notes, stab notes 1 bar 1 note"),
+        "{s}"
+    );
+
+    let stems = dir.path().join("stems");
+    let out = tune()
+        .arg("render")
+        .arg(&path)
+        .args(["--stems", "--json", "--out"])
+        .arg(&stems)
+        .assert()
+        .success();
+    let v = json_of(&out.get_output().stdout);
+    let files = v["files"].as_array().unwrap();
+    let acid = files
+        .iter()
+        .map(|f| PathBuf::from(f.as_str().unwrap()))
+        .find(|f| f.file_name().unwrap().to_string_lossy().contains("acid"))
+        .unwrap_or_else(|| panic!("no acid stem in {v}"));
+    let acid = if acid.is_absolute() {
+        acid
+    } else {
+        stems.join(acid.file_name().unwrap())
+    };
+    let peak = hound::WavReader::open(&acid)
+        .unwrap()
+        .samples::<f32>()
+        .map(|s| s.unwrap().abs())
+        .fold(0.0_f32, f32::max);
+    let dbfs = 20.0 * f64::from(peak).log10();
+    assert!(dbfs > -60.0, "acid stem peak {dbfs} dBFS");
 }

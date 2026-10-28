@@ -15,7 +15,9 @@ pub enum Command {
     ListSongs,
     /// The current [`StudioState`](crate::StudioState), as the call's
     /// result. Changes nothing; a client calls it right after subscribing,
-    /// in case it missed the first `state` event.
+    /// in case it missed the first `state` event. For the same reason, a
+    /// migration the studio could not save is reported again, as an `error`
+    /// event.
     GetState,
     OpenSong {
         path: String,
@@ -41,8 +43,11 @@ pub enum Command {
         value: f64,
         commit: bool,
     },
+    /// Sets the `mode` setting of the track's fx device `device` (its id,
+    /// e.g. `dist`): `tracks.<t>.<device>.mode`.
     SetFxMode {
         track: String,
+        device: String,
         mode: String,
     },
     /// Sets one step of an acid pattern. A rest (`note: None`) carries no

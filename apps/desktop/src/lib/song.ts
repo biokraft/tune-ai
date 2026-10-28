@@ -41,6 +41,22 @@ export function currentSection(view: StudioView): number | null {
   return sectionAtBar(song.sections, bar) ?? 0;
 }
 
+/**
+ * The clips `track` plays in part of section `i`, or from mid-clip, when the section plays no one
+ * clip for it (`play[track]` is unset): the distinct clip ids of the placements that overlap the
+ * section, in time order. Empty when the track is silent there or plays one clip over it.
+ */
+export function partialClipsIn(song: SongView, i: number, track: string): string[] {
+  const s = song.sections[i];
+  if (!s || s.play[track] !== undefined) return [];
+  const end = s.start_bar + s.bars;
+  const placements = song.tracks.find((t) => t.id === track)?.placements ?? [];
+  const clips = placements
+    .filter((p) => p.start_bar < end && s.start_bar < p.start_bar + p.bars)
+    .map((p) => p.clip);
+  return [...new Set(clips)];
+}
+
 /** The pattern `track` plays in section `i`, if any. */
 export function patternIn(song: SongView, i: number | null, track: string): PatternView | null {
   if (i === null) return null;
@@ -50,9 +66,17 @@ export function patternIn(song: SongView, i: number | null, track: string): Patt
 
 /**
  * A pattern's shape for its timeline block, one value per step: a rest is 0, a hit or a note 0.6
- * and an accented one 1.
+ * and an accented one 1. A note clip has `16 * bars` values; each note marks the step it starts in.
  */
 export function patternGlyph(p: PatternView): number[] {
+  if (p.kind === "notes") {
+    const glyph = new Array<number>(STEPS_PER_BAR * p.bars).fill(0);
+    for (const n of p.notes) {
+      const i = Math.floor(n.start);
+      if (i >= 0 && i < glyph.length) glyph[i] = Math.max(glyph[i]!, n.vel >= 110 ? 1 : 0.6);
+    }
+    return glyph;
+  }
   if (p.kind === "drum") return p.hits.map((h) => (h === "accent" ? 1 : h === "hit" ? 0.6 : 0));
   return p.steps.map((s) => (s.note === null ? 0 : s.accent ? 1 : 0.6));
 }
@@ -80,7 +104,7 @@ export function highlightedSteps(
   highlights: ReadonlyMap<string, HighlightKind>,
   pattern: string,
 ): Map<number, HighlightKind> {
-  const prefix = `patterns.${pattern}.steps[`;
+  const prefix = `clips.${pattern}.steps[`;
   const out = new Map<number, HighlightKind>();
   for (const [key, kind] of highlights) {
     if (key.startsWith(prefix)) out.set(Number(key.slice(prefix.length, -1)), kind);
