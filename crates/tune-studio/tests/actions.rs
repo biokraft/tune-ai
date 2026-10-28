@@ -12,6 +12,7 @@ use tune_studio::{
 };
 
 const FIXTURE: &str = include_str!("fixtures/commented.toml");
+const SESSION: &str = include_str!("../../tune-song/tests/fixtures/session.toml");
 
 fn args(xs: &[&str]) -> Vec<String> {
     xs.iter().map(|s| (*s).to_owned()).collect()
@@ -458,7 +459,7 @@ fn remove_track_cleans_up() {
         out.results,
         [
             json!({"removed": {"lanes": [{"param": "acid.acid303.cutoff", "at": 3, "bars": 2,
-            "points": [[0, 0.1], [2, 0.8]]}], "placements": [], "duck_source": null}})
+            "points": [[0, 0.1], [2, 0.8]]}], "placements": [], "slots": [], "duck_source": null}})
         ]
     );
     let text = s.text();
@@ -610,7 +611,7 @@ fn remove_effect_removes_its_lanes() {
         out.results,
         [
             json!({"removed": {"lanes": [{"param": "acid.dist.drive", "at": 1, "bars": 2,
-            "points": [[0, 0.2], [2, 0.4]]}], "placements": [], "duck_source": null}})
+            "points": [[0, 0.2], [2, 0.4]]}], "placements": [], "slots": [], "duck_source": null}})
         ]
     );
     let text = s.text();
@@ -940,6 +941,7 @@ fn swap_cleans_up_and_lists_it() {
             "lanes": [{"param": "acid.acid303.cutoff", "at": 3, "bars": 2,
                 "points": [[0, 0.1], [2, 0.8]]}],
             "placements": [{"track": "acid", "at": 3, "clip": "a1", "bars": 2, "offset": 0}],
+            "slots": [],
             "duck_source": null,
         }})]
     );
@@ -1244,6 +1246,7 @@ fn remove_clip_removes_its_placements() {
                 {"track": "kick", "at": 1, "clip": "k4", "bars": 2, "offset": 0},
                 {"track": "kick", "at": 3, "clip": "k4", "bars": 2, "offset": 0},
             ],
+            "slots": [],
             "duck_source": null,
         }})]
     );
@@ -1492,6 +1495,7 @@ fn placements_by_start_bar() {
             "placements": [
                 {"track": "kick", "at": 3, "clip": "k4", "bars": 2, "offset": 0},
             ],
+            "slots": [],
             "duck_source": null,
         }})]
     );
@@ -2006,6 +2010,7 @@ fn remove_and_set_points() {
                 "points": [[0, 0.1], [2, 0.8]],
             }],
             "placements": [],
+            "slots": [],
             "duck_source": null,
         }})]
     );
@@ -2084,4 +2089,558 @@ fn lane_edits_are_one_undo_step() {
     assert_ne!(s.text(), FIXTURE);
     core.undo(tune_studio::Source::Human).expect("undoes");
     assert_eq!(s.text(), FIXTURE);
+}
+
+// ----- scenes -----
+
+fn session() -> Song {
+    song_with(SESSION)
+}
+
+fn add_scene(scene: &str, index: Option<usize>) -> Action {
+    Action::AddScene {
+        scene: scene.into(),
+        index,
+    }
+}
+
+fn move_scene(scene: &str, index: usize) -> Action {
+    Action::MoveScene {
+        scene: scene.into(),
+        index,
+    }
+}
+
+fn set_slot(scene: &str, track: &str, clip: Option<&str>) -> Action {
+    Action::SetSlot {
+        scene: scene.into(),
+        track: track.into(),
+        clip: clip.map(Into::into),
+    }
+}
+
+fn scene_ids(song: &tune_song::Song) -> Vec<&str> {
+    song.scenes.keys().map(String::as_str).collect()
+}
+
+const GROOVE: &str = "# jam rows\n[scenes.groove]\nslots = { kick = \"k4\", acid = \"a1\" }\n\n";
+
+#[test]
+fn add_scene_writes_a_table() {
+    let s = session();
+    s.ok(add_scene("jam", None));
+    let text = s.text();
+    assert!(
+        text.contains("slots = { hat = \"h\" }\n\n[scenes.jam]\n\n[[sections]]\nname = \"a\""),
+        "{text}"
+    );
+    assert_eq!(scene_ids(&s.song()), ["groove", "break", "jam"]);
+    assert!(s.song().scenes["jam"].slots.is_empty());
+    comments_kept(SESSION, &text, &[]);
+
+    let s = session();
+    s.ok(add_scene("jam", Some(0)));
+    let text = s.text();
+    assert!(
+        text.contains(&format!(
+            "steps = \"..x...x...x...x.\"\n\n[scenes.jam]\n\n{GROOVE}"
+        )),
+        "{text}"
+    );
+    assert_eq!(scene_ids(&s.song()), ["jam", "groove", "break"]);
+    comments_kept(SESSION, &text, &[]);
+
+    let s = session();
+    s.ok(add_scene("jam", Some(1)));
+    let text = s.text();
+    assert!(
+        text.contains("\n\n[scenes.jam]\n\n# hats alone\n[scenes.break]"),
+        "{text}"
+    );
+    assert_eq!(scene_ids(&s.song()), ["groove", "jam", "break"]);
+
+    // A song with no scenes gets the table right after the last clip.
+    let s = fixture();
+    s.ok(add_scene("jam", None));
+    let text = s.text();
+    assert!(
+        text.contains("steps = \"..x...x...x...x.\"\n\n[scenes.jam]\n\n[[sections]]"),
+        "{text}"
+    );
+    assert_eq!(scene_ids(&s.song()), ["jam"]);
+    comments_kept(FIXTURE, &text, &[]);
+}
+
+#[test]
+fn remove_scene_takes_its_comments() {
+    let s = session();
+    let out = s.ok(Action::RemoveScene {
+        scene: "groove".into(),
+    });
+    assert_eq!(
+        out.results,
+        [json!({"removed": {
+            "lanes": [],
+            "placements": [],
+            "slots": [
+                {"scene": "groove", "track": "kick", "clip": "k4"},
+                {"scene": "groove", "track": "acid", "clip": "a1"},
+            ],
+            "duck_source": null,
+        }})]
+    );
+    assert_eq!(s.text(), SESSION.replacen(GROOVE, "", 1));
+    assert_eq!(scene_ids(&s.song()), ["break"]);
+}
+
+#[test]
+fn rename_and_move_scenes() {
+    let s = session();
+    s.ok(Action::RenameScene {
+        scene: "groove".into(),
+        to: "drop".into(),
+    });
+    assert_eq!(
+        s.text(),
+        SESSION.replacen("[scenes.groove]", "[scenes.drop]", 1)
+    );
+    assert_eq!(scene_ids(&s.song()), ["drop", "break"]);
+
+    let s = session();
+    s.ok(move_scene("break", 0));
+    let text = s.text();
+    assert!(
+        text.contains(
+            "\n\n# hats alone\n[scenes.break]\nslots = { hat = \"h\" }\n\n# jam rows\n\
+             [scenes.groove]\nslots = { kick = \"k4\", acid = \"a1\" }\n\n[[sections]]"
+        ),
+        "{text}"
+    );
+    assert_eq!(scene_ids(&s.song()), ["break", "groove"]);
+    // The text is the same set of lines, only the scene tables swapped.
+    let mut want: Vec<&str> = SESSION.lines().collect();
+    let mut have: Vec<&str> = text.lines().collect();
+    want.sort_unstable();
+    have.sort_unstable();
+    assert_eq!(want, have);
+
+    // Moving back, and moving to where it is, round-trip and write nothing.
+    s.ok(move_scene("break", 1));
+    assert_eq!(s.text(), SESSION);
+    let out = s.ok(move_scene("groove", 0));
+    assert_eq!(out.file_hash, None);
+    assert_eq!(s.text(), SESSION);
+}
+
+#[test]
+fn moving_a_scene_carries_its_slots_table() {
+    let text = SESSION.replace(
+        "slots = { kick = \"k4\", acid = \"a1\" }\n",
+        "\n[scenes.groove.slots]\nkick = \"k4\" # low\nacid = \"a1\"\n",
+    );
+    let s = song_with(&text);
+    s.ok(move_scene("groove", 1));
+    let moved = s.text();
+    assert!(
+        moved.contains(
+            "# hats alone\n[scenes.break]\nslots = { hat = \"h\" }\n\n# jam rows\n\
+             [scenes.groove]\n\n[scenes.groove.slots]\nkick = \"k4\" # low\nacid = \"a1\"\n"
+        ),
+        "{moved}"
+    );
+    assert_eq!(scene_ids(&s.song()), ["break", "groove"]);
+    s.ok(move_scene("groove", 0));
+    assert_eq!(s.text(), text);
+}
+
+#[test]
+fn scene_rules() {
+    let s = session();
+    for (action, message) in [
+        (add_scene("groove", None), "scene `groove` already exists"),
+        (
+            add_scene("Jam", None),
+            "a scene id is lower-case letters, digits and `_`, got `Jam`",
+        ),
+        (
+            add_scene("jam", Some(3)),
+            "index 3 is out of bounds (the song has 2 scenes)",
+        ),
+        (
+            Action::RemoveScene {
+                scene: "drop".into(),
+            },
+            "there is no scene `drop`",
+        ),
+        (
+            Action::RenameScene {
+                scene: "groove".into(),
+                to: "break".into(),
+            },
+            "scene `break` already exists",
+        ),
+        (
+            move_scene("groove", 2),
+            "index 2 is out of bounds (the song has 2 scenes)",
+        ),
+        (
+            set_slot("groove", "bass", Some("k4")),
+            "there is no track `bass`",
+        ),
+        (
+            set_slot("groove", "kick", Some("nope")),
+            "there is no clip `nope`",
+        ),
+        (set_slot("drop", "kick", None), "there is no scene `drop`"),
+    ] {
+        assert_eq!(s.refused(action), message);
+    }
+    // The validator judges what the model leaves to it.
+    let message = s.refused(set_slot("groove", "acid", Some("k4")));
+    assert!(
+        message.contains("clip `k4` is a drum clip; track `acid` (acid303) plays acid clips"),
+        "{message}"
+    );
+}
+
+#[test]
+fn set_slot_from_the_cli() {
+    assert_eq!(
+        cli("set_slot", &["scene=groove", "track=acid", "clip="]),
+        Ok(set_slot("groove", "acid", None))
+    );
+    let s = session();
+    s.ok(set_slot("groove", "acid", None));
+    let text = s.text();
+    assert!(text.contains("slots = { kick = \"k4\" }"), "{text}");
+    assert_eq!(
+        text,
+        SESSION.replacen(
+            "slots = { kick = \"k4\", acid = \"a1\" }",
+            "slots = { kick = \"k4\" }",
+            1
+        )
+    );
+    s.ok(set_slot("break", "kick", Some("k4")));
+    assert!(
+        s.text().contains("slots = { hat = \"h\", kick = \"k4\" }"),
+        "{}",
+        s.text()
+    );
+    // Clearing a slot that is empty writes nothing.
+    let out = s.ok(set_slot("break", "acid", None));
+    assert_eq!(out.file_hash, None);
+}
+
+#[test]
+fn a_scene_batch_builds_on_itself() {
+    let s = session();
+    let out = s
+        .apply(&[add_scene("jam", None), set_slot("jam", "acid", Some("a1"))])
+        .expect("applies");
+    let hash = out.file_hash.clone().expect("written once");
+    assert_eq!(out.results.len(), 2);
+    let log = tune_studio::EditLog::for_song(&s.path)
+        .read_since(None)
+        .expect("read log");
+    let mut actions: Vec<_> = log.iter().map(|e| e.action.as_deref()).collect();
+    actions.dedup();
+    assert_eq!(actions, [Some("add_scene"), Some("set_slot")]);
+    assert!(log.iter().all(|e| e.file_hash.as_deref() == Some(&hash)));
+    let song = s.song();
+    assert_eq!(song.scenes["jam"].slots["acid"], "a1");
+    assert!(
+        s.text()
+            .contains("[scenes.jam]\nslots = { acid = \"a1\" }\n"),
+        "{}",
+        s.text()
+    );
+}
+
+#[test]
+fn scene_actions_name_their_targets_and_read_back() {
+    assert_eq!(add_scene("jam", None).targets(), ["scenes.jam"]);
+    assert_eq!(
+        Action::RemoveScene {
+            scene: "groove".into()
+        }
+        .targets(),
+        ["scenes.groove"]
+    );
+    let rename = Action::RenameScene {
+        scene: "groove".into(),
+        to: "drop".into(),
+    };
+    assert_eq!(rename.targets(), ["scenes.groove", "scenes.drop"]);
+    assert_eq!(move_scene("break", 0).targets(), ["scenes"]);
+    assert_eq!(
+        set_slot("groove", "acid", None).targets(),
+        ["scenes.groove.slots.acid"]
+    );
+    for name in [
+        "add_scene",
+        "remove_scene",
+        "rename_scene",
+        "move_scene",
+        "set_slot",
+    ] {
+        let spec = tune_studio::find_action(name).unwrap_or_else(|| panic!("{name}"));
+        assert_eq!(spec.kind, tune_studio::ActionKind::Edit);
+    }
+    let remove = Action::RemoveScene {
+        scene: "groove".into(),
+    };
+    for action in [
+        add_scene("jam", None),
+        add_scene("jam", Some(1)),
+        remove,
+        rename,
+        move_scene("break", 0),
+        set_slot("groove", "acid", None),
+        set_slot("groove", "acid", Some("a1")),
+    ] {
+        let got = action.to_cli_args();
+        assert_eq!(action_from_cli(action.name(), &got), Ok(action));
+    }
+}
+
+#[test]
+fn scene_edits_work_on_other_written_forms() {
+    // Scene entries as inline tables under a `[scenes]` header.
+    let inline = SESSION
+        .replace("# jam rows\n[scenes.groove]\nslots = { kick = \"k4\", acid = \"a1\" }\n\n# hats alone\n[scenes.break]\nslots = { hat = \"h\" }\n",
+                 "[scenes]\ngroove = { slots = { kick = \"k4\", acid = \"a1\" } }\n# hats alone\nbreak = { slots = { hat = \"h\" } }\n");
+    assert_ne!(inline, SESSION);
+    let s = song_with(&inline);
+    s.ok(add_scene("jam", Some(1)));
+    assert_eq!(scene_ids(&s.song()), ["groove", "jam", "break"]);
+    assert!(
+        s.text().contains(
+            "[scenes]\ngroove = { slots = { kick = \"k4\", acid = \"a1\" } }\njam = {}\n# hats alone\nbreak = { slots = { hat = \"h\" } }\n"
+        ),
+        "{}",
+        s.text()
+    );
+    s.ok(Action::RenameScene {
+        scene: "jam".into(),
+        to: "fill".into(),
+    });
+    s.ok(Action::RemoveScene {
+        scene: "groove".into(),
+    });
+    assert_eq!(scene_ids(&s.song()), ["fill", "break"]);
+    assert!(
+        s.text()
+            .contains("[scenes]\nfill = {}\n# hats alone\nbreak = { slots = { hat = \"h\" } }\n"),
+        "{}",
+        s.text()
+    );
+    comments_kept(&inline, &s.text(), &[]);
+    assert_eq!(
+        s.refused(move_scene("break", 0)),
+        "`move_scene` needs each scene as its own [scenes.<id>] table; edit this form by hand"
+    );
+    // A scene that is not there is said first.
+    assert_eq!(s.refused(move_scene("nope", 0)), "there is no scene `nope`");
+
+    // A root inline table cannot take a new scene or a move either.
+    let root = SESSION
+        .replace(
+            "# jam rows\n[scenes.groove]\nslots = { kick = \"k4\", acid = \"a1\" }\n\n# hats alone\n[scenes.break]\nslots = { hat = \"h\" }\n\n",
+            "",
+        )
+        .replacen(
+            "\n\n[song]",
+            "\n\nscenes = { groove = { slots = { kick = \"k4\" } }, break = {} }\n\n[song]",
+            1,
+        );
+    let s = song_with(&root);
+    assert_eq!(scene_ids(&s.song()), ["groove", "break"]);
+    let by_hand = |action: &str| {
+        format!(
+            "`{action}` needs each scene as its own [scenes.<id>] table; edit this form by hand"
+        )
+    };
+    assert_eq!(s.refused(add_scene("jam", None)), by_hand("add_scene"));
+    assert_eq!(s.refused(move_scene("break", 0)), by_hand("move_scene"));
+    s.ok(set_slot("groove", "hat", Some("h")));
+    assert!(
+        s.text().contains("kick = \"k4\", hat = \"h\""),
+        "{}",
+        s.text()
+    );
+}
+
+#[test]
+fn a_scene_move_is_one_undo_step() {
+    let s = session();
+    let mut core = tune_studio::StudioCore::open(&s.path).expect("opens");
+    let out = core
+        .apply_now(&[move_scene("break", 0)], &Origin::claude(None))
+        .expect("moves");
+    assert_eq!(out.changes.len(), 1);
+    assert_eq!(out.changes[0].path.to_string(), "scenes");
+    assert_ne!(s.text(), SESSION);
+    let log = tune_studio::EditLog::for_song(&s.path)
+        .read_since(None)
+        .expect("read log");
+    let paths: Vec<_> = log.iter().map(|e| e.path.to_string()).collect();
+    assert_eq!(paths, ["scenes"]);
+    core.undo(tune_studio::Source::Human).expect("undoes");
+    assert_eq!(s.text(), SESSION);
+}
+
+#[test]
+fn remove_track_removes_its_slots() {
+    let s = session();
+    let out = s.ok(Action::RemoveTrack {
+        track: "acid".into(),
+    });
+    assert_eq!(
+        out.results[0]["removed"]["slots"],
+        json!([{"scene": "groove", "track": "acid", "clip": "a1"}])
+    );
+    let text = s.text();
+    assert!(text.contains("slots = { kick = \"k4\" }"), "{text}");
+    assert!(text.contains("# jam rows\n[scenes.groove]"), "{text}");
+    assert_eq!(scene_ids(&s.song()), ["groove", "break"]);
+    assert_eq!(s.song().scenes["groove"].slots.len(), 1);
+}
+
+#[test]
+fn rename_track_renames_its_slots() {
+    let s = session();
+    s.ok(Action::RenameTrack {
+        track: "acid".into(),
+        to: "bass".into(),
+    });
+    let text = s.text();
+    assert!(
+        text.contains("slots = { kick = \"k4\", bass = \"a1\" }"),
+        "{text}"
+    );
+    let song = s.song();
+    let keys: Vec<_> = song.scenes["groove"].slots.keys().collect();
+    assert_eq!(keys, ["kick", "bass"], "the key keeps its place");
+    assert_eq!(scene_ids(&song), ["groove", "break"]);
+    comments_kept(SESSION, &text, &[]);
+}
+
+#[test]
+fn remove_clip_removes_its_slots() {
+    let s = session();
+    let out = s.ok(Action::RemoveClip { clip: "h".into() });
+    assert_eq!(
+        out.results[0]["removed"]["slots"],
+        json!([{"scene": "break", "track": "hat", "clip": "h"}])
+    );
+    assert_eq!(
+        out.results[0]["removed"]["placements"],
+        json!([
+            {"track": "hat", "at": 1, "clip": "h", "bars": 2, "offset": 0},
+            {"track": "hat", "at": 3, "clip": "h", "bars": 2, "offset": 0},
+        ])
+    );
+    let text = s.text();
+    assert!(text.contains("# hats alone\n[scenes.break]\n"), "{text}");
+    assert!(!text.contains("hat = \"h\""), "{text}");
+    assert_eq!(
+        text.matches("slots =").count(),
+        1,
+        "only groove keeps a slots line:\n{text}"
+    );
+    assert!(s.song().scenes["break"].slots.is_empty());
+}
+
+#[test]
+fn rename_clip_rewrites_slots() {
+    let s = session();
+    s.ok(Action::RenameClip {
+        clip: "a1".into(),
+        to: "bass1".into(),
+    });
+    let text = s.text();
+    assert!(
+        text.contains("slots = { kick = \"k4\", acid = \"bass1\" }"),
+        "{text}"
+    );
+    assert_eq!(s.song().scenes["groove"].slots["acid"], "bass1");
+}
+
+#[test]
+fn set_instrument_removes_the_slots_it_cannot_play() {
+    let s = session();
+    let out = s.ok(set_instrument("acid", "kick"));
+    assert_eq!(
+        out.results[0]["removed"]["slots"],
+        json!([{"scene": "groove", "track": "acid", "clip": "a1"}])
+    );
+    let text = s.text();
+    assert!(text.contains("slots = { kick = \"k4\" }"), "{text}");
+}
+
+#[test]
+fn slot_clean_ups_keep_comments_in_slots_tables_and_scene_less_songs() {
+    // A `[scenes.x.slots]` table keeps its header when its last slot goes.
+    let text = SESSION.replace(
+        "slots = { hat = \"h\" }",
+        "[scenes.break.slots]\nhat = \"h\" # the hats",
+    );
+    let s = song_with(&text);
+    s.ok(Action::RenameTrack {
+        track: "hat".into(),
+        to: "hh".into(),
+    });
+    assert!(s.text().contains("hh = \"h\" # the hats"), "{}", s.text());
+    s.ok(Action::RenameClip {
+        clip: "h".into(),
+        to: "hh1".into(),
+    });
+    assert!(s.text().contains("hh = \"hh1\" # the hats"), "{}", s.text());
+    s.ok(Action::RemoveTrack { track: "hh".into() });
+    let after = s.text();
+    assert!(
+        after.contains("# hats alone\n[scenes.break]\n[scenes.break.slots]"),
+        "{after}"
+    );
+    assert!(!after.contains("the hats"), "{after}");
+    assert!(s.song().scenes["break"].slots.is_empty());
+
+    // A song with no scenes has nothing to clean up.
+    let s = fixture();
+    s.ok(Action::RenameTrack {
+        track: "acid".into(),
+        to: "bass".into(),
+    });
+    s.ok(Action::RemoveClip { clip: "k4".into() });
+    assert!(!s.text().contains("scenes"), "{}", s.text());
+}
+
+#[test]
+fn session_targets() {
+    let launch = Action::LaunchClip {
+        track: "acid".into(),
+        scene: "groove".into(),
+    };
+    assert_eq!(launch.targets(), ["scenes.groove.slots.acid"]);
+    let scene = Action::LaunchScene {
+        scene: "groove".into(),
+    };
+    assert_eq!(scene.targets(), ["scenes.groove"]);
+    let stop = Action::StopClip {
+        track: "hat".into(),
+    };
+    assert_eq!(stop.targets(), ["tracks.hat"]);
+    let back_one = Action::BackToArrangement {
+        track: Some("acid".into()),
+    };
+    assert_eq!(back_one.targets(), ["tracks.acid"]);
+    assert!(
+        Action::BackToArrangement { track: None }
+            .targets()
+            .is_empty()
+    );
+    for a in [launch, scene, stop, back_one] {
+        assert_eq!(a.kind(), tune_studio::ActionKind::Live, "{}", a.name());
+    }
 }

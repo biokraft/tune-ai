@@ -456,3 +456,46 @@ bars = 1
         "{v}"
     );
 }
+
+#[test]
+fn set_writes_a_slot() {
+    let dir = tempfile::tempdir().unwrap();
+    let song = dir.path().join("song.toml");
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/session.toml"),
+        &song,
+    )
+    .unwrap();
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "scenes.groove.slots.hat=h",
+        "--json",
+    ]));
+    assert_eq!(v["ok"], true);
+    assert_eq!(
+        v["changes"][0],
+        serde_json::json!({ "path": "scenes.groove.slots.hat", "old": null, "new": "h" })
+    );
+    let text = fs::read_to_string(&song).unwrap();
+    assert!(
+        text.contains("slots = { kick = \"k4\", acid = \"a1\", hat = \"h\" }"),
+        "{text}"
+    );
+
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "scenes.groove.slots.hat=",
+        "--json",
+    ]));
+    assert_eq!(
+        v["changes"][0],
+        serde_json::json!({ "path": "scenes.groove.slots.hat", "old": "h", "new": null })
+    );
+    let text = fs::read_to_string(&song).unwrap();
+    assert!(
+        text.contains("slots = { kick = \"k4\", acid = \"a1\" }"),
+        "{text}"
+    );
+}

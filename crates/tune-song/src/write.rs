@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 
 use crate::FORMAT_VERSION;
 use crate::model::{
-    Clip, DEFAULT_VELOCITY, Device, Note, Placement, Song, TICKS_PER_STEP, Track, pitch_name,
+    Clip, DEFAULT_VELOCITY, Device, Note, Placement, Scene, Song, TICKS_PER_STEP, Track, pitch_name,
 };
 
 impl Song {
@@ -64,6 +64,11 @@ impl Song {
             out.push_str(&clip_table_toml(id, clip));
         }
 
+        for (id, scene) in &self.scenes {
+            out.push('\n');
+            out.push_str(&scene_table_toml(id, scene));
+        }
+
         for section in &self.sections {
             out.push_str("\n[[sections]]\n");
             let _ = writeln!(out, "name = {}", string(&section.name));
@@ -108,6 +113,22 @@ pub fn clip_table_toml(id: &str, clip: &Clip) -> String {
             let text = steps.steps_text().expect("a steps clip has step notation");
             let _ = writeln!(out, "steps = {}", string(&text));
         }
+    }
+    out
+}
+
+/// The table of scene `id`, `[scenes.<id>]` and its `slots` when it has any,
+/// as [`Song::to_toml`] writes it. Ends with a newline.
+pub fn scene_table_toml(id: &str, scene: &Scene) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "[scenes.{}]", key(id));
+    if !scene.slots.is_empty() {
+        let slots: Vec<String> = scene
+            .slots
+            .iter()
+            .map(|(track, clip)| format!("{} = {}", key(track), string(clip)))
+            .collect();
+        let _ = writeln!(out, "slots = {{ {} }}", slots.join(", "));
     }
     out
 }

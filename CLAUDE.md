@@ -12,9 +12,11 @@ and lock-free live playback) driven through the `tune` CLI.
   note events), today's modules and the registry; depends only on tune-dsp.
 - `crates/tune-song` - song file model (format v2): parse, validate
   (positional errors), canonical write, the comment-keeping migration of v1
-  files to v2, section operations, file watcher. Headless.
+  files to v2, section, track, clip and scene operations, file watcher.
+  Headless.
 - `crates/tune-engine` - compiles a song and renders it: offline (`render`) or
-  live (`live`, lock-free swap for hot reload). Headless.
+  live (`live`, lock-free swap for hot reload, session play of scenes and
+  clips cued to bar lines). Headless.
 - `crates/tune-studio` - the studio core: in-place song edits by path
   (`SongPath`, comments kept), the action layer, the edit log, undo,
   external-change merge, the `Studio` actor the app talks to and its local
@@ -111,6 +113,16 @@ Notation:
   `bars` and `offset` are whole numbers. Keep them in time order and never
   overlapping. Two placements whose offsets differ by a clip length play the
   same but count as a change.
+- Scenes: `[scenes.<id>]` tables after the clips, in file order (the row
+  order), each with an optional `slots = { <track id> = "<clip id>" }`; a
+  track without a key has an empty slot, and `[scenes.empty]` is an empty
+  scene. The scene id follows the track and clip id rules (`a-z`, `0-9`, `_`).
+  A slot must name a track of the song and a clip that track's instrument can
+  play (the placement rule: an acid clip on a drum track is an error). Scenes
+  are scenes of live play only: renders play the arrangement and ignore them.
+  They are part of format v2, and a v1 file with `[scenes.*]` gets the
+  "version 2" hint. `tune info` lists them
+  (`scenes: groove (kick k4, acid a1), break (hat h)`; `--json` has `scenes`).
 - Sections: `[[sections]]` with `name` and `bars` (1 to 1024), laid end to end
   from bar 1. They set the song length and hold no content.
 - Devices: a track's `instrument` (a module name, or a table with `type` and
@@ -295,7 +307,8 @@ The producer may have the studio (app or browser) open on the same song.
   | `sections[<i>].name` | string; `<i>` is 0-based |
   | `sections[<i>].bars` | integer, 1 to 1024; resizes the section: placements and stretches that ran to its end run to the new end (grow) or are cut at it (shrink), later ones move |
   | `sections[<i>].play.<t>` | clip id: replaces what the track plays inside the section with one placement covering it; empty removes them |
-  | `tracks.<t>`, `sections`, `sections[<i>].lanes`, `song.version` | read-only (appear in `tune changes`) |
+  | `scenes.<s>.slots.<t>` | clip id: puts the clip in the scene's slot for track `t` (a clip the track's instrument can play); empty clears the slot |
+  | `tracks.<t>`, `sections`, `sections[<i>].lanes`, `scenes`, `scenes.<s>`, `song.version` | read-only (appear in `tune changes`) |
 
   Section operations (`play`, `bars`) rewrite a track's `play` list and drop
   the comments inside it.
@@ -309,21 +322,21 @@ The producer may have the studio (app or browser) open on the same song.
   | Action | Example |
   | --- | --- |
   | `add_track` | `tune do <song> add_track track=bass instrument=acid303` appends a default track (gain and pan 0, no effects or placements) |
-  | `remove_track` | `tune do <song> remove_track track=bass` removes the track, its placements and its lanes (the result lists the lanes) |
-  | `rename_track` | `tune do <song> rename_track track=bass to=lead`; lanes and `mix.duck_source` follow, but its noise changes (seeded from the track id) |
+  | `remove_track` | `tune do <song> remove_track track=bass` removes the track, its placements, its lanes and its scene slots (the result lists the lanes and the slots) |
+  | `rename_track` | `tune do <song> rename_track track=bass to=lead`; lanes, scene slots and `mix.duck_source` follow, but its noise changes (seeded from the track id) |
   | `add_effect` | `tune do <song> add_effect track=acid module=eq index=0` returns the new device's id (`eq`, then `eq2`); `id=` names it |
   | `remove_effect` | `tune do <song> remove_effect track=acid device=eq2` removes the effect and its lanes |
   | `move_effect` | `tune do <song> move_effect track=acid device=dist index=0` |
   | `rename_device` | `tune do <song> rename_device track=acid device=acid303 to=bass303` renames the instrument or an effect, its param keys and lanes |
-  | `set_instrument` | `tune do <song> set_instrument track=acid module=kick` swaps the instrument; the new device is `kick` with default settings, so the old instrument's params, lane stretches and placements of clips the new module cannot play go (the result lists them; the clips stay) and so does a `mix.duck_source` naming the track when the new module plays no drum clips; strip params stay. Dropping placements rewrites the `play` list, which drops the comments inside it, and a swap the song would not take (the only kick, while a track ducks to it) is refused with the validator's message |
+  | `set_instrument` | `tune do <song> set_instrument track=acid module=kick` swaps the instrument; the new device is `kick` with default settings, so the old instrument's params, lane stretches and placements and scene slots of clips the new module cannot play go (the result lists them; the clips stay; a notes clip's stay) and so does a `mix.duck_source` naming the track when the new module plays no drum clips; strip params stay. Dropping placements rewrites the `play` list, which drops the comments inside it, and a swap the song would not take (the only kick, while a track ducks to it) is refused with the validator's message |
 
   The clip ones, refused the same way:
 
   | Action | Example |
   | --- | --- |
   | `add_clip` | `tune do <song> add_clip clip=lead kind=notes bars=2 notes='[{ start = 0, pitch = "C3", len = 2 }]'`; `kind` is `acid`, `drum` or `notes`, `steps` only for acid and drum (16 rests by default), `bars` and `notes` only for notes; goes after the last clip |
-  | `remove_clip` | `tune do <song> remove_clip clip=k4` removes the clip and its placements (the result lists them) |
-  | `rename_clip` | `tune do <song> rename_clip clip=a1 to=bass1`; keeps its place, placements follow |
+  | `remove_clip` | `tune do <song> remove_clip clip=k4` removes the clip, its placements and the scene slots holding it (the result lists them) |
+  | `rename_clip` | `tune do <song> rename_clip clip=a1 to=bass1`; keeps its place, placements and scene slots follow |
   | `duplicate_clip` | `tune do <song> duplicate_clip clip=h to=h2` copies it right after the original, without its comments |
 
   The placement and section ones, refused the same way (`at` and `to` are 1-based
@@ -350,6 +363,52 @@ The producer may have the studio (app or browser) open on the same song.
   | `add_lane` | `tune do <song> add_lane param=mix.reverb.size at=1 bars=4 points='[[0, 0.2], [4, 0.6]]'` writes a new `[[automation]]` table (the first one creates the list) right after the stretches of the section it starts in; an overlap, an unknown param or a point out of range is refused with the validator's message |
   | `remove_lane` | `tune do <song> remove_lane param=acid.acid303.cutoff at=3` drops the stretch's table with its comments (the result lists it) |
   | `set_lane_points` | `tune do <song> set_lane_points param=acid.acid303.cutoff at=3 points='[[0, 0.3], [2, 0.9]]'` changes only the `points` line |
+
+  The scene ones, refused the same way (`index` is 0-based, like a section's; a
+  file that writes `scenes = { … }` as one root inline table refuses `add_scene` and
+  `move_scene`, and one with `[scenes]` and inline entries refuses `move_scene`: edit
+  those forms by hand):
+
+  | Action | Example |
+  | --- | --- |
+  | `add_scene` | `tune do <song> add_scene scene=jam index=0` adds an empty scene before scene 0 (the end by default); its table goes right before that scene's comments |
+  | `remove_scene` | `tune do <song> remove_scene scene=jam` removes the scene, the comments above it and its slots (the result lists them; the text line is `removed slot a1 on acid in scene groove`) |
+  | `rename_scene` | `tune do <song> rename_scene scene=groove to=drop`; keeps its place and comments |
+  | `move_scene` | `tune do <song> move_scene scene=break index=0` removes the scene and inserts it at `index`; its comments travel with it |
+  | `set_slot` | `tune do <song> set_slot scene=groove track=acid clip=a1` puts the clip in the slot (a clip the track's instrument can play); `clip=` empties the slot |
+
+  The session ones are live, like `play`: they need the studio open, a
+  `--batch` refuses them, and they write nothing, are not undoable, are never
+  logged or part of a run, return `null` and print nothing in text mode. Each
+  lands at the next bar line, and an unknown track or scene, or a launch of an
+  empty slot, is refused with a plain message ("scene `break` has no clip for
+  track `acid`"):
+
+  | Action | Example |
+  | --- | --- |
+  | `launch_clip` | `tune do <song> launch_clip track=acid scene=groove` plays the clip in the scene's slot for the track from its start, looping; from the bar it lands at the track is off the arrangement until it is sent back, so its lanes no longer drive it. A knob released on it is written from the moment the studio sends the launch to the engine (at once, unless it waits for an edit to play) until a return is sent |
+  | `launch_scene` | `tune do <song> launch_scene scene=groove` launches the row: each track whose slot holds a clip plays it, and each track with an empty slot stops |
+  | `stop_clip` | `tune do <song> stop_clip track=hat` silences the track (one playing the arrangement too) until it is sent back |
+  | `back_to_arrangement` | `tune do <song> back_to_arrangement track=acid` sends the track back to the arrangement; without `track`, every track |
+
+  With the transport stopped, a launch starts playback at the cursor (a bar
+  line, so it lands at once), and `stop_clip` and `back_to_arrangement`
+  change nothing. Stopping ends the session: the next playback starts with
+  every track on the arrangement. What plays is the launched clip, not the
+  slot, so `set_slot`, `rename_scene` or `remove_scene` change nothing until
+  the next launch. A hot reload keeps the session by id: an edited clip plays
+  its new content, a track whose clip is gone (or that its new instrument
+  cannot play) stops, and a renamed or new track follows the arrangement. A
+  launch sent right after an edit waits until the engine plays the edit, so
+  it can land one bar later; one whose scene or track an edit took away in
+  the meantime, or whose slot an edit emptied (`set_slot`, `remove_clip`, or
+  a new instrument that cannot play the clip), is dropped with an error
+  event. Session clips do not make the song longer: it still ends where the
+  arrangement ends, so loop to jam on. A
+  `~` on the last step before the bar line still slides into the launched
+  clip's first note when the old clip or arrangement has a note next, because
+  the slide reads what the track was playing and ignores cues; the samples
+  depend only on the bar the launch lands at.
 
 - Undo a whole run: `tune do <song> undo_run <run id> --json` (the studio
   open or closed; the app's "Undo this run" does the same). It reads the
@@ -382,25 +441,45 @@ The producer may have the studio (app or browser) open on the same song.
   whole when any part of it changed later, and also when any other edit
   since changed placements, lane stretches, sections or a whole track
   anywhere in the song. A rename (`rename_track`, `rename_clip`,
-  `rename_device`) likewise goes back whole with everything its write
-  changed (the lanes, placements and duck source that followed it), or
-  is kept whole when any part of it changed later (the new name renamed
-  again or removed included), so the old name never comes back beside the
-  new one. A target someone set back to
-  its value before the run is listed in `already`, not `kept`. The
-  result is `{"run", "title", "reverted": [{"target",
-  "item"}], "kept": [{"target", "item", "reason", "by", "message"}],
-  "already": [<target>]}` (`item` is the placement or stretch for
-  `tracks.<t>.play` and `automation.<t>.<param>`, else `null`; `already`
-  lists targets back at their value before the run); the text is `undid
-  run r1: 4 reverted, 1 kept` and one `kept <target>: changed later by
-  human` (`by another run`, `outside the studio`, `still used: <message>`)
-  line each. A damaged record line in the log refuses it ("the edit log
-  has a damaged record at line N; nothing was changed"). Costs: a removed
-  lane, track or clip comes back without its comments (so do the lanes
-  `rename_device` moved, and a section `rename_section` renamed loses the
-  comment above it), a restored clip goes to the end of the clip pool, and
-  an explicit `send.* = -60` (a silent bus) is not restored.
+  `rename_device`, `rename_scene`) likewise goes back whole with
+  everything its write changed (the lanes, placements, scene slots and
+  duck source that followed it), or is kept whole when any part of it
+  changed later (the new name renamed again or removed included), so the
+  old name never comes back beside the new one; a renamed scene is renamed
+  back where it sits now, its comments kept. Scenes go back one at a time
+  too: a slot (`scenes.<s>.slots.<t>`) is kept when someone since changed
+  it or its scene, or made, removed or rebuilt its track or a clip it
+  named, or its whole track is kept (a scene the producer removed does not
+  come back for it, and a track they made again, by hand too, or a clip
+  they made again gets no old slot); a scene the run added
+  or removed (`scenes.<s>`, with the slots the run set in a scene it
+  added) is kept when someone since changed it or any slot in it, moved
+  any scene, or made, removed or rebuilt a track or clip its slots name,
+  and one the run added or renamed is kept when it is no longer on the row
+  the run left it on (a scene added, removed or moved above it, by hand
+  too; `by` names a logged scene edit since, else `null`), even when the
+  producer only added a row above it. The scene order (`scenes`, from
+  `move_scene`) goes back unless someone added, removed or moved a scene
+  since; a slot edit does not keep it. The scenes the run added or removed
+  around its moves go back with the order, or are kept with it. Live
+  session actions (`launch_clip`, `launch_scene`, `stop_clip`,
+  `back_to_arrangement`) are never part of a run. A target someone set
+  back to its value before the run is listed in `already`, not `kept`. The
+  result is `{"run", "title", "reverted": [{"target", "item"}], "kept":
+  [{"target", "item", "reason", "by", "message"}], "already": [<target>]}`
+  (`item` is the placement or stretch for `tracks.<t>.play` and
+  `automation.<t>.<param>`, else `null`; `already` lists targets back at
+  their value before the run); the text is `undid run r1: 4 reverted, 1
+  kept` and one `kept <target>: changed later by human` (`by another run`,
+  `outside the studio`, `still used: <message>`) line each. A damaged
+  record line in the log refuses it ("the edit log has a damaged record at
+  line N; nothing was changed"). Costs: a removed lane, track, clip or
+  scene comes back without its comments (so do the lanes `rename_device`
+  moved, and a section `rename_section` renamed loses the comment above
+  it), a restored clip goes to the end of the clip pool, a removed scene
+  goes back to its old row number, so it can land above rows the producer
+  added since (theirs keep their order), and an explicit `send.* = -60` (a
+  silent bus) is not restored.
 - To see the UI: `tune serve <song> --device null --port 4580` (in the
   background; `task ui:build` first), then drive Chrome with the
   `agent-browser` skill: start the agent Chrome, pick a session

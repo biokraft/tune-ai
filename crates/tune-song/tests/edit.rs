@@ -3,11 +3,11 @@
 
 use tune_dsp::DrumPattern;
 use tune_song::{
-    Clip, EditOpError, Lane, LaneOrigin, Placement, Registry, Song, add_clip, add_effect, add_lane,
-    add_placement, add_track, clip_table_toml, duplicate_clip, move_effect, move_placement,
-    parse_song, remove_clip, remove_effect, remove_lane, remove_placement, remove_track,
-    rename_clip, rename_device, rename_track, resize_placement, set_instrument, set_lane_points,
-    track_table_toml,
+    Clip, EditOpError, Lane, LaneOrigin, Placement, Registry, RemovedSlot, Song, add_clip,
+    add_effect, add_lane, add_placement, add_scene, add_track, clip_table_toml, duplicate_clip,
+    move_effect, move_placement, parse_song, remove_clip, remove_effect, remove_lane,
+    remove_placement, remove_track, rename_clip, rename_device, rename_track, resize_placement,
+    set_instrument, set_lane_points, set_slot, track_table_toml,
 };
 
 const SONG: &str = r#"
@@ -911,4 +911,82 @@ fn new_points_replace_only_the_points() {
     );
     assert_eq!(edited.removed, Default::default());
     assert_eq!(song.tracks, s.tracks);
+}
+
+// ----- slots follow the edits -----
+
+/// The swap song with scene `jam` holding acid's `a1` and scene `alt` its
+/// notes clip `lead`.
+fn swap_song_with_slots() -> Song {
+    let mut song = swap_song();
+    for (scene, clip) in [("jam", "a1"), ("alt", "lead")] {
+        song = add_scene(&song, scene, None).unwrap().arranged.song;
+        song = set_slot(&song, scene, "acid", Some(clip))
+            .unwrap()
+            .arranged
+            .song;
+    }
+    song
+}
+
+#[test]
+fn swap_removes_slots_it_cannot_play() {
+    let edited = set_instrument(&swap_song_with_slots(), registry(), "acid", "kick").unwrap();
+    let song = &edited.arranged.song;
+    assert_eq!(
+        edited.removed.slots,
+        [RemovedSlot {
+            scene: "jam".into(),
+            track: "acid".into(),
+            clip: "a1".into()
+        }]
+    );
+    assert!(song.scenes["jam"].slots.is_empty());
+    assert_eq!(
+        song.scenes["alt"].slots["acid"], "lead",
+        "a notes clip stays"
+    );
+    assert_eq!(song.scenes.keys().collect::<Vec<_>>(), ["jam", "alt"]);
+}
+
+#[test]
+fn remove_track_and_clip_list_their_slots_in_scene_order() {
+    let song = swap_song_with_slots();
+    let edited = remove_track(&song, "acid").unwrap();
+    let listed: Vec<_> = edited
+        .removed
+        .slots
+        .iter()
+        .map(|s| (s.scene.as_str(), s.track.as_str(), s.clip.as_str()))
+        .collect();
+    assert_eq!(listed, [("jam", "acid", "a1"), ("alt", "acid", "lead")]);
+    assert!(
+        edited
+            .arranged
+            .song
+            .scenes
+            .values()
+            .all(|s| s.slots.is_empty())
+    );
+
+    let edited = remove_clip(&song, "lead").unwrap();
+    assert_eq!(edited.removed.slots.len(), 1);
+    assert_eq!(edited.removed.slots[0].scene, "alt");
+    assert_eq!(edited.arranged.song.scenes["jam"].slots["acid"], "a1");
+}
+
+#[test]
+fn renames_follow_the_slots_in_place() {
+    let mut song = swap_song_with_slots();
+    song = set_slot(&song, "jam", "kick", Some("k4"))
+        .unwrap()
+        .arranged
+        .song;
+    let renamed = rename_track(&song, "acid", "bass").unwrap().arranged.song;
+    let keys: Vec<_> = renamed.scenes["jam"].slots.keys().collect();
+    assert_eq!(keys, ["bass", "kick"], "the key keeps its place");
+    assert_eq!(renamed.scenes["alt"].slots["bass"], "lead");
+    let renamed = rename_clip(&song, "a1", "bass1").unwrap().arranged.song;
+    assert_eq!(renamed.scenes["jam"].slots["acid"], "bass1");
+    assert_eq!(renamed.scenes["alt"].slots["acid"], "lead");
 }

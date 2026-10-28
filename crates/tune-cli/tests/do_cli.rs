@@ -737,3 +737,217 @@ fn undo_run_says_what_it_kept() {
         "{err}"
     );
 }
+
+#[test]
+fn scenes_from_the_cli() {
+    let e = fixture();
+    let session =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/session.toml");
+    fs::copy(session, &e.song).unwrap();
+    let song = e.song.to_str().unwrap();
+
+    let v = json_out(
+        e.tune()
+            .args(["do", song, "add_scene", "scene=jam", "index=0", "--json"]),
+    );
+    assert_eq!(v["results"][0], Value::Null);
+    json_out(e.tune().args([
+        "do",
+        song,
+        "set_slot",
+        "scene=jam",
+        "track=acid",
+        "clip=a1",
+        "--json",
+    ]));
+    json_out(
+        e.tune()
+            .args(["do", song, "move_scene", "scene=jam", "index=2", "--json"]),
+    );
+    json_out(
+        e.tune()
+            .args(["do", song, "rename_scene", "scene=jam", "to=fill", "--json"]),
+    );
+    let text = fs::read_to_string(&e.song).unwrap();
+    assert!(
+        text.contains("[scenes.fill]\nslots = { acid = \"a1\" }"),
+        "{text}"
+    );
+    assert!(
+        text.find("[scenes.break]") < text.find("[scenes.fill]"),
+        "{text}"
+    );
+
+    // Text mode says which slots went with the scene.
+    let out = e
+        .tune()
+        .args(["do", song, "remove_scene", "scene=groove"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("removed slot k4 on kick in scene groove"),
+        "{text}"
+    );
+    assert!(
+        text.contains("removed slot a1 on acid in scene groove"),
+        "{text}"
+    );
+    let v = json_out(
+        e.tune()
+            .args(["do", song, "remove_scene", "scene=break", "--json"]),
+    );
+    assert_eq!(
+        v["results"][0]["removed"]["slots"],
+        json!([{"scene": "break", "track": "hat", "clip": "h"}])
+    );
+}
+
+#[test]
+fn removing_an_empty_scene_prints_no_raw_json() {
+    let e = fixture();
+    let session =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/session.toml");
+    fs::copy(session, &e.song).unwrap();
+    let song = e.song.to_str().unwrap();
+    json_out(
+        e.tune()
+            .args(["do", song, "add_scene", "scene=empty", "--json"]),
+    );
+    let out = e
+        .tune()
+        .args(["do", song, "remove_scene", "scene=empty"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    // The change line says the scene went; no result line follows it.
+    assert_eq!(
+        text.trim(),
+        "set scenes.empty {\"slots\":{}} -> null",
+        "{text}"
+    );
+}
+
+#[test]
+fn removed_slots_are_printed() {
+    let e = fixture();
+    let session =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/session.toml");
+    fs::copy(session, &e.song).unwrap();
+    let song = e.song.to_str().unwrap();
+    let out = e
+        .tune()
+        .args(["do", song, "remove_track", "track=acid"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("removed slot a1 on acid in scene groove"),
+        "{text}"
+    );
+}
+
+/// The session fixture in place of the commented one.
+fn session_fixture() -> Env {
+    let e = fixture();
+    let session =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/session.toml");
+    fs::copy(session, &e.song).unwrap();
+    e
+}
+
+#[test]
+fn session_actions_need_the_studio() {
+    let e = session_fixture();
+    let song = e.song.to_str().unwrap();
+    let before = fs::read(&e.song).unwrap();
+    let msg = fails(
+        e.tune()
+            .args(["do", song, "launch_scene", "groove", "--json"]),
+    );
+    assert!(
+        msg.contains(
+            "`launch_scene` needs the studio: open the song with `tune serve <song>` or the app first"
+        ),
+        "{msg}"
+    );
+    let batch = r#"[{"cmd": "launch_scene", "args": {"scene": "groove"}}]"#;
+    let msg = fails(
+        e.tune()
+            .args(["do", song, "--batch", "--json"])
+            .write_stdin(batch),
+    );
+    assert!(
+        msg.contains("a batch holds song edits only; run `launch_scene` on its own"),
+        "{msg}"
+    );
+    assert_eq!(fs::read(&e.song).unwrap(), before);
+    assert_eq!(e.log(), "");
+
+    let v = json_out(e.tune().args(["actions", "--json"]));
+    let actions = v["actions"].as_array().unwrap();
+    let launch = actions
+        .iter()
+        .find(|a| a["name"] == "launch_clip")
+        .unwrap_or_else(|| panic!("no launch_clip in {actions:?}"));
+    assert_eq!(launch["kind"], "live");
+    let args: Vec<&str> = launch["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(args, ["track", "scene"]);
+}
+
+/// Through a running studio a session action plays and prints nothing in
+/// text mode; its JSON result is `null` and nothing is written.
+#[test]
+fn session_actions_through_the_studio_print_nothing() {
+    let e = session_fixture();
+    let studio = Studio::spawn(
+        StudioConfig {
+            audio: Box::new(tune_audio::NullOut::new()),
+            songs_root: e.dir.path().to_owned(),
+        },
+        Some(e.song.clone()),
+    )
+    .unwrap();
+    let _control = ControlServer::start(studio.clone(), e.studio.path()).unwrap();
+    let song = e.song.to_str().unwrap();
+    let before = fs::read(&e.song).unwrap();
+
+    let out = e
+        .tune()
+        .args(["do", song, "launch_scene", "scene=groove"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    // `finish` ends the (empty) text with its newline.
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "\n", "{out:?}");
+    let state = studio
+        .call(StudioCall::Studio(StudioCommand::GetState))
+        .unwrap();
+    assert_eq!(state["playing"], true);
+
+    let v = json_out(
+        e.tune()
+            .args(["do", song, "stop_clip", "track=hat", "--json"]),
+    );
+    assert_eq!(v["via"], "studio");
+    assert_eq!(v["results"], json!([null]));
+    assert_eq!(v["changes"], json!([]));
+    let msg = fails(
+        e.tune()
+            .args(["do", song, "launch_clip", "track=acid", "scene=break"]),
+    );
+    assert!(
+        msg.contains("scene `break` has no clip for track `acid`"),
+        "{msg}"
+    );
+    assert_eq!(fs::read(&e.song).unwrap(), before);
+    studio.shutdown();
+}

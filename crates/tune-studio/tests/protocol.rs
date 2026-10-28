@@ -28,6 +28,10 @@ fn wire_name(c: &Command) -> &'static str {
             Action::Stop => "stop",
             Action::SeekBar { .. } => "seek_bar",
             Action::SetLoop { .. } => "set_loop",
+            Action::LaunchClip { .. } => "launch_clip",
+            Action::LaunchScene { .. } => "launch_scene",
+            Action::StopClip { .. } => "stop_clip",
+            Action::BackToArrangement { .. } => "back_to_arrangement",
             Action::Undo => "undo",
             Action::Redo => "redo",
             Action::SetValue { .. } => "set_value",
@@ -59,6 +63,11 @@ fn wire_name(c: &Command) -> &'static str {
             Action::RemovePlacement { .. } => "remove_placement",
             Action::AddSection { .. } => "add_section",
             Action::RenameSection { .. } => "rename_section",
+            Action::AddScene { .. } => "add_scene",
+            Action::RemoveScene { .. } => "remove_scene",
+            Action::RenameScene { .. } => "rename_scene",
+            Action::MoveScene { .. } => "move_scene",
+            Action::SetSlot { .. } => "set_slot",
             Action::AddLane { .. } => "add_lane",
             Action::RemoveLane { .. } => "remove_lane",
             Action::SetLanePoints { .. } => "set_lane_points",
@@ -109,6 +118,17 @@ fn sample_actions() -> Vec<Action> {
         Action::Stop,
         Action::SeekBar { bar: 8 },
         Action::SetLoop { bars: Some([2, 6]) },
+        Action::LaunchClip {
+            track: "acid".into(),
+            scene: "groove".into(),
+        },
+        Action::LaunchScene {
+            scene: "groove".into(),
+        },
+        Action::StopClip {
+            track: "hat".into(),
+        },
+        Action::BackToArrangement { track: None },
         Action::Undo,
         Action::Redo,
         Action::SetValue {
@@ -235,6 +255,26 @@ fn sample_actions() -> Vec<Action> {
         Action::RenameSection {
             index: 1,
             name: "drop".into(),
+        },
+        Action::AddScene {
+            scene: "jam".into(),
+            index: Some(1),
+        },
+        Action::RemoveScene {
+            scene: "groove".into(),
+        },
+        Action::RenameScene {
+            scene: "groove".into(),
+            to: "drop".into(),
+        },
+        Action::MoveScene {
+            scene: "break".into(),
+            index: 0,
+        },
+        Action::SetSlot {
+            scene: "groove".into(),
+            track: "acid".into(),
+            clip: Some("a1".into()),
         },
         Action::AddLane {
             param: "mix.reverb.size".into(),

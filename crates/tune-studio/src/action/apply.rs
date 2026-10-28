@@ -267,6 +267,11 @@ pub(crate) fn apply_action(
         Action::RenameSection { index, name } => {
             doc.set(&SongPath::SectionName(*index), &Value::from(name.as_str()))?;
         }
+        Action::AddScene { scene, index } => doc.add_scene(scene, *index)?,
+        Action::RemoveScene { scene } => return Ok(removed_value(&doc.remove_scene(scene)?)),
+        Action::RenameScene { scene, to } => doc.rename_scene(scene, to)?,
+        Action::MoveScene { scene, index } => doc.move_scene(scene, *index)?,
+        Action::SetSlot { scene, track, clip } => doc.set_slot(scene, track, clip.as_deref())?,
         Action::AddLane {
             param,
             at,
@@ -294,6 +299,10 @@ pub(crate) fn apply_action(
         | Action::Stop
         | Action::SeekBar { .. }
         | Action::SetLoop { .. }
+        | Action::LaunchClip { .. }
+        | Action::LaunchScene { .. }
+        | Action::StopClip { .. }
+        | Action::BackToArrangement { .. }
         | Action::Undo
         | Action::Redo => return Err(StudioError::NotAnEdit),
     }
@@ -322,10 +331,11 @@ fn pairs(points: &[[f64; 2]]) -> Vec<(f64, f64)> {
     points.iter().map(|&[bar, value]| (bar, value)).collect()
 }
 
-/// What an edit removed, as the action's result: `{"removed": {"lanes":
-/// […], "placements": […], "duck_source": …}}`. A lane is `{"param": "<track>.<param>",
-/// "at", "bars", "points"}` (`at` 1-based), a placement
-/// `{"track", "at", "clip", "bars", "offset"}`.
+/// What an edit removed, as the action's result: `{"removed": {"lanes": […],
+/// "placements": […], "slots": […], "duck_source": …}}`. A lane is `{"param":
+/// "<track>.<param>", "at", "bars", "points"}` (`at` 1-based), a placement
+/// `{"track", "at", "clip", "bars", "offset"}`, a slot `{"scene", "track",
+/// "clip"}`.
 fn removed_value(removed: &Removed) -> Value {
     let lanes: Vec<Value> = removed
         .lanes
@@ -355,9 +365,15 @@ fn removed_value(removed: &Removed) -> Value {
             value
         })
         .collect();
+    let slots: Vec<Value> = removed
+        .slots
+        .iter()
+        .map(|s| json!({ "scene": s.scene, "track": s.track, "clip": s.clip }))
+        .collect();
     json!({ "removed": {
         "lanes": lanes,
         "placements": placements,
+        "slots": slots,
         "duck_source": removed.duck_source,
     } })
 }

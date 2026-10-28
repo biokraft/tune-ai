@@ -3,9 +3,11 @@
 //!
 //! This module checks the header, the mix, ducking, ids and the song
 //! length; [`tracks`] checks tracks, their fx and their params, and
-//! [`arrange`] clips, sections, placements and lanes.
+//! [`arrange`] clips, sections, placements and lanes and [`scenes`] the
+//! session scenes.
 
 mod arrange;
+mod scenes;
 mod tracks;
 
 use std::ops::RangeInclusive;
@@ -80,10 +82,16 @@ pub(crate) fn validate(raw: RawSong, registry: &Registry, errors: &mut Errors) -
     let duck = Duck::of(&raw, &shapes);
     check_duck_depths(&raw, &duck, errors);
 
-    let arrangement = if v2 {
-        arrange::v2(&raw, &shapes, &duck, &mut tracks, errors)
+    let (arrangement, scenes) = if v2 {
+        let kinds = arrange::clip_kinds(&raw, errors);
+        let arrangement = arrange::v2(&raw, &shapes, &kinds, &duck, &mut tracks, errors);
+        let scenes = scenes::scenes(&raw.scenes, &shapes, &kinds, errors);
+        (arrangement, scenes)
     } else {
-        arrange::v1(&raw, &shapes, &duck, &mut tracks, errors)
+        (
+            arrange::v1(&raw, &shapes, &duck, &mut tracks, errors),
+            IndexMap::new(),
+        )
     };
 
     // Counted over every section whose bars are valid, so the length check
@@ -117,6 +125,7 @@ pub(crate) fn validate(raw: RawSong, registry: &Registry, errors: &mut Errors) -
         sample_rate,
         tracks,
         clips: arrangement.clips,
+        scenes,
         sections: arrangement.sections,
         automation: arrangement.automation,
         mix: mix?,

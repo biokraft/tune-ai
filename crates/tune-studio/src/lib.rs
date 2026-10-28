@@ -19,6 +19,7 @@ mod error;
 mod log;
 mod path;
 mod run_undo;
+mod session;
 mod set;
 mod studio;
 mod target;

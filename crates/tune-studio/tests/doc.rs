@@ -1437,3 +1437,208 @@ fn views_show_note_clips() {
         })
     );
 }
+
+const SESSION: &str = include_str!("../../tune-song/tests/fixtures/session.toml");
+
+fn session() -> SongDoc {
+    SongDoc::parse(SESSION).expect("session fixture parses")
+}
+
+#[test]
+fn scene_paths_parse_and_print() {
+    for s in ["scenes", "scenes.groove", "scenes.groove.slots.acid"] {
+        assert_eq!(path(s).to_string(), s);
+    }
+    assert_eq!(
+        path("scenes.groove.slots.acid"),
+        SongPath::SceneSlot {
+            scene: "groove".into(),
+            track: "acid".into()
+        }
+    );
+    assert!(path("scenes").is_read_only());
+    assert!(path("scenes.groove").is_read_only());
+    assert!(!path("scenes.groove.slots.acid").is_read_only());
+    for bad in [
+        "scenes.Groove.slots.acid",
+        "scenes.groove.acid",
+        "scenes.groove.slots",
+        "scenes.groove.slots.",
+        "scenes.groove.slots.Acid",
+        "scenes..slots.acid",
+        "scenes.",
+    ] {
+        let err = bad.parse::<SongPath>().expect_err(bad);
+        assert!(err.contains("scenes.<scene>.slots.<track>"), "{err}");
+    }
+}
+
+#[test]
+fn scene_values() {
+    let d = session();
+    let get = |s: &str| d.get(&path(s));
+    assert_eq!(get("scenes"), Some(json!(["groove", "break"])));
+    assert_eq!(
+        get("scenes.groove"),
+        Some(json!({ "slots": { "kick": "k4", "acid": "a1" } }))
+    );
+    assert_eq!(get("scenes.groove.slots.acid"), Some(json!("a1")));
+    assert_eq!(get("scenes.groove.slots.hat"), Some(Value::Null));
+    assert_eq!(get("scenes.nope.slots.acid"), None);
+    assert_eq!(get("scenes.nope"), None);
+    let plain = SongDoc::parse(COMMENTED).unwrap();
+    assert_eq!(plain.get(&path("scenes")), Some(json!([])));
+}
+
+#[test]
+fn set_a_slot_in_place() {
+    let mut d = session();
+    d.set(&path("scenes.groove.slots.hat"), &json!("h"))
+        .unwrap();
+    assert_eq!(
+        d.text(),
+        SESSION.replace(
+            "slots = { kick = \"k4\", acid = \"a1\" }",
+            "slots = { kick = \"k4\", acid = \"a1\", hat = \"h\" }"
+        )
+    );
+    assert_eq!(d.song().scenes["groove"].slots["hat"], "h");
+
+    // Replacing an existing slot keeps the key's place.
+    let mut d = session();
+    d.set(&path("scenes.groove.slots.kick"), &json!("k4"))
+        .unwrap();
+    assert_eq!(d.text(), SESSION);
+
+    let mut d = session();
+    d.set(&path("scenes.groove.slots.acid"), &Value::Null)
+        .unwrap();
+    assert_eq!(
+        d.text(),
+        SESSION.replace(
+            "slots = { kick = \"k4\", acid = \"a1\" }",
+            "slots = { kick = \"k4\" }"
+        )
+    );
+    // The empty string clears too.
+    let mut e = session();
+    e.set(&path("scenes.groove.slots.acid"), &json!(""))
+        .unwrap();
+    assert_eq!(e.text(), d.text());
+
+    let mut d = session();
+    d.set(&path("scenes.break.slots.hat"), &Value::Null)
+        .unwrap();
+    assert_eq!(d.text(), SESSION.replace("slots = { hat = \"h\" }\n", ""));
+    assert!(d.text().contains("# hats alone\n[scenes.break]\n"));
+    assert!(d.song().scenes["break"].slots.is_empty());
+
+    // A scene without `slots` gets them, and clearing the last one takes them away again.
+    let bare = SESSION.replace("slots = { hat = \"h\" }\n", "");
+    let mut d = SongDoc::parse(&bare).unwrap();
+    d.set(&path("scenes.break.slots.hat"), &json!("h")).unwrap();
+    assert_eq!(d.text(), SESSION);
+    d.set(&path("scenes.break.slots.hat"), &Value::Null)
+        .unwrap();
+    assert_eq!(d.text(), bare);
+    // Clearing an empty slot changes nothing.
+    d.set(&path("scenes.break.slots.hat"), &Value::Null)
+        .unwrap();
+    assert_eq!(d.text(), bare);
+}
+
+#[test]
+fn set_a_slot_in_a_slots_table() {
+    let tabled = SESSION.replace(
+        "slots = { kick = \"k4\", acid = \"a1\" }",
+        "\n[scenes.groove.slots]\nkick = \"k4\" # the floor\nacid = \"a1\"",
+    );
+    let tabled = tabled.replace("# jam rows\n\n", "# jam rows\n");
+    let mut d = SongDoc::parse(&tabled).unwrap();
+    d.set(&path("scenes.groove.slots.hat"), &json!("h"))
+        .unwrap();
+    assert_eq!(
+        d.text(),
+        tabled.replace("acid = \"a1\"\n", "acid = \"a1\"\nhat = \"h\"\n")
+    );
+    d.set(&path("scenes.groove.slots.kick"), &Value::Null)
+        .unwrap();
+    assert!(
+        d.text().contains("acid = \"a1\"\nhat = \"h\"\n"),
+        "{}",
+        d.text()
+    );
+    assert!(!d.text().contains("the floor"), "{}", d.text());
+    assert_eq!(d.song().scenes["groove"].slots.len(), 2);
+}
+
+#[test]
+fn slot_errors() {
+    let mut d = session();
+    let err = d
+        .set(&path("scenes.nope.slots.acid"), &json!("a1"))
+        .unwrap_err();
+    assert_eq!(
+        err,
+        EditError::NoSuchTarget("scenes.nope.slots.acid".into())
+    );
+    let err = d
+        .set(&path("scenes.groove.slots.acid"), &json!("k4"))
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("clip `k4` is a drum clip; track `acid` (acid303) plays acid clips"),
+        "{err}"
+    );
+    let err = d
+        .set(&path("scenes.groove.slots.bass"), &json!("k4"))
+        .unwrap_err();
+    assert!(err.to_string().contains("unknown track `bass`"), "{err}");
+    let err = d
+        .set(&path("scenes.groove.slots.hat"), &json!(3))
+        .unwrap_err();
+    assert!(matches!(err, EditError::BadValue { .. }), "{err}");
+    let err = d.set(&path("scenes.groove"), &json!({})).unwrap_err();
+    assert!(matches!(err, EditError::ReadOnly(_)), "{err}");
+    assert_eq!(d.text(), SESSION);
+}
+
+#[test]
+fn clearing_an_absent_slot_changes_no_text() {
+    let inline = SESSION.replace("slots = { hat = \"h\" }", "slots = {}");
+    let tabled = SESSION.replace("slots = { hat = \"h\" }", "[scenes.break.slots] # none");
+    for text in [inline, tabled] {
+        let mut d = SongDoc::parse(&text).unwrap();
+        d.set(&path("scenes.break.slots.hat"), &Value::Null)
+            .unwrap();
+        assert_eq!(d.text(), text);
+    }
+}
+
+#[test]
+fn clearing_the_last_slot_of_a_table_keeps_the_table() {
+    let tabled = SESSION.replace(
+        "slots = { hat = \"h\" }",
+        "[scenes.break.slots] # the hats\nhat = \"h\"",
+    );
+    let mut d = SongDoc::parse(&tabled).unwrap();
+    d.set(&path("scenes.break.slots.hat"), &Value::Null)
+        .unwrap();
+    assert_eq!(d.text(), tabled.replace("hat = \"h\"\n", ""));
+    assert!(d.text().contains("[scenes.break.slots] # the hats"));
+    assert!(d.song().scenes["break"].slots.is_empty());
+}
+
+#[test]
+fn clearing_a_non_last_inline_slot_keeps_the_rest() {
+    let mut d = session();
+    d.set(&path("scenes.groove.slots.kick"), &Value::Null)
+        .unwrap();
+    assert_eq!(
+        d.text(),
+        SESSION.replace(
+            "slots = { kick = \"k4\", acid = \"a1\" }",
+            "slots = { acid = \"a1\" }"
+        )
+    );
+}

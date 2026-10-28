@@ -82,6 +82,20 @@ describe("describeChange on v2 songs", () => {
   });
 });
 
+describe("describeChange on scenes", () => {
+  it("words the order, an added or removed scene and a slot", () => {
+    expect(change("scenes", ["a"], ["b", "a"])).toBe("Scene order");
+    expect(change("scenes.groove", null, { slots: {} })).toBe("Scene groove added");
+    expect(change("scenes.groove", { slots: {} }, null)).toBe("Scene groove removed");
+    expect(change("scenes.groove", { slots: {} }, { slots: { hat: "h" } })).toBe(
+      "Scene groove changed",
+    );
+    expect(change("scenes.groove.slots.hat", null, "h")).toBe("hat in scene groove none → h");
+    expect(change("scenes.groove.slots.hat", "h", "a1")).toBe("hat in scene groove h → a1");
+    expect(change("scenes.groove.slots.hat", "h", null)).toBe("hat in scene groove h → none");
+  });
+});
+
 describe("describeTarget", () => {
   const k = (target: string, by: "human" | "claude" | "external" | null = null) =>
     ({ target, item: null, reason: "changed_later", by, message: null }) as never;
@@ -114,5 +128,13 @@ describe("describeTarget", () => {
     expect(describeTarget(k("sections", "claude"), song)).toBe("the sections (another run)");
     expect(describeTarget(k("sections", "external"), song)).toBe("the sections");
     expect(describeTarget(k("sections", null), song)).toBe("the sections");
+  });
+  it("names a scene target", () => {
+    expect(describeTarget(k("scenes"), song)).toBe("the scene order");
+    expect(describeTarget(k("scenes.jam", "human"), song)).toBe("scene jam (by you)");
+    expect(describeTarget(k("scenes.jam.slots.hat", "claude"), song)).toBe(
+      "hat's slot in scene jam (another run)",
+    );
+    expect(describeTarget(k("scenes.jam.slots.hat"), song)).toBe("hat's slot in scene jam");
   });
 });
