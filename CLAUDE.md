@@ -12,9 +12,11 @@ and lock-free live playback) driven through the `tune` CLI.
   note events), today's modules and the registry; depends only on tune-dsp.
 - `crates/tune-song` - song file model (format v2): parse, validate
   (positional errors), canonical write, the comment-keeping migration of v1
-  files to v2, section operations, file watcher. Headless.
+  files to v2, section, track, clip and scene operations, file watcher.
+  Headless.
 - `crates/tune-engine` - compiles a song and renders it: offline (`render`) or
-  live (`live`, lock-free swap for hot reload). Headless.
+  live (`live`, lock-free swap for hot reload, session play of scenes and
+  clips cued to bar lines). Headless.
 - `crates/tune-studio` - the studio core: in-place song edits by path
   (`SongPath`, comments kept), the action layer, the edit log, undo,
   external-change merge, the `Studio` actor the app talks to and its local
