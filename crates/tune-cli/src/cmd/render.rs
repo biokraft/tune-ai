@@ -8,7 +8,7 @@ use serde_json::json;
 use tune_engine::{CLIP_CEILING, CompiledSong, RenderOptions, render_to_files};
 use tune_song::MasterMode;
 
-use super::{load, sample_rate};
+use super::{load, note_migration, sample_rate};
 use crate::report::{Failure, Success, dbfs, finish, fmt_time, parse_bar_range};
 
 /// Limiter reduction (dB) above which the render warns.
@@ -41,7 +41,8 @@ fn check_out(out: &Path, stems: bool) -> Result<(), String> {
 }
 
 fn run_inner(a: &Args) -> Result<Success, Vec<Failure>> {
-    let song = load(&a.song)?;
+    let loaded = load(&a.song)?;
+    let song = loaded.song;
     let total = song.total_bars();
     let range = match &a.bars {
         Some(s) => parse_bar_range(s, total).map_err(|m| vec![Failure::msg(m)])?,
@@ -102,7 +103,7 @@ fn run_inner(a: &Args) -> Result<Success, Vec<Failure>> {
         .iter()
         .map(|f| f.display().to_string())
         .collect();
-    Ok(Success {
+    let mut success = Success {
         text,
         json: json!({
             "files": files,
@@ -114,7 +115,9 @@ fn run_inner(a: &Args) -> Result<Success, Vec<Failure>> {
             "master": compiled_master.name(),
             "max_reduction_db": (reduction * 100.0).round() / 100.0,
         }),
-    })
+    };
+    note_migration(&a.song, loaded.migrated_from, a.json, &mut success);
+    Ok(success)
 }
 
 pub fn run(a: &Args) -> ExitCode {

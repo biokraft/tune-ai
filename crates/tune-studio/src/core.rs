@@ -17,24 +17,30 @@
 //! the external value and is offered back for re-apply, so the producer's
 //! edits are never silently lost. While the file does not parse, the last
 //! good song and the pending edits are kept and nothing is written.
+//!
+//! A song file in an older format is migrated when opened: the new text is
+//! written at once, logged as one `external` `song.version` change and kept
+//! as one undo step, so undo puts the old bytes back. The document in
+//! memory stays migrated, so the next edit writes the newest format again.
+//! An older-format text that arrives from outside is read migrated and not
+//! written back.
 
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::Value;
 use tune_dsp::DrumPattern;
 use tune_dsp::acid303::{AcidPattern, AcidStep};
-use tune_song::{PatternSteps, Song};
+use tune_song::{Clip, FORMAT_VERSION, Song};
 
 use crate::command::Command;
-use crate::diff::{Change, diff_songs, is_whole_replace};
+use crate::diff::{Change, diff_files, diff_songs, is_whole_replace, version_change};
 use crate::doc::{EditError, SongDoc};
 use crate::error::{ErrorView, StudioError};
-use crate::log::{EditEntry, EditLog, Source, text_hash};
+use crate::log::{EditLog, Source, text_hash};
 use crate::path::{SongPath, TrackField};
 use crate::set::write_atomic;
 use crate::view::SongView;
@@ -109,8 +115,10 @@ pub struct StudioCore {
     log: EditLog,
     /// The current document: the disk text plus the pending edits.
     doc: SongDoc,
-    /// The text last written or read, and the song it describes.
+    /// The text last written or read, the format version it is in and the
+    /// song it describes.
     disk_text: String,
+    disk_version: u32,
     disk_song: Song,
     /// Edits since the last flush, oldest first.
     pending: Vec<PendingEdit>,
@@ -128,19 +136,30 @@ pub struct StudioCore {
     /// An external change that [`flush`](Self::flush) took in before the
     /// watcher reported it, waiting to be announced.
     unreported: Option<ExternalChange>,
+    /// The version the file was migrated from when opened, and the undo
+    /// step the migration made.
+    migration: Option<(u32, UndoEntry)>,
+    /// Why writing the open-time migration back (or logging it) failed,
+    /// until the next successful write.
+    migration_error: Option<String>,
 }
 
 impl StudioCore {
-    /// Opens the song file at `path`.
+    /// Opens the song file at `path`. A file in an older format is migrated
+    /// and written back (see the module docs); when that write fails, the
+    /// song still opens, migrated in memory, and
+    /// [`migration_error`](Self::migration_error) says why.
     pub fn open(path: &Path) -> Result<Self, StudioError> {
         let text = fs::read_to_string(path)
             .map_err(|e| StudioError::Io(format!("cannot read {}: {e}", path.display())))?;
         let doc = SongDoc::parse(&text)
             .map_err(|errs| StudioError::Load(errs.iter().map(ErrorView::from).collect()))?;
-        Ok(Self {
+        let migrated_from = doc.migrated_from();
+        let mut core = Self {
             path: path.to_owned(),
             log: EditLog::for_song(path),
             disk_song: doc.song().clone(),
+            disk_version: text_version(&doc),
             doc,
             disk_text: text,
             pending: Vec::new(),
@@ -152,7 +171,63 @@ impl StudioCore {
             offered_changes: Vec::new(),
             file_errors: Vec::new(),
             unreported: None,
-        })
+            migration: None,
+            migration_error: None,
+        };
+        if let Some(from) = migrated_from {
+            core.write_migration(from);
+        }
+        Ok(core)
+    }
+
+    /// Writes the document, migrated from format `from` in memory, over the
+    /// older text as one of the studio's own writes, logs it as one
+    /// `external` `song.version` change and makes it one undo step. When the
+    /// write fails, nothing is logged or pushed and the reason is kept.
+    fn write_migration(&mut self, from: u32) {
+        let text = self.doc.text();
+        let hash = match self.write(&text) {
+            Ok(hash) => hash,
+            Err(e) => {
+                self.migration_error = Some(format!(
+                    "the song was upgraded to the new file format in memory but not saved: {e}"
+                ));
+                return;
+            }
+        };
+        let changes: Vec<Change> = version_change(from, FORMAT_VERSION).into_iter().collect();
+        if let Err(e) = self.log.append_changes(Source::External, &changes, &hash) {
+            // The file is migrated either way; say that the log missed it.
+            self.migration_error = Some(format!(
+                "the song was upgraded and saved, but the edit log could not be written: {e}"
+            ));
+        }
+        let before = std::mem::replace(&mut self.disk_text, text.clone());
+        self.disk_version = FORMAT_VERSION;
+        let entry = UndoEntry {
+            before,
+            after: text,
+            source: Source::External,
+            changes,
+        };
+        self.migration = Some((from, entry.clone()));
+        self.push_undo(entry);
+    }
+
+    /// The format version the song file was migrated from when opened,
+    /// while that migration is the newest undo step (and no edit is
+    /// pending), so that one undo reverts it; else `None`.
+    pub fn migrated_from(&self) -> Option<u32> {
+        let (from, entry) = self.migration.as_ref()?;
+        (self.pending.is_empty() && self.undo.back() == Some(entry)).then_some(*from)
+    }
+
+    /// Why the migrated text could not be written back when the song was
+    /// opened (the song is open, migrated in memory), or why the edit log
+    /// missed the migration, as a sentence for the producer; `None` when it
+    /// went well, there was none, or the studio has written the file since.
+    pub fn migration_error(&self) -> Option<&str> {
+        self.migration_error.as_deref()
     }
 
     /// Applies an edit command in memory and returns what it changed. The
@@ -226,8 +301,14 @@ impl StudioCore {
         }
         let hash = self.write(&text)?;
         self.clear_pending();
-        let changes = diff_songs(&self.disk_song, self.doc.song());
+        let changes = diff_files(
+            self.disk_version,
+            &self.disk_song,
+            FORMAT_VERSION,
+            self.doc.song(),
+        );
         let before = std::mem::replace(&mut self.disk_text, text.clone());
+        self.disk_version = FORMAT_VERSION;
         self.disk_song = self.doc.song().clone();
         self.push_undo(UndoEntry {
             before,
@@ -279,7 +360,8 @@ impl StudioCore {
         } else {
             Source::External
         };
-        let changes = diff_songs(&self.disk_song, doc.song());
+        let version = text_version(&doc);
+        let changes = diff_files(self.disk_version, &self.disk_song, version, doc.song());
         if source == Source::External {
             // Best effort: the change is adopted even if the log is not
             // writable, as it is already on disk.
@@ -287,6 +369,7 @@ impl StudioCore {
         }
         let replaced = is_whole_replace(&self.disk_text, &text);
         let before = std::mem::replace(&mut self.disk_text, text.clone());
+        self.disk_version = version;
         self.disk_song = doc.song().clone();
         self.push_undo(UndoEntry {
             before,
@@ -483,19 +566,14 @@ impl StudioCore {
         }
     }
 
-    /// Whether `bar` (0-based) lies in a section with a lane for this
+    /// Whether `bar` (0-based) lies in a stretch of the lane for this
     /// track's `param`.
     pub fn is_automated(&self, track: &str, param: &str, bar: u32) -> bool {
-        let song = self.doc.song();
-        song.sections
+        self.doc
+            .song()
+            .automation
             .iter()
-            .zip(song.section_start_bars())
-            .find(|(s, start)| (*start..*start + s.bars).contains(&bar))
-            .is_some_and(|(s, _)| {
-                s.automation
-                    .iter()
-                    .any(|l| l.track == track && l.param == param)
-            })
+            .any(|l| l.track == track && l.param == param && l.span().contains(&bar))
     }
 
     /// The current song, pending edits included.
@@ -551,6 +629,9 @@ impl StudioCore {
     fn write(&mut self, text: &str) -> Result<String, StudioError> {
         write_atomic(&self.path, text)
             .map_err(|e| StudioError::Io(format!("cannot write {}: {e}", self.path.display())))?;
+        // The file now holds the newest format, whatever the open-time
+        // migration could not do.
+        self.migration_error = None;
         let hash = text_hash(text);
         if self.own_writes.len() == OWN_WRITE_RING {
             self.own_writes.pop_front();
@@ -566,9 +647,11 @@ impl StudioCore {
         let doc = SongDoc::parse(text)
             .map_err(|errs| StudioError::Load(errs.iter().map(ErrorView::from).collect()))?;
         let hash = self.write(text)?;
-        let changes = diff_songs(&self.disk_song, doc.song());
+        let version = text_version(&doc);
+        let changes = diff_files(self.disk_version, &self.disk_song, version, doc.song());
         self.disk_song = doc.song().clone();
         self.disk_text = text.to_owned();
+        self.disk_version = version;
         self.doc = doc;
         self.clear_pending();
         Ok((changes, hash))
@@ -591,24 +674,17 @@ impl StudioCore {
         changes: &[Change],
         hash: &str,
     ) -> Result<(), StudioError> {
-        let ts = Timestamp::now();
-        let entries: Vec<EditEntry> = changes
-            .iter()
-            .map(|c| EditEntry {
-                ts,
-                source,
-                path: c.path.to_string(),
-                old: c.old.clone(),
-                new: c.new.clone(),
-                file_hash: Some(hash.to_owned()),
-            })
-            .collect();
-        self.log.append(&entries).map_err(|e| {
+        self.log.append_changes(source, changes, hash).map_err(|e| {
             StudioError::Io(format!(
                 "the song was written, but the edit log failed: {e}"
             ))
         })
     }
+}
+
+/// The format version of the text `doc` was parsed from.
+fn text_version(doc: &SongDoc) -> u32 {
+    doc.migrated_from().unwrap_or(FORMAT_VERSION)
 }
 
 /// Applies one edit command to `doc`, all or nothing. Works on any document,
@@ -624,9 +700,14 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
             let path = SongPath::param(track, param);
             doc.set(&path, &Value::from(round_significant(*value)))?;
         }
-        Command::SetFxMode { track, mode } => {
-            let path = SongPath::FxMode {
+        Command::SetFxMode {
+            track,
+            device,
+            mode,
+        } => {
+            let path = SongPath::TrackParam {
                 track: track.clone(),
+                param: format!("{device}.mode"),
             };
             doc.set(&path, &Value::from(mode.as_str()))?;
         }
@@ -637,12 +718,14 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
             accent,
             slide,
         } => {
-            let path = SongPath::Pattern {
-                pattern: pattern.clone(),
+            let path = SongPath::Clip {
+                clip: pattern.clone(),
             };
             let mut steps = match pattern_steps(doc, &path, pattern)? {
-                PatternSteps::Acid(p) => p.steps().to_vec(),
-                PatternSteps::Drum(_) => return Err(bad(&path, "not an acid pattern").into()),
+                Clip::Acid(p) => p.steps().to_vec(),
+                Clip::Drum(_) | Clip::Notes(_) => {
+                    return Err(bad(&path, "not an acid pattern").into());
+                }
             };
             let step = step_mut(&mut steps, *index)?;
             *step = AcidStep {
@@ -658,12 +741,14 @@ fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
             index,
             hit,
         } => {
-            let path = SongPath::Pattern {
-                pattern: pattern.clone(),
+            let path = SongPath::Clip {
+                clip: pattern.clone(),
             };
             let mut hits = match pattern_steps(doc, &path, pattern)? {
-                PatternSteps::Drum(p) => p.hits().to_vec(),
-                PatternSteps::Acid(_) => return Err(bad(&path, "not a drum pattern").into()),
+                Clip::Drum(p) => p.hits().to_vec(),
+                Clip::Acid(_) | Clip::Notes(_) => {
+                    return Err(bad(&path, "not a drum pattern").into());
+                }
             };
             *step_mut(&mut hits, *index)? = (*hit).into();
             let p = DrumPattern::new(hits).map_err(|e| bad(&path, &e.to_string()))?;
@@ -748,7 +833,6 @@ fn holds(whole: &SongPath, part: &SongPath) -> bool {
             SongPath::Track { track },
             SongPath::TrackField { track: t, .. }
             | SongPath::TrackParam { track: t, .. }
-            | SongPath::FxMode { track: t }
             | SongPath::SectionPlay { track: t, .. },
         ) => t == track,
         _ => false,
@@ -759,11 +843,10 @@ fn pattern_steps<'d>(
     doc: &'d SongDoc,
     path: &SongPath,
     pattern: &str,
-) -> Result<&'d PatternSteps, EditError> {
+) -> Result<&'d Clip, EditError> {
     doc.song()
-        .patterns
+        .clips
         .get(pattern)
-        .map(|p| &p.steps)
         .ok_or_else(|| EditError::NoSuchTarget(path.to_string()))
 }
 

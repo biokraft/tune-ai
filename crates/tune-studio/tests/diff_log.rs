@@ -8,7 +8,7 @@ use tune_studio::{
     Change, EditEntry, EditLog, SongDoc, SongPath, Source, diff_songs, is_whole_replace, text_hash,
 };
 
-const MINI: &str = include_str!("../../tune-song/tests/fixtures/mini.toml");
+const MINI: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
 const FIRST_ACID: &str = include_str!("../../../songs/first-acid/song.toml");
 
 fn song(text: &str) -> tune_song::Song {
@@ -53,16 +53,20 @@ fn diff_steps() {
     let text = MINI.replace("C2 C2! C3~ C2 . D#2 C2~ G2!", "C2 C2! C3~ C2 . D#2 C2~ A2!");
     let d = diff_songs(&song(MINI), &song(&text));
     assert_eq!(d.len(), 1, "{d:?}");
-    assert_eq!(d[0].path.to_string(), "patterns.a1.steps");
+    assert_eq!(d[0].path.to_string(), "clips.a1.steps");
     assert!(d[0].old.is_string() && d[0].new.is_string());
     assert_ne!(d[0].old, d[0].new);
 }
 
+/// The mini song with its two sections in the other order (and what plays
+/// in them with them).
 fn swapped() -> String {
-    let a = "[[sections]]\nname = \"a\"\nbars = 2\nplay = { kick = \"k4\", hat = \"h\" }\n\n";
-    let b = "[[sections]]\nname = \"b\"\nbars = 2\nplay = { kick = \"k4\", acid = \"a1\", hat = \"h\" }\n\n[[sections.automation]]\nparam = \"acid.acid303.cutoff\"\npoints = [[0, 0.1], [2, 0.8]]\n";
-    assert!(MINI.contains(&format!("{a}{b}")));
-    MINI.replace(&format!("{a}{b}"), &format!("{b}\n{a}"))
+    let mut song = song(MINI);
+    let mut doc = SongDoc::parse(MINI).unwrap();
+    doc.move_section(1, 0).unwrap();
+    song.sections.swap(0, 1);
+    assert_eq!(doc.song().sections, song.sections);
+    doc.text()
 }
 
 #[test]
@@ -80,11 +84,162 @@ fn diff_sections_reorder() {
 
 #[test]
 fn diff_bars_only() {
-    let text = MINI.replacen("bars = 2", "bars = 4", 1);
+    let mut d = SongDoc::parse(MINI).unwrap();
+    d.set(&path("sections[0].bars"), &json!(4)).unwrap();
+    // Section `b` and what plays in it move back with it; within `b`
+    // nothing changed, and `a`'s clips grow with it, so only the bars did.
     assert_eq!(
-        diff_songs(&song(MINI), &song(&text)),
+        diff_songs(&song(MINI), d.song()),
         vec![change("sections[0].bars", json!(2), json!(4))]
     );
+}
+
+/// Resizing a section moves the stretches after it (their `at` is
+/// absolute), which is not an edit of those sections' lanes. A real edit of
+/// a later section's lane still is.
+#[test]
+fn shifted_lanes_are_not_lane_changes() {
+    let old = song(MINI);
+    assert_eq!(
+        old.lanes_in(1).len(),
+        1,
+        "the fixture has a lane in section 1"
+    );
+    let resized = tune_song::resize_section(&old, 0, 3).unwrap().song;
+    assert_eq!(resized.automation[0].start_bar, 3);
+    assert_eq!(
+        diff_songs(&old, &resized),
+        vec![change("sections[0].bars", json!(2), json!(3))]
+    );
+
+    let mut edited = resized.clone();
+    edited.automation[0].points[1].1 = 0.9;
+    let lane =
+        |song: &tune_song::Song| tune_studio::effective_value(song, &path("sections[1].lanes"));
+    assert_eq!(
+        diff_songs(&old, &edited),
+        vec![
+            change("sections[0].bars", json!(2), json!(3)),
+            Change {
+                path: path("sections[1].lanes"),
+                old: lane(&old).unwrap(),
+                new: lane(&edited).unwrap(),
+            },
+        ]
+    );
+}
+
+/// The mini song with the acid playing part of section `b` from bar 2 of
+/// its clip, and a cutoff stretch across the `a`/`b` edge.
+fn partial() -> String {
+    let text = MINI
+        .replacen(
+            "play = [{ at = 3, clip = \"a1\", bars = 2 }]",
+            "play = [{ at = 3, clip = \"a1\", bars = 1, offset = 1 }]",
+            1,
+        )
+        .replacen(
+            "at = 3\nbars = 2\npoints = [[0, 0.1], [2, 0.8]]",
+            "at = 2\nbars = 3\npoints = [[0, 0.2], [1, 0.4], [3, 0.6]]",
+            1,
+        );
+    assert_ne!(text, MINI);
+    text
+}
+
+/// A placement on part of a later section, moved by a resize, is not a
+/// change of what plays there; a real change of it is.
+#[test]
+fn shifted_partial_plays_are_not_play_changes() {
+    let old = song(&partial());
+    assert!(matches!(
+        old.section_play(1, "acid"),
+        tune_song::SectionPlay::Other(_)
+    ));
+    let mut d = SongDoc::parse(&partial()).unwrap();
+    d.set(&path("sections[0].bars"), &json!(6)).unwrap();
+    let paths: Vec<String> = diff_songs(&old, d.song())
+        .iter()
+        .map(|c| c.path.to_string())
+        .collect();
+    assert_eq!(paths, ["sections[0].bars", "sections[0].lanes"]);
+
+    let edited =
+        SongDoc::parse(&partial().replacen("bars = 1, offset = 1", "bars = 1", 1)).unwrap();
+    let paths: Vec<String> = diff_songs(&old, edited.song())
+        .iter()
+        .map(|c| c.path.to_string())
+        .collect();
+    assert_eq!(paths, ["sections[1].play.acid"]);
+}
+
+/// The mini song with the kick playing one placement over both sections,
+/// `offset` bars into its clip.
+fn spanning(offset: &str) -> String {
+    let text = MINI.replacen(
+        "play = [\n  { at = 1, clip = \"k4\", bars = 2 },\n  { at = 3, clip = \"k4\", bars = 2 },\n]",
+        &format!("play = [{{ at = 1, clip = \"k4\", bars = 4{offset} }}]"),
+        1,
+    );
+    assert_ne!(text, MINI);
+    text
+}
+
+/// A change of only where a placement starts in its clip is a change of
+/// what every section it covers plays.
+#[test]
+fn an_offset_only_change_is_a_play_change() {
+    let old = song(&spanning(""));
+    assert_eq!(
+        old.section_play(0, "kick"),
+        tune_song::SectionPlay::Clip("k4")
+    );
+    // It starts before section `b`, so `b` plays it mid-clip.
+    assert!(matches!(
+        old.section_play(1, "kick"),
+        tune_song::SectionPlay::Other(_)
+    ));
+    let new = song(&spanning(", offset = 1"));
+    let changes = diff_songs(&old, &new);
+    let paths: Vec<String> = changes.iter().map(|c| c.path.to_string()).collect();
+    assert_eq!(paths, ["sections[0].play.kick", "sections[1].play.kick"]);
+    assert_eq!(changes[0].old, json!("k4"));
+    assert_eq!(
+        changes[0].new,
+        json!([{ "at": 1, "clip": "k4", "bars": 4, "offset": 1 }])
+    );
+}
+
+/// A stretch across a section edge is split there by a resize; the part
+/// inside the later section is unchanged, so its lanes are too.
+#[test]
+fn a_stretch_split_at_an_edge_is_not_a_lane_change() {
+    let old = song(&partial());
+    assert_eq!(old.lanes_in(0).len(), 1);
+    assert_eq!(old.lanes_in(1).len(), 1);
+    for bars in [1, 4] {
+        let resized = tune_song::resize_section(&old, 0, bars).unwrap().song;
+        // Split at the edge; a shrink drops the part past `a`'s new end.
+        let pieces = if bars == 1 { 1 } else { 2 };
+        assert_eq!(resized.automation.len(), pieces);
+        let paths: Vec<String> = diff_songs(&old, &resized)
+            .iter()
+            .map(|c| c.path.to_string())
+            .collect();
+        assert_eq!(
+            paths,
+            ["sections[0].bars", "sections[0].lanes"],
+            "{bars} bars"
+        );
+    }
+    // A change of the part inside `b` is a change of `b`'s lanes.
+    let mut edited = old.clone();
+    edited.automation[0].points[2].1 = 0.9;
+    let paths: Vec<String> = diff_songs(&old, &edited)
+        .iter()
+        .map(|c| c.path.to_string())
+        .collect();
+    assert_eq!(paths, ["sections[1].lanes"]);
 }
 
 #[test]
@@ -95,7 +250,25 @@ fn diff_track_added() {
         vec![change(
             "tracks.clap",
             Value::Null,
-            json!({"instrument": "clap"})
+            json!({"instrument": "clap", "fx": []})
+        )]
+    );
+}
+
+#[test]
+fn reordered_fx_chain_is_a_track_change() {
+    const CHAIN: &str = "fx = [{ type = \"distortion\", mode = \"soft\", params = { \"dist.drive\" = 12 } }, { type = \"eq\", params = { \"eq.low_cut\" = 85 } }]";
+    const REVERSED: &str = "fx = [{ type = \"eq\", params = { \"eq.low_cut\" = 85 } }, { type = \"distortion\", mode = \"soft\", params = { \"dist.drive\" = 12 } }]";
+    assert!(MIXED.contains(CHAIN));
+    let reordered = MIXED.replace(CHAIN, REVERSED);
+    let dist = json!({"id": "dist", "type": "distortion"});
+    let eq = json!({"id": "eq", "type": "eq"});
+    assert_eq!(
+        diff_songs(&song(MIXED), &song(&reordered)),
+        vec![change(
+            "tracks.acid",
+            json!({"instrument": "acid303", "fx": [dist, eq]}),
+            json!({"instrument": "acid303", "fx": [eq, dist]})
         )]
     );
 }
@@ -280,4 +453,50 @@ fn diff_reports_mix_changes() {
             change("mix.reverb.size", json!(30), json!(25)),
         ]
     );
+}
+
+const NOTE_SONG: &str = r#"[song]
+version = 2
+name = "notes"
+bpm = 120
+
+[tracks.acid]
+instrument = "acid303"
+play = [{ at = 1, clip = "lead", bars = 1 }]
+
+[clips.lead]
+kind = "notes"
+bars = 1
+notes = [
+  { start = 0, pitch = "C3", len = 3 },
+  { start = 2.5, pitch = "D#3", len = 2, vel = 120 },
+]
+
+[[sections]]
+name = "a"
+bars = 1
+"#;
+
+#[test]
+fn note_edits_are_clip_note_changes() {
+    let old = json!([
+        { "start": 0, "pitch": "C3", "len": 3, "vel": 100 },
+        { "start": 2.5, "pitch": "D#3", "len": 2, "vel": 120 },
+    ]);
+    let new = json!([
+        { "start": 0, "pitch": "C3", "len": 3, "vel": 100 },
+        { "start": 2.5, "pitch": "E3", "len": 2, "vel": 120 },
+    ]);
+    let text = NOTE_SONG.replace("D#3", "E3");
+    assert_eq!(
+        diff_songs(&song(NOTE_SONG), &song(&text)),
+        vec![change("clips.lead.notes", old, new)]
+    );
+
+    let text = NOTE_SONG.replace("bars = 1\nnotes", "bars = 2\nnotes");
+    assert_eq!(
+        diff_songs(&song(NOTE_SONG), &song(&text)),
+        vec![change("clips.lead.bars", json!(1), json!(2))]
+    );
+    assert!(diff_songs(&song(NOTE_SONG), &song(NOTE_SONG)).is_empty());
 }

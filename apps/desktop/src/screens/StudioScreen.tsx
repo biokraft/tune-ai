@@ -82,14 +82,19 @@ export function StudioScreen({ view, store }: StudioScreenProps) {
 
   const tracks = useMemo(
     () =>
-      song.tracks.map((t) => ({ id: t.id, instrument: t.instrument, mute: t.mute, solo: t.solo })),
+      song.tracks.map((t) => ({
+        id: t.id,
+        instrument: t.instrument,
+        mute: t.mute,
+        solo: t.solo,
+        placements: t.placements,
+      })),
     [song.tracks],
   );
   const patterns = useMemo(
     () =>
       song.patterns.map((p) => ({
         id: p.id,
-        track: p.track,
         kind: p.kind,
         glyph: patternGlyph(p),
       })),

@@ -29,3 +29,55 @@ describe("describeChange on the mixer", () => {
     expect(change("mix", null, {})).toBe("mix");
   });
 });
+
+describe("describeChange on clips", () => {
+  it("describes a clip step change by its `clips.` path", () => {
+    expect(change("clips.k4.steps", "x... x...", "x... X...")).toBe("k4 pattern (1 step)");
+    expect(change("clips.a1.steps", null, "C2 C3")).toBe("Pattern a1 added");
+  });
+  it("describes a note clip's notes and length", () => {
+    expect(change("clips.lead.notes", [], [{ start: 0 }])).toBe("Changed the notes of lead");
+    expect(change("clips.lead.bars", 1, 2)).toBe("Changed the length of lead");
+  });
+});
+
+describe("describeChange on v2 songs", () => {
+  it("names the upgrade of the song file", () => {
+    expect(change("song.version", 1, 2)).toBe(
+      "Upgraded the song file to format version 2 (comments kept)",
+    );
+  });
+  it("names going back to an older format as a restore, not an upgrade", () => {
+    expect(change("song.version", 2, 1)).toBe("Restored the song file to format version 1");
+  });
+  it("names a distortion mode change by its device id", () => {
+    expect(change("tracks.acid.dist.mode", "soft", "hard")).toBe("acid distortion soft → hard");
+    const dist = song.tracks.find((t) => t.id === "acid")!.fx.find((f) => f.id === "dist")!;
+    const two = {
+      ...song,
+      tracks: song.tracks.map((t) =>
+        t.id === "acid" ? { ...t, fx: [...t.fx, { ...dist, id: "d2", params: [] }] } : t,
+      ),
+    };
+    expect(
+      describeChange({ path: "tracks.acid.d2.mode", old: "soft", new: "hard" } as never, two),
+    ).toBe("acid distortion d2 soft → hard");
+    // A mode on no distortion keeps the plain form.
+    expect(change("tracks.acid.d2.mode", "soft", "hard")).toBe("acid d2.mode soft → hard");
+  });
+  it("says what a track plays in a section changed when it is not one clip", () => {
+    const placements = [{ at: 1, clip: "a1", bars: 1 }];
+    expect(change("sections[1].play.acid", "a1", placements)).toBe("Changed what acid plays in b");
+    expect(change("sections[0].play.kick", placements, null)).toBe("Changed what kick plays in a");
+    // One clip on both sides still reads as before.
+    expect(change("sections[1].play.acid", "a1", "a2")).toBe("b acid a1 → a2");
+  });
+  it("says the devices on a track changed, not that it was removed", () => {
+    const devices = { instrument: "acid303", fx: ["dist"] };
+    expect(change("tracks.acid", devices, { ...devices, fx: ["dist", "eq"] })).toBe(
+      "Changed the devices on acid",
+    );
+    expect(change("tracks.acid", null, devices)).toBe("Track acid added");
+    expect(change("tracks.acid", devices, null)).toBe("Track acid removed");
+  });
+});

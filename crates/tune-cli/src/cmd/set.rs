@@ -4,8 +4,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use serde_json::{Value, json};
-use tune_studio::{Source, StudioError, parse_assignment, set_paths};
+use tune_studio::{SongPath, Source, StudioError, parse_assignment, set_paths};
 
+use super::tag_migrated;
 use crate::report::{Failure, Success, finish};
 
 pub fn run(song: &Path, assignments: &[String], json: bool) -> ExitCode {
@@ -22,7 +23,14 @@ fn set(song: &Path, assignments: &[String]) -> Result<Success, Vec<Failure>> {
     let text = out
         .changes
         .iter()
-        .map(|c| format!("set {} {} -> {}", c.path, show(&c.old), show(&c.new)))
+        .map(|c| match c.path {
+            SongPath::Version => format!(
+                "migrated the file from version {} to {}",
+                show(&c.old),
+                show(&c.new)
+            ),
+            _ => format!("set {} {} -> {}", c.path, show(&c.old), show(&c.new)),
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let text = if text.is_empty() {
@@ -30,13 +38,16 @@ fn set(song: &Path, assignments: &[String]) -> Result<Success, Vec<Failure>> {
     } else {
         text
     };
-    Ok(Success {
-        text,
-        json: json!({ "changes": out.changes, "file_hash": out.file_hash }),
-    })
+    // `migrated_from` only for a migrated file, as every command reports it.
+    let mut json = json!({
+        "changes": out.changes,
+        "file_hash": out.file_hash,
+    });
+    tag_migrated(&mut json, out.migrated_from);
+    Ok(Success { text, json })
 }
 
-fn failures(song: &Path, e: StudioError) -> Vec<Failure> {
+pub(crate) fn failures(song: &Path, e: StudioError) -> Vec<Failure> {
     match e {
         StudioError::Load(views) => views
             .into_iter()

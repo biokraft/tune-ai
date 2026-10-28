@@ -11,7 +11,7 @@ use tune_audio::output;
 use tune_engine::{CompiledSong, live};
 use tune_song::{Reload, SongError, SongWatcher};
 
-use super::{load, sample_rate};
+use super::{load, migration_note, sample_rate, tag_migrated};
 use crate::report::{Failure, finish, parse_bar_range};
 
 pub use tune_audio::Device;
@@ -54,8 +54,8 @@ fn song_failures(file: &Path, errors: &[SongError]) -> Vec<Failure> {
 }
 
 pub fn run(a: &Args) -> ExitCode {
-    let song = match load(&a.song) {
-        Ok(s) => s,
+    let (song, migrated_from) = match load(&a.song) {
+        Ok(l) => (l.song, l.migrated_from),
         Err(e) => return finish(a.json, Err(e)),
     };
     let total = song.total_bars();
@@ -106,6 +106,18 @@ pub fn run(a: &Args) -> ExitCode {
         Err(m) => return fail(a.json, m),
     };
 
+    if let (Some(from), false) = (migrated_from, a.json) {
+        eprintln!("{}", migration_note(&a.song, from));
+    }
+    let mut playing = json!({
+        "event": "playing",
+        "song": song.name,
+        "bar": a.from_bar,
+        "bpm": song.bpm,
+        "sample_rate": rate,
+        "device": a.device.name(),
+    });
+    tag_migrated(&mut playing, migrated_from);
     emit(
         a.json,
         &format!(
@@ -115,14 +127,7 @@ pub fn run(a: &Args) -> ExitCode {
             song.bpm,
             a.device.name()
         ),
-        json!({
-            "event": "playing",
-            "song": song.name,
-            "bar": a.from_bar,
-            "bpm": song.bpm,
-            "sample_rate": rate,
-            "device": a.device.name(),
-        }),
+        playing,
     );
 
     let mut seen_swaps = controller.swaps_applied();

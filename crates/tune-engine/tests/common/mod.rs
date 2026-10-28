@@ -5,8 +5,10 @@
 use std::sync::{Arc, Mutex};
 
 use tune_dsp::ParamSpec;
-use tune_engine::{Cell, CompiledSong, Effect, Engine, Instrument, StepCtx, TrackRuntime};
-use tune_song::{Song, parse_song};
+use tune_engine::{
+    CompiledSong, CompiledTrack, Effect, Engine, EventCtx, Instrument, NoteEvent, TrackRuntime,
+};
+use tune_song::{Lane, Placement, Song, parse_song};
 
 /// The shared `mini` fixture.
 pub const MINI: &str = include_str!("../../../tune-song/tests/fixtures/mini.toml");
@@ -35,13 +37,70 @@ pub fn variant_of(src: &str, edit: impl FnOnce(&mut Song)) -> Song {
     parse_song(&s.to_toml()).unwrap_or_else(|e| panic!("variant does not validate: {e:?}"))
 }
 
-/// Removes the lane on `track`'s `param` from every section.
+/// Removes every stretch of the lane on `track`'s `param`.
 pub fn drop_lane(s: &mut Song, track: &str, param: &str) {
-    for section in &mut s.sections {
-        section
-            .automation
-            .retain(|l| !(l.track == track && l.param == param));
+    s.automation
+        .retain(|l| !(l.track == track && l.param == param));
+}
+
+/// Silences `track` everywhere: clears its placements.
+pub fn unplay(s: &mut Song, track: &str) {
+    s.tracks
+        .get_mut(track)
+        .unwrap_or_else(|| panic!("no track `{track}`"))
+        .play
+        .clear();
+}
+
+/// Keeps the first `n` sections, dropping the placements and lane stretches
+/// past the new end and cutting those that cross it.
+pub fn keep_sections(s: &mut Song, n: usize) {
+    s.sections.truncate(n);
+    let end = s.total_bars();
+    for t in s.tracks.values_mut() {
+        t.play.retain(|p| p.start_bar < end);
+        for p in &mut t.play {
+            p.bars = p.bars.min(end - p.start_bar);
+        }
     }
+    s.automation.retain(|l| l.start_bar < end);
+    for l in &mut s.automation {
+        l.bars = l.bars.min(end - l.start_bar);
+    }
+}
+
+/// Appends a copy of section `i`, with copies of the placements and lane
+/// stretches that cover exactly that section.
+pub fn push_section_copy(s: &mut Song, i: usize) {
+    let to = s.total_bars();
+    let placements: Vec<Vec<Placement>> = s
+        .tracks
+        .values()
+        .map(|t| {
+            t.play
+                .iter()
+                .filter(|p| s.covers_section(i, p.span()))
+                .map(|p| Placement {
+                    start_bar: to,
+                    ..p.clone()
+                })
+                .collect()
+        })
+        .collect();
+    let lanes: Vec<Lane> = s
+        .automation
+        .iter()
+        .filter(|l| s.covers_section(i, l.span()))
+        .map(|l| Lane {
+            start_bar: to,
+            ..l.clone()
+        })
+        .collect();
+    for (t, copies) in s.tracks.values_mut().zip(placements) {
+        t.play.extend(copies);
+    }
+    s.automation.extend(lanes);
+    s.sections.push(s.sections[i].clone());
 }
 
 /// The bit patterns of `x`, for bitwise comparisons.
@@ -53,10 +112,10 @@ pub fn bits(x: &[f32]) -> Vec<u32> {
 /// `process` calls the probe saw before the call.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    Step {
+    Note {
         sample: u64,
-        cell: Cell,
-        ctx: StepCtx,
+        event: NoteEvent,
+        ctx: EventCtx,
     },
     Param {
         sample: u64,
@@ -71,18 +130,34 @@ pub enum Event {
 #[derive(Default, Debug)]
 pub struct Log {
     pub events: Vec<Event>,
+    /// `process` calls so far (kept by [`ProbeFx`]).
+    pub samples: u64,
 }
 
 impl Log {
-    /// Every `on_step` as `(sample, cell, ctx)`.
-    pub fn steps(&self) -> Vec<(u64, Cell, StepCtx)> {
+    /// Every `note` as `(sample, event, ctx)`.
+    pub fn notes(&self) -> Vec<(u64, NoteEvent, EventCtx)> {
         self.events
             .iter()
             .filter_map(|e| match e {
-                Event::Step { sample, cell, ctx } => Some((*sample, cell.clone(), *ctx)),
+                Event::Note { sample, event, ctx } => Some((*sample, *event, *ctx)),
                 _ => None,
             })
             .collect()
+    }
+
+    /// Every `On`, like [`notes`](Self::notes).
+    pub fn ons(&self) -> Vec<(u64, NoteEvent, EventCtx)> {
+        let mut notes = self.notes();
+        notes.retain(|(_, e, _)| matches!(e, NoteEvent::On { .. }));
+        notes
+    }
+
+    /// Every `Off`, like [`notes`](Self::notes).
+    pub fn offs(&self) -> Vec<(u64, NoteEvent, EventCtx)> {
+        let mut notes = self.notes();
+        notes.retain(|(_, e, _)| matches!(e, NoteEvent::Off { .. }));
+        notes
     }
 
     /// Every `set_param_at` as `(sample, index, plain)`.
@@ -162,10 +237,10 @@ impl Instrument for Probe {
             plain,
         });
     }
-    fn on_step(&mut self, cell: &Cell, ctx: &StepCtx) {
-        self.push(Event::Step {
+    fn note(&mut self, event: &NoteEvent, ctx: &EventCtx) {
+        self.push(Event::Note {
             sample: self.samples,
-            cell: cell.clone(),
+            event: *event,
             ctx: *ctx,
         });
     }
@@ -180,10 +255,12 @@ impl Instrument for Probe {
     }
 }
 
-/// An effect that records every `set_param_at` and passes audio through.
+/// An effect that records every `set_param_at` and its `process` count, and
+/// passes audio through (or outputs a constant, see [`ProbeFx::constant`]).
 pub struct ProbeFx {
     table: &'static [ParamSpec],
     samples: u64,
+    output: Option<f64>,
     log: SharedLog,
 }
 
@@ -194,10 +271,19 @@ impl ProbeFx {
             Self {
                 table,
                 samples: 0,
+                output: None,
                 log: log.clone(),
             },
             log,
         )
+    }
+
+    /// Like [`new`](Self::new), but every `process` returns `value` whatever
+    /// comes in, so what follows the probe does not depend on the instrument.
+    pub fn constant(table: &'static [ParamSpec], value: f64) -> (Self, SharedLog) {
+        let (mut fx, log) = Self::new(table);
+        fx.output = Some(value);
+        (fx, log)
     }
 }
 
@@ -214,7 +300,8 @@ impl Effect for ProbeFx {
     }
     fn process(&mut self, x: f64) -> f64 {
         self.samples += 1;
-        x
+        self.log.lock().unwrap().samples = self.samples;
+        self.output.unwrap_or(x)
     }
     fn reset(&mut self) {}
 }
@@ -233,29 +320,55 @@ pub fn probe_engine_fx(
     id: &str,
     probe_fx: bool,
 ) -> (Engine, SharedLog, Option<SharedLog>) {
-    let sr = f64::from(song.clock.sample_rate);
+    let slots: &[usize] = if probe_fx { &[0] } else { &[] };
+    let (engine, log, fx_logs) = probe_engine_slots(song, id, slots);
+    (engine, log, fx_logs.into_iter().next())
+}
+
+/// Like [`probe_engine`], with a [`ProbeFx`] in each of the probed track's
+/// fx `slots` (each with its device's param table); returns their logs in
+/// the order of `slots`.
+pub fn probe_engine_slots(
+    song: &Arc<CompiledSong>,
+    id: &str,
+    slots: &[usize],
+) -> (Engine, SharedLog, Vec<SharedLog>) {
     let mut log = None;
-    let mut fx_log = None;
+    let mut fx_logs = Vec::new();
+    let engine = engine_with(song, |t, rt| {
+        if t.id != id {
+            return;
+        }
+        let (probe, l) = Probe::new(t.instrument.module.params);
+        rt.instrument = Box::new(probe);
+        log = Some(l);
+        for &slot in slots {
+            let (fx, l) = ProbeFx::new(t.fx[slot].module.params);
+            rt.fx[slot] = Box::new(fx);
+            fx_logs.push(l);
+        }
+    });
+    let log = log.unwrap_or_else(|| panic!("no track `{id}`"));
+    (engine, log, fx_logs)
+}
+
+/// An engine for `song` whose runtimes are built as usual, then changed by
+/// `edit` (called once per track, in song order).
+pub fn engine_with(
+    song: &Arc<CompiledSong>,
+    mut edit: impl FnMut(&CompiledTrack, &mut TrackRuntime),
+) -> Engine {
+    let sr = f64::from(song.clock.sample_rate);
     let tracks = song
         .tracks
         .iter()
         .map(|t| {
             let mut rt = TrackRuntime::build(t, sr);
-            if t.id == id {
-                let (probe, l) = Probe::new(t.kind.params());
-                rt.instrument = Box::new(probe);
-                log = Some(l);
-                if probe_fx {
-                    let (fx, l) = ProbeFx::new(t.fx[0].spec.params_table());
-                    rt.fx[0] = Box::new(fx);
-                    fx_log = Some(l);
-                }
-            }
+            edit(t, &mut rt);
             rt
         })
         .collect();
-    let log = log.unwrap_or_else(|| panic!("no track `{id}`"));
-    (Engine::from_parts(song.clone(), tracks), log, fx_log)
+    Engine::from_parts(song.clone(), tracks)
 }
 
 /// Runs `engine` for `frames` frames in 4096-frame blocks and returns the

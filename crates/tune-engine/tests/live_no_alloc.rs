@@ -1,8 +1,12 @@
 //! Proves `LiveProcessor::process` and `Engine::process` neither allocate
 //! nor free memory, even across blocks that apply a swap (one that keeps the
-//! mix, one that rebuilds the delay for a new bpm and master-mode switches
-//! that crossfade between the clipper and the limiter), a seek, a loop wrap,
-//! the song end and knob overrides on tracks, strips and the mix.
+//! mix, one that rebuilds the delay for a new bpm, master-mode switches that
+//! crossfade between the clipper and the limiter, and swaps that add,
+//! reorder, replace or remove devices or move a placement, swaps that edit
+//! a note clip while its notes are held, and structural swaps that
+//! crossfade a track's old and new paths, an instrument swap among them),
+//! a seek, a loop wrap, the song
+//! end and knob overrides on tracks, strips and the mix.
 //!
 //! A counting global allocator counts every allocation, reallocation and
 //! deallocation made while the thread-local "audio" flag is set. The flag is
@@ -16,10 +20,11 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Arc;
 
-use common::{MINI, MIXED, compile_song, compiled, song, variant_of};
-use tune_dsp::{DistortionMode, MASTER_GAIN, STRIP_SEND_DELAY};
+use common::{MINI, MIXED, compile_song, compiled, keep_sections, song, variant_of};
+use tune_dsp::{MASTER_GAIN, STRIP_SEND_DELAY};
 use tune_engine::{CompiledSong, Engine, LiveProcessor, MIX_TRACK, ParamTarget, SongUpdate, live};
-use tune_song::{FxSpec, InstrumentKind, MasterMode, MixUnit, Track};
+use tune_modules::{CLAP, EQ, KICK, ModuleDescriptor};
+use tune_song::{Device, MasterMode, MixUnit, Track};
 
 struct Counting;
 
@@ -120,31 +125,24 @@ fn process_never_allocates_or_frees() {
     ALLOCS.with(|c| c.set(0));
     DEALLOCS.with(|c| c.set(0));
 
-    // B: drops `hat`, changes the acid distortion mode (fresh fx chain), adds
-    // a `clap` track (fresh runtime) and mutes the kick (kept runtime).
+    // B: drops `hat`, changes the acid distortion mode (a fresh distortion),
+    // adds a `clap` track (fresh runtime) and mutes the kick (kept runtime).
     let mut b = song(MINI);
     b.tracks.shift_remove("hat");
-    b.patterns.shift_remove("h");
-    for s in &mut b.sections {
-        s.play.shift_remove("hat");
-    }
+    b.clips.shift_remove("h");
     b.tracks.get_mut("kick").unwrap().mute = true;
-    let acid = b.tracks.get_mut("acid").unwrap();
-    let FxSpec::Distortion { mode, .. } = &mut acid.fx[0] else {
-        panic!("expected distortion")
-    };
-    *mode = DistortionMode::Hard;
+    b.tracks.get_mut("acid").unwrap().fx[0].settings[0] = "hard";
     b.tracks.insert(
         "clap".into(),
         Track {
-            instrument: InstrumentKind::Clap,
+            instrument: Device::new("clap", &CLAP),
             ..b.tracks["kick"].clone()
         },
     );
     let b = compile_song(&b);
     let a = compiled(MINI);
     let mut two_bars = song(MINI);
-    two_bars.sections.truncate(1);
+    keep_sections(&mut two_bars, 1);
     let two_bars = compile_song(&two_bars);
 
     let (mut ctl, mut p) = live(a.clone(), 0, None);
@@ -208,6 +206,38 @@ fn process_never_allocates_or_frees() {
     audio(&mut p, &mut out, STEP, 512);
     assert_eq!(ctl.swaps_applied(), 5);
     assert_eq!(ctl.overrides_active(), 0);
+    assert_eq!(ctl.collect_garbage(), 1);
+
+    // Devices: an eq added to the acid and the kick, the acid's chain
+    // reordered (both devices kept, in new slots), then the kick keeping its
+    // id with a new instrument (its strip and fx kept).
+    let chain = |reversed: bool, kick: &'static ModuleDescriptor| {
+        compile_song(&variant_of(MINI, |s| {
+            let acid = s.tracks.get_mut("acid").unwrap();
+            acid.fx.push(Device::new("eq", &EQ));
+            if reversed {
+                acid.fx.reverse();
+            }
+            let k = s.tracks.get_mut("kick").unwrap();
+            k.fx.push(Device::new("eq", &EQ));
+            k.instrument = Device::new(kick.name, kick);
+        }))
+    };
+    for (i, next) in [chain(false, &KICK), chain(true, &KICK), chain(true, &CLAP)]
+        .into_iter()
+        .enumerate()
+    {
+        ctl.swap(next).unwrap();
+        audio(&mut p, &mut out, STEP, 512);
+        assert_eq!(ctl.swaps_applied(), 6 + i as u64);
+        assert_eq!(ctl.collect_garbage(), 1);
+    }
+
+    // Back to plain `mini`: the acid's and the kick's eq are removed and
+    // the kick is a kick again.
+    ctl.swap(a.clone()).unwrap();
+    audio(&mut p, &mut out, STEP, 512);
+    assert_eq!(ctl.swaps_applied(), 9);
     assert_eq!(ctl.collect_garbage(), 1);
 
     assert_no_alloc();
@@ -330,5 +360,236 @@ fn master_switches_swap_without_alloc() {
     assert_eq!(ctl.collect_garbage(), 1);
     audio(&mut p, &mut out, STEP, 512);
 
+    assert_no_alloc();
+}
+
+/// A v2 song: the acid through the chain `fx`, the kick's first placement at
+/// 1-based bar `kick_at`.
+fn v2_song(fx: &str, kick_at: u32) -> Arc<CompiledSong> {
+    compiled(&format!(
+        r#"
+[song]
+version = 2
+name = "v2"
+bpm = 120
+seed = 7
+
+[tracks.kick]
+instrument = "kick"
+play = [
+  {{ at = {kick_at}, clip = "k4", bars = 1 }},
+  {{ at = 3, clip = "k4", bars = 2 }},
+]
+
+[tracks.acid]
+instrument = "acid303"
+fx = [{fx}]
+play = [{{ at = 1, clip = "a1", bars = 4, offset = 1 }}]
+
+[clips.k4]
+kind = "drum"
+steps = "x...x...x...X..."
+
+[clips.a1]
+kind = "acid"
+steps = "C2 C2! C3~ C2 . D#2 C2~ G2!"
+
+[[sections]]
+name = "a"
+bars = 4
+
+[[automation]]
+param = "acid.eq2.mid_gain"
+at = 2
+bars = 2
+points = [[0, 0.2], [2, 0.8]]
+"#
+    ))
+}
+
+#[test]
+fn device_and_placement_swaps_never_allocate() {
+    const STEP: u64 = 6000;
+    const EQ: &str = r#"{ type = "eq", params = { "eq.low_cut" = 85 } }"#;
+    const EQ2: &str = r#"{ type = "eq", id = "eq2", params = { "eq2.mid_gain" = 3 } }"#;
+    const DIST: &str = r#"{ type = "distortion", params = { "dist.drive" = 20 } }"#;
+    let songs = [
+        // A device added at the end of the chain.
+        v2_song(&format!("{EQ}, {EQ2}, {DIST}"), 1),
+        // One removed.
+        v2_song(&format!("{EQ2}, {DIST}"), 1),
+        // Two eqs, then the same two the other way round.
+        v2_song(&format!("{EQ}, {EQ2}"), 1),
+        v2_song(&format!("{EQ2}, {EQ}"), 1),
+        // The kick's first placement one bar later.
+        v2_song(&format!("{EQ2}, {EQ}"), 2),
+    ];
+    let (mut ctl, mut p) = live(v2_song(&format!("{EQ}, {EQ2}"), 1), 0, None);
+    let mut out = vec![0.0f32; 2 * 4096];
+    audio(&mut p, &mut out, 1000, 512);
+    for (i, next) in songs.into_iter().enumerate() {
+        ctl.swap(next).unwrap();
+        audio(&mut p, &mut out, STEP, 512);
+        assert_eq!(ctl.swaps_applied(), 1 + i as u64);
+        assert_eq!(ctl.collect_garbage(), 1);
+    }
+    assert_no_alloc();
+}
+
+/// A v2 song whose `lead` holds a note from every step of 0 to 6 (each to
+/// step 16) in a notes clip of `bars` bars, plus one at `other`, at
+/// `gain_db`; with `extra`, the lead plays the clip again from bar 3.
+fn notes_song(bars: u32, other: u32, extra: bool, gain_db: i32) -> Arc<CompiledSong> {
+    let mut notes: Vec<String> = (0..7)
+        .map(|s| format!(r#"{{ start = {s}, pitch = "C2", len = {} }}"#, 16 - s))
+        .collect();
+    notes.push(format!(r#"{{ start = {other}, pitch = "G2", len = 2 }}"#));
+    let extra = if extra {
+        r#", { at = 3, clip = "n", bars = 2 }"#
+    } else {
+        ""
+    };
+    compiled(&format!(
+        r#"
+[song]
+version = 2
+name = "notes"
+bpm = 120
+seed = 7
+
+[tracks.lead]
+instrument = "acid303"
+gain_db = {gain_db}
+play = [{{ at = 1, clip = "n", bars = 2 }}{extra}]
+
+[clips.n]
+kind = "notes"
+bars = {bars}
+notes = [{}]
+
+[[sections]]
+name = "a"
+bars = 4
+"#,
+        notes.join(", ")
+    ))
+}
+
+#[test]
+fn note_clip_swaps_never_allocate() {
+    const STEP: u64 = 6000;
+    let songs = [
+        // A note moved (the held one ends).
+        notes_song(2, 11, false, 0),
+        // The clip's length changed.
+        notes_song(1, 11, false, 0),
+        // A notes-clip placement added.
+        notes_song(1, 11, true, 0),
+        // Only a gain (the held note goes on).
+        notes_song(1, 11, true, -3),
+    ];
+    let (mut ctl, mut p) = live(notes_song(2, 10, false, 0), 0, None);
+    let mut out = vec![0.0f32; 2 * 4096];
+    audio(&mut p, &mut out, 1000, 512);
+    for (i, next) in songs.into_iter().enumerate() {
+        ctl.swap(next).unwrap();
+        audio(&mut p, &mut out, STEP, 512);
+        assert_eq!(ctl.swaps_applied(), 1 + i as u64);
+        assert_eq!(ctl.collect_garbage(), 1);
+    }
+    assert_no_alloc();
+}
+
+#[test]
+fn structural_swaps_fade_without_alloc() {
+    const STEP: u64 = 6000;
+    let eq2 = Device {
+        id: "eq2".into(),
+        ..Device::new("eq", &EQ)
+    };
+    let with = |edit: &dyn Fn(&mut tune_song::Song)| compile_song(&variant_of(MIXED, edit));
+    let songs = [
+        // An eq added after the acid's two devices (they copy their state).
+        with(&|s| {
+            s.tracks.get_mut("acid").unwrap().fx.push(eq2.clone());
+        }),
+        // Its two eqs the other way round.
+        with(&|s| {
+            let fx = &mut s.tracks.get_mut("acid").unwrap().fx;
+            fx.push(eq2.clone());
+            fx.swap(1, 2);
+        }),
+        // The distortion's mode changed.
+        with(&|s| {
+            let fx = &mut s.tracks.get_mut("acid").unwrap().fx;
+            fx.push(eq2.clone());
+            fx.swap(1, 2);
+            fx[0].settings[0] = "hard";
+        }),
+        // A track added: it fades in.
+        with(&|s| {
+            let fx = &mut s.tracks.get_mut("acid").unwrap().fx;
+            fx.push(eq2.clone());
+            fx.swap(1, 2);
+            fx[0].settings[0] = "hard";
+            s.tracks.insert(
+                "clap".into(),
+                Track {
+                    instrument: Device::new("clap", &CLAP),
+                    ..s.tracks["kick"].clone()
+                },
+            );
+        }),
+        // The hat (into the reverb) removed: it fades out.
+        with(&|s| {
+            let fx = &mut s.tracks.get_mut("acid").unwrap().fx;
+            fx.push(eq2.clone());
+            fx.swap(1, 2);
+            fx[0].settings[0] = "hard";
+            s.tracks.shift_remove("hat");
+            s.clips.shift_remove("h");
+        }),
+        // An eq on the kick, then its instrument swapped for a clap: the
+        // old kick plays inside the fade (`Cross { own_instrument: true }`)
+        // through a stand-in of the kept eq.
+        with(&|s| {
+            let fx = &mut s.tracks.get_mut("acid").unwrap().fx;
+            fx.push(eq2.clone());
+            fx.swap(1, 2);
+            fx[0].settings[0] = "hard";
+            s.tracks.shift_remove("hat");
+            s.clips.shift_remove("h");
+            s.tracks
+                .get_mut("kick")
+                .unwrap()
+                .fx
+                .push(Device::new("eq", &EQ));
+        }),
+        with(&|s| {
+            let fx = &mut s.tracks.get_mut("acid").unwrap().fx;
+            fx.push(eq2.clone());
+            fx.swap(1, 2);
+            fx[0].settings[0] = "hard";
+            s.tracks.shift_remove("hat");
+            s.clips.shift_remove("h");
+            let kick = s.tracks.get_mut("kick").unwrap();
+            kick.fx.push(Device::new("eq", &EQ));
+            kick.instrument = Device::new("clap", &CLAP);
+            // The acid still ducks under the track, now a clap.
+            s.mix.duck_source = Some("kick".into());
+        }),
+    ];
+    let (mut ctl, mut p) = live(compiled(MIXED), 0, None);
+    let mut out = vec![0.0f32; 2 * 4096];
+    // Section `b`: the acid sounds, into both buses.
+    ctl.seek(2).unwrap();
+    audio(&mut p, &mut out, 1000, 512);
+    for (i, next) in songs.into_iter().enumerate() {
+        ctl.swap(next).unwrap();
+        // The swap lands 5000 frames in; its fade ends 480 frames later.
+        audio(&mut p, &mut out, STEP, if i % 2 == 0 { 512 } else { 4096 });
+        assert_eq!(ctl.swaps_applied(), 1 + i as u64);
+        assert_eq!(ctl.collect_garbage(), 1, "swap {i}");
+    }
     assert_no_alloc();
 }

@@ -84,6 +84,8 @@ describe("StudioScreen mixer strips", () => {
           track: "kick",
           param: "send.delay",
           points: [[0, 0.5]],
+          from: 0,
+          to: 2,
         });
       }),
     );
@@ -218,8 +220,8 @@ describe("StudioScreen timeline blocks", () => {
     render303(
       stateEvent((s) => {
         s.song!.sections[0]!.lanes.push(
-          { track: "kick", param: "send.delay", points: [[0, 0.5]] },
-          { track: "mix", param: "reverb.size", points: [[0, 0.2]] },
+          { track: "kick", param: "send.delay", points: [[0, 0.5]], from: 0, to: 2 },
+          { track: "mix", param: "reverb.size", points: [[0, 0.2]], from: 0, to: 2 },
         );
       }),
     );

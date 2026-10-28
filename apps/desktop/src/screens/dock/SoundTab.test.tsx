@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { goldenState } from "../../client/fakeClient";
-import type { Command } from "../../client/protocol";
+import type { Command, FxView, ParamView, SongView } from "../../client/protocol";
 import type { HighlightKind } from "../../store/studioStore";
 import { HelpLine, HelpProvider } from "../help";
 import { BIG, SMALL, SoundTab } from "./SoundTab";
@@ -17,8 +17,10 @@ function setup(
     highlights?: Map<string, HighlightKind>;
     automatedIn?: number | null;
     result?: unknown;
+    song?: SongView;
   } = {},
 ) {
+  const shown = opts.song ?? song;
   const sent: Command[] = [];
   const fired: Command[] = [];
   const send = vi.fn((c: Command) => {
@@ -29,8 +31,8 @@ function setup(
   render(
     <HelpProvider>
       <SoundTab
-        song={song}
-        track={song.tracks.find((t) => t.id === trackId)!}
+        song={shown}
+        track={shown.tracks.find((t) => t.id === trackId)!}
         automatedIn={opts.automatedIn ?? 1}
         highlights={opts.highlights ?? new Map()}
         send={send}
@@ -41,6 +43,20 @@ function setup(
   );
   return { sent, fired };
 }
+
+/** The golden song with the acid's fx chain replaced by `fx`. */
+function withAcidFx(fx: FxView[]): SongView {
+  const s = structuredClone(song);
+  s.tracks.find((t) => t.id === "acid")!.fx = fx;
+  return s;
+}
+
+/** A copy of `p` under another device id (`dist.drive` as `eq2.drive`). */
+const under = (device: string, p: ParamView, label = p.label): ParamView => ({
+  ...p,
+  id: `${device}.${p.id.slice(p.id.indexOf(".") + 1)}`,
+  label,
+});
 
 const helpLine = () => document.querySelector<HTMLElement>('[aria-live="polite"]')!;
 
@@ -63,10 +79,53 @@ describe("SoundTab", () => {
     expect(names).toEqual([...BIG, ...SMALL].map(sentence));
   });
 
-  it("picking hard fires set_fx_mode", () => {
+  it("the mode switch sends the device id", () => {
     const { fired } = setup();
     fireEvent.click(screen.getByRole("radio", { name: "Hard" }));
-    expect(fired).toEqual([{ cmd: "set_fx_mode", args: { track: "acid", mode: "hard" } }]);
+    expect(fired).toEqual([
+      { cmd: "set_fx_mode", args: { track: "acid", device: "dist", mode: "hard" } },
+    ]);
+  });
+
+  it("lists a second eq by name without knobs", () => {
+    const dist = song.tracks.find((t) => t.id === "acid")!.fx[0]!;
+    const drive = dist.params[0]!;
+    const eq = (id: string): FxView => ({
+      id,
+      kind: "eq",
+      mode: "",
+      modes: [],
+      params: [under(id, drive, "Low cut")],
+    });
+    setup("acid", {
+      song: withAcidFx([dist, eq("eq"), eq("eq2"), { ...dist, id: "dist2", params: [] }]),
+    });
+    const first = screen.getByRole("group", { name: "EQ" });
+    expect(within(first).getByRole("slider", { name: "Low cut" })).toBeInTheDocument();
+    const second = screen.getByRole("group", { name: "EQ eq2" });
+    expect(second).toHaveTextContent("eq2");
+    expect(within(second).queryAllByRole("slider")).toHaveLength(0);
+    expect(screen.getAllByRole("slider", { name: "Low cut" })).toHaveLength(1);
+    // A second distortion is listed the same way: no knobs and no mode switch.
+    const dist2 = screen.getByRole("group", { name: "Distortion dist2" });
+    expect(within(dist2).queryAllByRole("slider")).toHaveLength(0);
+    expect(screen.getAllByRole("radiogroup", { name: "Distortion mode" })).toHaveLength(1);
+  });
+
+  it("an unknown instrument shows a plain panel", () => {
+    const s = structuredClone(song);
+    const kick = s.tracks.find((t) => t.id === "kick")!;
+    kick.instrument = "fm_synth";
+    kick.instrument_id = "fm_synth";
+    kick.params = kick.params.map((p) => ({ ...under("fm_synth", p), value: p.max }));
+    setup("kick", { song: s });
+    const panel = screen.getByRole("group", { name: "Fm synth" });
+    const sliders = within(panel).getAllByRole("slider");
+    expect(sliders).toHaveLength(kick.params.length);
+    for (const knob of sliders) {
+      expect(knob).toHaveStyle({ width: "36px" });
+      expect(within(knob).getByTestId("knob-arc")).toHaveAttribute("stroke", "rgb(var(--ink2))");
+    }
   });
 
   it("a kick shows one slider per param and no mode switch", () => {

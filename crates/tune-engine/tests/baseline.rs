@@ -14,6 +14,12 @@ use tune_engine::{RenderOptions, render};
 /// guards the engine while the live song keeps changing.
 const FIRST_ACID: &str = include_str!("../../tune-song/tests/fixtures/first-acid-v1.toml");
 
+/// The committed v2 copies of the two pinned fixtures. tune-song's migrate
+/// tests prove each is byte for byte the migration of its v1 file and the
+/// same song in the same order, so rendering the copies covers the migration.
+const MINI_V2: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
+const FIRST_ACID_V2: &str = include_str!("../../tune-song/tests/fixtures/v2/first-acid-v1.toml");
+
 /// What a whole-song render with stems is pinned by.
 #[derive(Debug, PartialEq)]
 struct Fingerprint {
@@ -100,6 +106,44 @@ fn mini_renders_as_before() {
 fn first_acid_renders_as_before() {
     assert_eq!(
         fingerprint(FIRST_ACID),
+        Fingerprint::pinned(
+            0xcc4f_9320_a2f2_d1ff,
+            &[
+                ("kick", 0x313b_7bb2_7445_8115),
+                ("clap", 0x5a70_dbd6_8c24_f84d),
+                ("hat_closed", 0xe84f_482c_5657_c917),
+                ("hat_open", 0xa6fc_7e2b_c125_476f),
+                ("acid", 0x37a4_7856_7490_8b29),
+            ],
+            0x3fe7_cc36_17e4_de19,
+            0x3fe9_1f17_6fea_b576,
+            70718,
+        )
+    );
+}
+
+#[test]
+fn mini_v2_renders_as_before() {
+    assert_eq!(
+        fingerprint(MINI_V2),
+        Fingerprint::pinned(
+            0x3cb4_018b_5885_1398,
+            &[
+                ("kick", 0x8ef5_6289_e893_c6bd),
+                ("acid", 0x58c6_1ef2_b9f0_8921),
+                ("hat", 0xa834_18dc_bebd_21b6),
+            ],
+            0x3fe8_399f_f012_f8ba,
+            0x3fe9_d80b_0101_da26,
+            8440,
+        )
+    );
+}
+
+#[test]
+fn first_acid_v2_renders_as_before() {
+    assert_eq!(
+        fingerprint(FIRST_ACID_V2),
         Fingerprint::pinned(
             0xcc4f_9320_a2f2_d1ff,
             &[

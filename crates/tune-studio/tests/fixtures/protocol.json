@@ -49,6 +49,7 @@
       "cmd": "set_fx_mode",
       "args": {
         "track": "acid",
+        "device": "dist",
         "mode": "hard"
       }
     },
@@ -139,6 +140,11 @@
           {
             "id": "kick",
             "instrument": "kick",
+            "instrument_id": "kick",
+            "plays": [
+              "drum",
+              "notes"
+            ],
             "gain_db": -3.0,
             "pan": 0.0,
             "mute": false,
@@ -255,11 +261,32 @@
                 "explicit": false
               }
             ],
-            "fx": []
+            "fx": [],
+            "placements": [
+              {
+                "start_bar": 0,
+                "bars": 2,
+                "clip": "k4",
+                "offset": 0,
+                "in_section": 0
+              },
+              {
+                "start_bar": 2,
+                "bars": 2,
+                "clip": "k4",
+                "offset": 0,
+                "in_section": 1
+              }
+            ]
           },
           {
             "id": "acid",
             "instrument": "acid303",
+            "instrument_id": "acid303",
+            "plays": [
+              "acid",
+              "notes"
+            ],
             "gain_db": 0.0,
             "pan": 0.0,
             "mute": false,
@@ -426,6 +453,7 @@
             ],
             "fx": [
               {
+                "id": "dist",
                 "kind": "distortion",
                 "mode": "soft",
                 "modes": [
@@ -472,11 +500,25 @@
                   }
                 ]
               }
+            ],
+            "placements": [
+              {
+                "start_bar": 2,
+                "bars": 2,
+                "clip": "a1",
+                "offset": 0,
+                "in_section": 1
+              }
             ]
           },
           {
             "id": "hat",
             "instrument": "hat_closed",
+            "instrument_id": "hat_closed",
+            "plays": [
+              "drum",
+              "notes"
+            ],
             "gain_db": -10.0,
             "pan": 0.3,
             "mute": false,
@@ -569,14 +611,29 @@
                 "explicit": false
               }
             ],
-            "fx": []
+            "fx": [],
+            "placements": [
+              {
+                "start_bar": 0,
+                "bars": 2,
+                "clip": "h",
+                "offset": 0,
+                "in_section": 0
+              },
+              {
+                "start_bar": 2,
+                "bars": 2,
+                "clip": "h",
+                "offset": 0,
+                "in_section": 1
+              }
+            ]
           }
         ],
         "patterns": [
           {
             "kind": "drum",
             "id": "k4",
-            "track": "kick",
             "hits": [
               "hit",
               "rest",
@@ -599,7 +656,6 @@
           {
             "kind": "acid",
             "id": "a1",
-            "track": "acid",
             "steps": [
               {
                 "note": 36,
@@ -646,7 +702,6 @@
           {
             "kind": "drum",
             "id": "h",
-            "track": "hat",
             "hits": [
               "rest",
               "rest",
@@ -700,7 +755,9 @@
                     2.0,
                     0.8
                   ]
-                ]
+                ],
+                "from": 0.0,
+                "to": 2.0
               }
             ]
           }
@@ -899,7 +956,8 @@
           "column": 5,
           "message": "expected a value"
         }
-      ]
+      ],
+      "migrated_from": 1
     },
     {
       "event": "playhead",

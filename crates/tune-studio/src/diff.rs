@@ -6,11 +6,12 @@
 //! default as the new value.
 
 use std::collections::HashMap;
+use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tune_dsp::STRIP_PARAMS;
-use tune_song::{MixUnit, Song, Track};
+use tune_song::{Device, MixUnit, Song, Track, lane_value, round_split_value};
 
 use crate::doc::effective_value;
 use crate::path::{SongPath, TrackField};
@@ -28,8 +29,13 @@ pub struct Change {
 ///
 /// A changed section count or order gives one `sections` change. Otherwise
 /// sections are compared field by field (`bars`, `name`, `play.<t>`,
-/// `lanes`). A track that appears or disappears gives one `tracks.<t>`
-/// change with `null` on the missing side.
+/// `lanes`). What a section plays and its lanes are compared by their parts
+/// inside the section, relative to its start, so they count as changed only
+/// when they changed within the section: not when the section only moved,
+/// nor when a placement or stretch was split at its edge. A track that appears or disappears gives one `tracks.<t>`
+/// change with `null` on the missing side; a track in both songs whose
+/// devices differ (a module, an id, the fx order) gives a `tracks.<t>`
+/// change first, then its param and setting changes.
 pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
     let mut out = Vec::new();
     let mut push = |path: SongPath, a: Option<Value>, b: Option<Value>| {
@@ -64,6 +70,12 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
     for name in union(old.tracks.keys(), new.tracks.keys()) {
         match (old.tracks.get(&name), new.tracks.get(&name)) {
             (Some(o), Some(n)) => {
+                // The devices themselves: modules and ids, in chain order.
+                let p = SongPath::Track {
+                    track: name.clone(),
+                };
+                let (a, b) = both(&p);
+                push(p, a, b);
                 for field in TrackField::ALL {
                     let p = SongPath::TrackField {
                         track: name.clone(),
@@ -86,11 +98,6 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
                     let (a, b) = both(&p);
                     push(p, a, b);
                 }
-                let p = SongPath::FxMode {
-                    track: name.clone(),
-                };
-                let (a, b) = both(&p);
-                push(p, a, b);
             }
             _ => {
                 let p = SongPath::Track { track: name };
@@ -100,10 +107,15 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
         }
     }
 
-    for name in union(old.patterns.keys(), new.patterns.keys()) {
-        let p = SongPath::Pattern { pattern: name };
-        let (a, b) = both(&p);
-        push(p, a, b);
+    for name in union(old.clips.keys(), new.clips.keys()) {
+        for p in [
+            SongPath::Clip { clip: name.clone() },
+            SongPath::ClipBars { clip: name.clone() },
+            SongPath::ClipNotes { clip: name },
+        ] {
+            let (a, b) = both(&p);
+            push(p, a, b);
+        }
     }
 
     if sections_restructured(old, new) {
@@ -116,21 +128,53 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
                 let (a, b) = both(&p);
                 push(p, a, b);
             }
-            let plays = union(old.sections[i].play.keys(), new.sections[i].play.keys());
+            // Tracks in both songs, in the new song's order; one that is
+            // silent in both compares equal and is left out.
+            let plays = new.tracks.keys().filter(|t| old.tracks.contains_key(*t));
             for track in plays {
-                if !old.tracks.contains_key(&track) || !new.tracks.contains_key(&track) {
+                if relative_play(old, i, track) == relative_play(new, i, track) {
                     continue;
                 }
-                let p = SongPath::SectionPlay { section: i, track };
+                let p = SongPath::SectionPlay {
+                    section: i,
+                    track: track.clone(),
+                };
                 let (a, b) = both(&p);
                 push(p, a, b);
             }
-            let p = SongPath::SectionLanes(i);
-            let (a, b) = both(&p);
-            push(p, a, b);
+            if relative_lanes(old, i) != relative_lanes(new, i) {
+                let p = SongPath::SectionLanes(i);
+                let (a, b) = both(&p);
+                push(p, a, b);
+            }
         }
     }
     out
+}
+
+/// The `song.version` change of a file whose format went from version `old`
+/// to `new`, if it changed.
+pub(crate) fn version_change(old: u32, new: u32) -> Option<Change> {
+    (old != new).then(|| Change {
+        path: SongPath::Version,
+        old: Value::from(old),
+        new: Value::from(new),
+    })
+}
+
+/// The changes between two texts of a song file, given the format version
+/// each was written in and the song it describes: `song.version` first when
+/// the version differs, then [`diff_songs`].
+pub(crate) fn diff_files(
+    old_version: u32,
+    old: &Song,
+    new_version: u32,
+    new: &Song,
+) -> Vec<Change> {
+    version_change(old_version, new_version)
+        .into_iter()
+        .chain(diff_songs(old, new))
+        .collect()
 }
 
 /// Names in `a` order, then those only in `b`.
@@ -147,19 +191,107 @@ fn union<'a>(
     out
 }
 
-/// Full ids of every param the track's instrument, strip and fx chain have.
+/// Track-relative ids of every param the track's instrument, strip and fx
+/// chain have, then of every device setting (`dist.mode`).
 fn param_ids(track: &Track) -> Vec<String> {
-    let mut ids: Vec<String> = track
-        .instrument
-        .params()
-        .iter()
-        .chain(STRIP_PARAMS)
-        .map(|s| s.id.to_owned())
-        .collect();
+    let params = |d: &Device| {
+        (0..d.module.params.len())
+            .map(|i| d.param_id(d.module.local_name(i)))
+            .collect::<Vec<_>>()
+    };
+    let mut ids = params(&track.instrument);
+    ids.extend(STRIP_PARAMS.iter().map(|s| s.id.to_owned()));
     for fx in &track.fx {
-        ids.extend(fx.params_table().iter().map(|s| s.id.to_owned()));
+        ids.extend(params(fx));
+    }
+    for d in std::iter::once(&track.instrument).chain(&track.fx) {
+        ids.extend(d.module.settings.iter().map(|s| d.param_id(s.name)));
     }
     ids
+}
+
+/// The 0-based bars of section `i`, if the song has it.
+fn section_range(song: &Song, i: usize) -> Option<Range<u32>> {
+    let start = *song.section_start_bars().get(i)?;
+    Some(start..start + song.sections[i].bars)
+}
+
+/// The part of the 0-based span `span` inside `section`, if any.
+fn clip_span(span: Range<u32>, section: &Range<u32>) -> Option<Range<u32>> {
+    let part = span.start.max(section.start)..span.end.min(section.end);
+    (part.start < part.end).then_some(part)
+}
+
+/// The part of one placement inside a section: clip, start from the
+/// section's start, bars and the offset into the clip there.
+type PlayPart<'s> = (&'s str, u32, u32, u64);
+
+/// What `track` plays inside section `i`, relative to the section's start;
+/// `None` when the song has no such section or track.
+fn relative_play<'s>(song: &'s Song, i: usize, track: &str) -> Option<Vec<PlayPart<'s>>> {
+    let section = section_range(song, i)?;
+    let placements = &song.tracks.get(track)?.play;
+    Some(
+        placements
+            .iter()
+            .filter_map(|p| {
+                let part = clip_span(p.span(), &section)?;
+                let offset = u64::from(p.offset_bars) + u64::from(part.start - p.start_bar);
+                Some((
+                    p.clip.as_str(),
+                    part.start - section.start,
+                    part.end - part.start,
+                    offset,
+                ))
+            })
+            .collect(),
+    )
+}
+
+/// The part of one lane stretch inside a section: track, param, start from
+/// the section's start, bars, and the breakpoints of that part (its value
+/// at the start, the points strictly inside, its value at the end).
+type LanePart<'s> = (&'s str, &'s str, u32, u32, Vec<(f64, f64)>);
+
+/// The stretches inside section `i`, each cut to the section and relative
+/// to its start, in a fixed order; `None` when the song has no such
+/// section. A stretch split at the section's edge gives the same part as
+/// the whole one (the values are computed as the split computes them).
+fn relative_lanes(song: &Song, i: usize) -> Option<Vec<LanePart<'_>>> {
+    let section = section_range(song, i)?;
+    let mut parts: Vec<LanePart<'_>> = song
+        .automation
+        .iter()
+        .filter_map(|l| {
+            let part = clip_span(l.span(), &section)?;
+            let from = f64::from(part.start - l.start_bar);
+            let to = f64::from(part.end - l.start_bar);
+            let points = &l.points;
+            // At the end, the value just before it: the first point there
+            // (the earlier side of a jump), else the lane's value.
+            let end = points
+                .iter()
+                .find(|&&(bar, _)| bar == to)
+                .map_or_else(|| round_split_value(lane_value(points, to)), |&(_, v)| v);
+            let mut cut = vec![(0.0, round_split_value(lane_value(points, from)))];
+            cut.extend(
+                points
+                    .iter()
+                    .filter(|&&(bar, _)| from < bar && bar < to)
+                    .map(|&(bar, v)| (bar - from, v)),
+            );
+            cut.push((to - from, end));
+            Some((
+                l.track.as_str(),
+                l.param.as_str(),
+                part.start - section.start,
+                part.end - part.start,
+                cut,
+            ))
+        })
+        .collect();
+    parts.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
+    Some(parts)
 }
 
 /// Whether the section list changed in count, or holds the same sections

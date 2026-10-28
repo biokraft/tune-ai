@@ -1,0 +1,81 @@
+# Shared fixture: mini plus the Plan 5 mixer (eq, sends, ducking, buses, limiter, ride).
+[song]
+version = 2
+name = "mixed"
+bpm = 120
+seed = 7
+
+[mix]
+master = "limit"
+params = { "delay.feedback" = 40, "reverb.size" = 30, "master.gain" = 6 }
+
+[tracks.kick]
+instrument = "kick"
+gain_db = -3
+play = [
+  { at = 1, clip = "k4", bars = 2 },
+  { at = 3, clip = "k4", bars = 2 },
+]
+
+[tracks.acid]
+instrument = "acid303"
+params = { "acid303.cutoff" = 500, "acid303.resonance" = 70, "send.delay" = -12, "send.reverb" = -18, "duck.depth" = 6 }
+fx = [{ type = "distortion", mode = "soft", params = { "dist.drive" = 12 } }, { type = "eq", params = { "eq.low_cut" = 85 } }]
+play = [{ at = 3, clip = "a1", bars = 2 }]
+
+[tracks.hat]
+instrument = "hat_closed"
+gain_db = -10
+pan = 0.3
+params = { "send.reverb" = -20 }
+play = [
+  { at = 1, clip = "h", bars = 2 },
+  { at = 3, clip = "h", bars = 2 },
+]
+
+[tracks.ride]
+instrument = "ride"
+gain_db = -14
+play = [{ at = 1, clip = "r", bars = 2 }]
+
+[clips.k4]
+kind = "drum"
+steps = "x...x...x...X..."
+
+[clips.a1]
+kind = "acid"
+steps = "C2 C2! C3~ C2 . D#2 C2~ G2!"
+
+[clips.h]
+kind = "drum"
+steps = "..x...x...x...x."
+
+[clips.r]
+kind = "drum"
+steps = "x.x.x.x.x.x.x.x."
+
+[[sections]]
+name = "a"
+bars = 2
+
+[[sections]]
+name = "b"
+bars = 2
+
+[[automation]]
+param = "acid.acid303.cutoff"
+at = 3
+bars = 2
+points = [[0, 0.1], [2, 0.8]]
+
+[[automation]]
+param = "acid.send.delay"
+at = 3
+bars = 2
+points = [[0, 0.5], [2, 1.0]]
+
+[[automation]]
+param = "mix.reverb.size"
+at = 3
+bars = 2
+points = [[0, 0.2], [2, 0.6]]

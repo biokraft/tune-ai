@@ -36,9 +36,10 @@ function setup(sections: SectionView[], extra: Record<string, unknown> = {}) {
           { id: "drums", instrument: "drums", mute: false, solo: false },
         ]}
         patterns={[
-          { id: "a1", track: "acid", kind: "acid", glyph: [0.6, 0, 1, 0] },
-          { id: "a2", track: "acid", kind: "acid", glyph: [1, 1] },
-          { id: "d1", track: "drums", kind: "drum", glyph: [0.6, 0, 0, 0, 1, 0, 0, 0] },
+          { id: "a1", kind: "acid", glyph: [0.6, 0, 1, 0] },
+          { id: "a2", kind: "acid", glyph: [1, 1] },
+          { id: "d1", kind: "drum", glyph: [0.6, 0, 0, 0, 1, 0, 0, 0] },
+          { id: "n1", kind: "notes", glyph: [0.6, 0, 1, 0] },
         ]}
         playhead={0}
         selected={null}
@@ -133,6 +134,8 @@ describe("Arrangement", () => {
           [0, 0],
           [8, 1],
         ] as [number, number][],
+        from: 0,
+        to: 16,
       },
       {
         track: "acid",
@@ -141,6 +144,8 @@ describe("Arrangement", () => {
           [0, 0.5],
           [16, 0.5],
         ] as [number, number][],
+        from: 0,
+        to: 16,
       },
     ];
     const { container } = setup([sec("a", 0, 16, { lanes })]);
@@ -193,8 +198,10 @@ describe("Arrangement", () => {
           [1, 0.2],
           [2, 0.8],
         ] as [number, number][],
+        from: 0,
+        to: 4,
       },
-      { track: "acid", param: "res", points: [[2, 0.5]] as [number, number][] },
+      { track: "acid", param: "res", points: [[2, 0.5]] as [number, number][], from: 0, to: 4 },
     ];
     const { container } = setup([sec("a", 16, 4, { lanes })]);
     const polys = container.querySelectorAll("polyline");
@@ -207,6 +214,35 @@ describe("Arrangement", () => {
       expect(xs[0]).toBe(16 * 12);
       expect(xs[xs.length - 1]).toBe(20 * 12);
     }
+  });
+
+  it("draws a lane only over its extent", () => {
+    // A stretch from bar 14 to 18, seen from section b (bars 16 to 20): its points sit 2 bars
+    // before b's start and 2 into it.
+    const lanes = [
+      {
+        track: "acid",
+        param: "cutoff",
+        points: [
+          [-2, 0],
+          [2, 1],
+        ] as [number, number][],
+        from: 0,
+        to: 2,
+      },
+    ];
+    const { container } = setup([sec("a", 0, 16), sec("b", 16, 4, { lanes })]);
+    const polys = container.querySelectorAll("polyline");
+    expect(polys).toHaveLength(1);
+    const pts = polys[0]!
+      .getAttribute("points")!
+      .split(" ")
+      .map((pt) => pt.split(",").map(Number) as [number, number]);
+    // From b's start to the stretch's end, starting halfway up the ramp.
+    expect(pts.map(([x]) => x)).toEqual([16 * 12, 18 * 12]);
+    const y = (v: number) => 56 + 46 + 22 - 3 - v * (22 - 6);
+    expect(pts[0]![1]).toBeCloseTo(y(0.5));
+    expect(pts[1]![1]).toBeCloseTo(y(1));
   });
 
   it("playhead x", () => {
@@ -395,6 +431,8 @@ const lane = (
   track,
   param,
   points,
+  from: 0,
+  to: 16,
 });
 
 describe("Arrangement blocks", () => {
@@ -452,6 +490,14 @@ describe("Arrangement blocks", () => {
     expect(Number(dashes[1]!.getAttribute("y"))).toBeLessThan(Number(dashes[0]!.getAttribute("y")));
   });
 
+  it("draws a note clip's block with its glyph", () => {
+    setup([sec("a", 0, 16, { play: { acid: "n1" } })]);
+    const dashes = within(blk("n1 in a")).getAllByTestId("glyph-step");
+    expect(dashes).toHaveLength(2);
+    for (const d of dashes) expect(d).toHaveAttribute("height", "2");
+    expect(Number(dashes[1]!.getAttribute("y"))).toBeLessThan(Number(dashes[0]!.getAttribute("y")));
+  });
+
   it("badges a pattern that plays in more than one section", () => {
     setup([
       sec("a", 0, 16, { play: { acid: "a1", drums: "d1" } }),
@@ -460,6 +506,38 @@ describe("Arrangement blocks", () => {
     expect(within(blk("a1 in a")).getByText("×2")).toHaveClass("badge");
     expect(within(blk("a1 in b")).getByText("×2")).toBeInTheDocument();
     expect(within(blk("d1 in a")).queryByText(/×/)).toBeNull();
+  });
+
+  it("draws a loose placement as a plain block with the clip name", () => {
+    const { onShowTrack } = setup([sec("a", 0, 16, { play: { acid: "a1" } }), sec("b", 16, 16)], {
+      tracks: [
+        {
+          id: "acid",
+          instrument: "acid303",
+          mute: false,
+          solo: false,
+          placements: [
+            { start_bar: 0, bars: 16, clip: "a1", offset: 0, in_section: 0 },
+            { start_bar: 18, bars: 4, clip: "a2", offset: 1, in_section: null },
+          ],
+        },
+      ],
+    });
+    const loose = screen.getByRole("img", { name: "a2, bars 19–22, read only" });
+    expect(loose).toHaveTextContent("a2");
+    expect(loose.tagName).not.toBe("BUTTON");
+    expect(loose.style.left).toBe(`${18 * 12 + 3}px`);
+    expect(loose.style.width).toBe(`${4 * 12 - 6}px`);
+    expect(loose.style.top).toBe(`${56 + 3}px`);
+    expect(within(loose).queryAllByTestId("glyph-step")).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "a2 in b" })).toBeNull();
+    // The placement a section shows is drawn once, as that section's block.
+    expect(screen.queryByRole("img", { name: /^a1/ })).toBeNull();
+    expect(blk("a1 in a")).toBeInTheDocument();
+    // Clicks pass through to the cell under it.
+    expect(loose).toHaveClass("pointer-events-none");
+    fireEvent.click(screen.getByTestId("empty-1-acid"));
+    expect(onShowTrack).toHaveBeenCalledWith("acid");
   });
 
   it("has no pattern popover: the dock picks patterns", async () => {
@@ -492,7 +570,7 @@ describe("Arrangement blocks", () => {
       {
         highlighted: new Map([
           ["sections[0].play.drums", "claude"],
-          ["patterns.a1.steps[2]", "claude"],
+          ["clips.a1.steps[2]", "claude"],
         ]),
       },
     );
@@ -511,7 +589,7 @@ describe("Arrangement blocks", () => {
     setup([sec("a", 0, 16, { play: { acid: "a1", drums: "d1" } })], {
       highlighted: new Map([
         ["sections[0].play.drums", "external"],
-        ["patterns.a1.steps[2]", "external"],
+        ["clips.a1.steps[2]", "external"],
       ]),
     });
     for (const name of ["d1 in a", "a1 in a"]) {

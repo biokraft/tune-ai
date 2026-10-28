@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tune_analysis::{Analysis, Audio, BarMap, SectionSpan, decode_file};
 use tune_engine::{CompiledSong, RenderOptions, render};
 
-use crate::cmd::{load, sample_rate};
+use crate::cmd::{load, migration_note, sample_rate};
 use crate::refs::find_refs;
 use crate::report::{Failure, parse_bar_range};
 
@@ -26,6 +26,9 @@ pub struct Input {
     /// Things the reader should know about the input, e.g. audio past the
     /// song's end that was left out.
     pub notes: Vec<String>,
+    /// The format version of the song file when it was read as the newest
+    /// in memory (the song itself, or the `--song` the audio is mapped onto).
+    pub migrated_from: Option<u32>,
 }
 
 fn fail(message: impl Into<String>) -> Vec<Failure> {
@@ -105,7 +108,8 @@ pub fn load_input(
 }
 
 fn load_song_input(path: &Path, bars: Option<&str>) -> Result<Input, Vec<Failure>> {
-    let song = load(path)?;
+    let loaded = load(path)?;
+    let song = loaded.song;
     let total = song.total_bars();
     let range = match bars {
         Some(s) => parse_bar_range(s, total).map_err(fail)?,
@@ -139,8 +143,20 @@ fn load_song_input(path: &Path, bars: Option<&str>) -> Result<Input, Vec<Failure
         stem,
         png_name,
         source,
-        notes: Vec::new(),
+        notes: migration_notes(path, loaded.migrated_from),
+        migrated_from: loaded.migrated_from,
     })
+}
+
+/// The migration note as an entry of `notes` (the printer adds `note: `).
+fn migration_notes(path: &Path, migrated_from: Option<u32>) -> Vec<String> {
+    migrated_from
+        .map(|from| {
+            let note = migration_note(path, from);
+            note.strip_prefix("note: ").unwrap_or(&note).to_owned()
+        })
+        .into_iter()
+        .collect()
 }
 
 fn load_file_input(
@@ -173,10 +189,12 @@ fn load_file_input(
             stem,
             source,
             notes: Vec::new(),
+            migrated_from: None,
         });
     };
 
-    let song = load(song_path)?;
+    let loaded = load(song_path)?;
+    let song = loaded.song;
     let sr = sample_rate(&song);
     if audio.sample_rate != sr {
         return Err(fail(format!(
@@ -204,7 +222,7 @@ fn load_file_input(
     // Audio past the song's last bar has no bar to map onto. A few frames of
     // codec padding are normal; a tenth of a second or more is worth a note.
     let song_end = (compiled.clock.bar_start(total) - base) as usize;
-    let mut notes = Vec::new();
+    let mut notes = migration_notes(song_path, loaded.migrated_from);
     let past = frames.saturating_sub(song_end) as f64 / f64::from(sr);
     if past >= 0.1 {
         notes.push(format!(
@@ -254,6 +272,7 @@ fn load_file_input(
         png_name,
         source,
         notes,
+        migrated_from: loaded.migrated_from,
     })
 }
 

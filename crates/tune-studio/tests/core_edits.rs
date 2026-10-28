@@ -11,6 +11,7 @@ use tune_studio::{
 };
 
 const FIXTURE: &str = include_str!("fixtures/commented.toml");
+const FIXTURE_V1: &str = include_str!("fixtures/commented-v1.toml");
 
 /// A temp dir holding a copy of the commented fixture as `song.toml`.
 struct Song {
@@ -19,10 +20,7 @@ struct Song {
 }
 
 fn song() -> Song {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("song.toml");
-    fs::write(&path, FIXTURE).expect("write fixture");
-    Song { _dir: dir, path }
+    song_with(FIXTURE)
 }
 
 fn open(s: &Song) -> StudioCore {
@@ -277,6 +275,7 @@ fn commands_map_to_paths() {
         (
             Command::SetFxMode {
                 track: "acid".into(),
+                device: "dist".into(),
                 mode: "hard".into(),
             },
             vec!["tracks.acid.dist.mode"],
@@ -289,13 +288,14 @@ fn commands_map_to_paths() {
                 accent: true,
                 slide: false,
             },
-            vec!["patterns.a1.steps"],
+            vec!["clips.a1.steps"],
         ),
-        (drum_step(0, DrumHitDto::Accent), vec!["patterns.h.steps"]),
+        (drum_step(0, DrumHitDto::Accent), vec!["clips.h.steps"]),
         (Command::MoveSection { from: 1, to: 0 }, vec!["sections"]),
         (Command::DuplicateSection { index: 0 }, vec!["sections"]),
         (Command::DeleteSection { index: 0 }, vec!["sections"]),
         (
+            // Section `b`'s lane stretch moves with it, unchanged within `b`.
             Command::ResizeSection { index: 0, bars: 8 },
             vec!["sections[0].bars"],
         ),
@@ -341,6 +341,36 @@ fn commands_map_to_paths() {
         core.flush().unwrap();
         StudioCore::open(&s.path).expect("the written file is a valid song");
     }
+}
+
+/// The mode switch names its device: a second distortion's switch sets
+/// that device's mode and no other.
+#[test]
+fn set_fx_mode_reaches_the_named_device() {
+    let from = r#"fx = [{ type = "distortion", mode = "soft", params = { "dist.drive" = 12 } }]"#;
+    assert!(FIXTURE.contains(from));
+    let text = FIXTURE.replacen(
+        from,
+        r#"fx = [{ type = "distortion", mode = "soft" }, { type = "distortion", id = "dist2", mode = "soft" }]"#,
+        1,
+    );
+    let s = song_with(&text);
+    let mut core = open(&s);
+    let mode = |device: &str| Command::SetFxMode {
+        track: "acid".into(),
+        device: device.into(),
+        mode: "hard".into(),
+    };
+    let changes = core.apply_edit(&mode("dist2"), Instant::now()).unwrap();
+    let paths: Vec<String> = changes.iter().map(|c| c.path.to_string()).collect();
+    assert_eq!(paths, ["tracks.acid.dist2.mode"]);
+    let fx = &core.song().tracks["acid"].fx;
+    assert_eq!(
+        (fx[0].setting("mode"), fx[1].setting("mode")),
+        (Some("soft"), Some("hard"))
+    );
+    // A device the track lacks is refused.
+    assert!(core.apply_edit(&mode("dist3"), Instant::now()).is_err());
 }
 
 #[test]
@@ -547,7 +577,7 @@ fn view_describes_the_song() {
     );
     assert_eq!(
         json["sections"][1]["lanes"][0],
-        json!({"track": "acid", "param": "acid303.cutoff", "points": [[0.0, 0.1], [2.0, 0.8]]})
+        json!({"track": "acid", "param": "acid303.cutoff", "points": [[0.0, 0.1], [2.0, 0.8]], "from": 0.0, "to": 2.0})
     );
 }
 
@@ -640,7 +670,7 @@ fn set_param_on_mix_commits() {
     };
     let changes = core.apply_edit(&send, t0).unwrap();
     assert_eq!(changes[0].path.to_string(), "tracks.hat.send.reverb");
-    assert_eq!(core.song().tracks["hat"].params["send.reverb"], -20.0);
+    assert_eq!(core.song().tracks["hat"].strip["send.reverb"], -20.0);
 
     // An unknown mix id is refused.
     let bad = Command::SetParam {
@@ -746,4 +776,172 @@ fn view_describes_the_mix() {
     let json = serde_json::to_value(&view).unwrap();
     assert_eq!(json["mix"]["masters"], json!(["clip", "limit"]));
     assert_eq!(json["tracks"][0]["strip"][0]["id"], "send.delay");
+}
+
+// ----- a version 1 song opened in the studio -----
+
+/// Review Focus 4: opening a v1 song writes it as v2 at once (an own write,
+/// logged as one `external` entry) and the migration is one undo step that
+/// puts the v1 bytes back.
+#[test]
+fn open_v1_migrates_writes_logs_and_can_undo() {
+    let s = song_with(FIXTURE_V1);
+    let mut core = open(&s);
+    let migrated = match tune_song::migrate(FIXTURE_V1).unwrap() {
+        tune_song::Migration::Migrated { text, .. } => text,
+        tune_song::Migration::Current => panic!("the fixture is v1"),
+    };
+    assert_eq!(disk(&s), migrated);
+    assert_eq!(disk(&s), FIXTURE);
+    assert!(core.is_own_write(&text_hash(&migrated)));
+    let entries = log(&s);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entry_summary(&entries[0]),
+        (Source::External, "song.version".into(), json!(1), json!(2))
+    );
+    assert_eq!(
+        entries[0].file_hash.as_deref(),
+        Some(text_hash(&migrated).as_str())
+    );
+    assert!(core.can_undo());
+    assert_eq!(core.migrated_from(), Some(1));
+    assert_eq!(core.migration_error(), None);
+    // The watcher's report of the write is the text already open.
+    assert!(core.on_disk_text(migrated.clone()).is_none());
+
+    let undone = core.undo().unwrap();
+    assert_eq!(disk(&s), FIXTURE_V1, "undo puts the v1 bytes back");
+    assert_eq!(core.migrated_from(), None);
+    assert_eq!(undone.len(), 1);
+    assert_eq!(undone[0].path.to_string(), "song.version");
+    assert_eq!((&undone[0].old, &undone[0].new), (&json!(2), &json!(1)));
+    let last = log(&s).pop().unwrap();
+    assert_eq!(
+        entry_summary(&last),
+        (Source::Human, "song.version".into(), json!(2), json!(1))
+    );
+    // The song is the same either way, and the studio keeps working.
+    assert_eq!(
+        core.song(),
+        tune_studio::SongDoc::parse(FIXTURE).unwrap().song()
+    );
+    assert!(core.can_redo());
+    core.redo().unwrap();
+    assert_eq!(disk(&s), FIXTURE);
+    assert_eq!(core.migrated_from(), Some(1));
+}
+
+#[test]
+fn edit_after_undoing_the_migration_writes_v2_again() {
+    let s = song_with(FIXTURE_V1);
+    let mut core = open(&s);
+    core.undo().unwrap();
+    assert_eq!(disk(&s), FIXTURE_V1);
+    let t0 = Instant::now();
+    core.apply_edit(&cutoff(820.0), t0).unwrap();
+    let changes = core.flush().unwrap();
+    let paths: Vec<String> = changes.iter().map(|c| c.path.to_string()).collect();
+    assert_eq!(paths, ["song.version", "tracks.acid.acid303.cutoff"]);
+    assert_eq!(
+        disk(&s),
+        FIXTURE.replacen("\"acid303.cutoff\" = 500", "\"acid303.cutoff\" = 820", 1)
+    );
+    let entries: Vec<_> = log(&s).iter().map(entry_summary).collect();
+    assert_eq!(
+        entries[entries.len() - 2..],
+        [
+            (Source::Human, "song.version".into(), json!(1), json!(2)),
+            (
+                Source::Human,
+                "tracks.acid.acid303.cutoff".into(),
+                json!(500),
+                json!(820)
+            ),
+        ]
+    );
+    // Undoing the edit goes back to the v1 bytes.
+    core.undo().unwrap();
+    assert_eq!(disk(&s), FIXTURE_V1);
+}
+
+/// Review Focus 4: a song folder the studio cannot write still opens, with
+/// the song migrated in memory and the reason kept.
+#[cfg(unix)]
+#[test]
+fn open_v1_in_a_readonly_dir_still_opens() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let s = song_with(FIXTURE_V1);
+    let dir = s.path.parent().unwrap().to_owned();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+    let opened = StudioCore::open(&s.path);
+    let bytes = fs::read_to_string(&s.path).unwrap();
+    let log_exists = dir.join("edits.jsonl").exists();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut core = opened.expect("opens");
+    assert_eq!(bytes, FIXTURE_V1, "nothing was written");
+    assert!(!log_exists, "nothing was logged");
+    let error = core.migration_error().expect("the reason is kept");
+    assert!(
+        error.starts_with("the song was upgraded to the new file format in memory but not saved: ")
+            && error.contains("cannot write"),
+        "{error}"
+    );
+    assert_eq!(core.migrated_from(), None);
+    assert!(!core.can_undo(), "nothing was pushed");
+    assert_eq!(
+        core.song(),
+        tune_studio::SongDoc::parse(FIXTURE).unwrap().song()
+    );
+
+    // Once the folder is writable again, the next edit saves v2 and the
+    // error is gone.
+    core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
+    let changes = core.flush().unwrap();
+    assert_eq!(changes[0].path.to_string(), "song.version");
+    assert_eq!(core.migration_error(), None);
+    assert!(disk(&s).contains("[song]\nversion = 2\n"));
+}
+
+/// The edit log failing after the migration was written says so in its
+/// own words; the migration is still one undo step.
+#[test]
+fn open_v1_with_an_unwritable_log_says_the_log_failed() {
+    let s = song_with(FIXTURE_V1);
+    fs::create_dir(s.path.parent().unwrap().join("edits.jsonl")).unwrap();
+    let core = open(&s);
+    assert_eq!(disk(&s), FIXTURE);
+    let error = core.migration_error().expect("the log failure is kept");
+    assert!(
+        error.starts_with(
+            "the song was upgraded and saved, but the edit log could not be written: "
+        ),
+        "{error}"
+    );
+    assert_eq!(core.migrated_from(), Some(1));
+}
+
+/// A resize out of the validator's range is refused with its wording, and
+/// the file is not touched.
+#[test]
+fn resize_out_of_range_is_refused() {
+    let s = song();
+    let mut core = open(&s);
+    for bars in [0, 2000] {
+        let err = core
+            .apply_edit(&Command::ResizeSection { index: 0, bars }, Instant::now())
+            .unwrap_err();
+        assert_eq!(
+            err,
+            StudioError::Edit(EditError::BadValue {
+                path: "sections[0].bars".into(),
+                message: format!("bars must be 1 to 1024, got {bars}"),
+            })
+        );
+        assert!(core.pending().is_empty());
+    }
+    core.flush().unwrap();
+    assert_eq!(disk(&s), FIXTURE);
 }

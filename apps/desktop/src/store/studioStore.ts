@@ -11,8 +11,8 @@ export type StudioView = {
   state: StudioState | null;
   playhead: { step: number; bar: number; beat: number } | null;
   /**
-   * Edit paths changed from outside in the last 4 s. `patterns.<p>.steps` is expanded to one
-   * key per changed step: `patterns.<p>.steps[<i>]`.
+   * Edit paths changed from outside in the last 4 s. `clips.<c>.steps` is expanded to one key
+   * per changed step: `clips.<c>.steps[<i>]`.
    */
   highlights: Map<string, HighlightKind>;
   /** The last change on disk, until dismissed. */
@@ -38,7 +38,7 @@ export type StudioStore = {
   dismissMessage(): void;
 };
 
-const STEPS = /^patterns\.(.+)\.steps$/;
+const STEPS = /^clips\.(.+)\.steps$/;
 
 /** The highlight keys for one change. */
 function highlightKeys(path: string, old: unknown, next: unknown): string[] {
@@ -46,6 +46,21 @@ function highlightKeys(path: string, old: unknown, next: unknown): string[] {
     return changedSteps(old, next).map((i) => `${path}[${i}]`);
   }
   return [path];
+}
+
+/** The format version the studio writes. */
+const FORMAT_VERSION = 2;
+
+/** The notice for a song file upgraded from format `from` on open, as one change on disk. */
+function migrationChange(from: number): ExternalChange {
+  return {
+    source: "external",
+    changes: [{ path: "song.version", old: from, new: FORMAT_VERSION }],
+    replaced: false,
+    merged: [],
+    offered: [],
+    errors: [],
+  };
 }
 
 /** The studio as the UI sees it, fed by one client's events; read via useSyncExternalStore. */
@@ -93,8 +108,32 @@ export function createStudioStore(client: StudioClient): StudioStore {
     set({ highlights: next });
   };
 
-  const adopt = (state: StudioState) =>
-    set({ state, selectedSection: clampSelection(state, view.selectedSection) });
+  /** The song path the last state named: a different one is a newly opened song. */
+  let openPath: string | null = null;
+  /** The notice that says the open song was migrated, while it stands. */
+  let migrationNotice: ExternalChange | null = null;
+
+  const adopt = (state: StudioState) => {
+    const patch: Partial<StudioView> = {
+      state,
+      selectedSection: clampSelection(state, view.selectedSection),
+    };
+    const opened = state.path !== openPath;
+    openPath = state.path;
+    if (opened && state.migrated_from !== null) {
+      // Opening upgraded the file: say so once, with an Undo while one undo reverts it.
+      migrationNotice = migrationChange(state.migrated_from);
+      patch.notice = migrationNotice;
+      patch.noticeUndoable = true;
+    } else if (
+      state.migrated_from === null &&
+      migrationNotice !== null &&
+      view.notice === migrationNotice
+    ) {
+      patch.noticeUndoable = false;
+    }
+    set(patch);
+  };
 
   /** State events seen; a `get_state` result older than one of them is dropped. */
   let stateEvents = 0;

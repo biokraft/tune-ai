@@ -137,3 +137,22 @@ fn from_bar_past_end() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("past the end"), "stderr: {err}");
 }
+
+#[test]
+fn play_v1_event_says_migrated() {
+    let mut p = Player::spawn(&[mini().to_str().unwrap(), "--from-bar", "4"]);
+    let playing = p.expect("playing");
+    assert_eq!(playing["migrated_from"], 1);
+    let _ = p.child.kill();
+    let _ = p.child.wait();
+}
+
+#[test]
+fn play_v2_event_has_no_migration_key() {
+    let v2 = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/v2/mini.toml");
+    let mut p = Player::spawn(&[v2.to_str().unwrap(), "--from-bar", "4"]);
+    let playing = p.expect("playing");
+    assert!(playing.get("migrated_from").is_none());
+    let _ = p.child.kill();
+    let _ = p.child.wait();
+}
