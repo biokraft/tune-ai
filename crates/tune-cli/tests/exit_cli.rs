@@ -1,4 +1,4 @@
-//! Spec §11 exits 1 and 4, end to end: a song built only with `tune do`, the
+//! Spec §11 exits 1, 3 and 4, end to end: a song built only with `tune do`, the
 //! running studio hot-reloading a CLI edit without a click, and an agent run
 //! undone while a later human edit stays. The studio runs in the test process
 //! on a capture device (no audio is ever played) with its control endpoint on
@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use assert_cmd::Command;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use tune_engine::{AudioOut, LiveProcessor};
+use tune_engine::{AudioOut, CompiledSong, LiveProcessor, RenderOptions, render};
 use tune_song::parse_song;
 use tune_studio::{
     Action, Command as StudioCall, ControlServer, Event, Studio, StudioConfig, StudioHandle,
@@ -440,5 +440,91 @@ fn an_agent_run_is_undone_keeping_a_later_human_edit() {
     assert_eq!(song.tracks["acid"].gain_db, -2.0);
     assert_eq!(song.bpm, 130.0);
     assert_eq!(song.tracks["acid"].instrument.params["cutoff"], 700.0);
+    r.handle.shutdown();
+}
+
+/// The session fixture, with its scenes and automation to be cut out.
+const SESSION: &str = include_str!("../../tune-song/tests/fixtures/session.toml");
+
+/// `text` without the lines from `from` up to (not including) `to`.
+fn cut(text: &str, from: &str, to: Option<&str>) -> String {
+    let start = text.find(from).unwrap();
+    let end = to.map_or(text.len(), |t| start + text[start..].find(t).unwrap());
+    format!("{}{}", &text[..start], &text[end..])
+}
+
+/// Spec §11 exit 3: a running studio, driven by `tune do`, launches a scene
+/// and a clip and goes back to the arrangement, each at a bar line, and the
+/// audio equals an arrangement that has those bars written out.
+#[test]
+fn a_running_studio_launches_and_returns_at_bar_lines() {
+    // S: the fixture without its automation; the engine plays it live.
+    let s = cut(SESSION, "# the filter opens", None);
+    // R: the arrangement the session should sound like, bar by bar.
+    let r = cut(&s, "# jam rows", Some("[[sections]]"));
+    let r = r
+        .replace(
+            "play = [\n  { at = 1, clip = \"k4\", bars = 2 },\n  { at = 3, clip = \"k4\", bars = 2 },\n]",
+            "play = [{ at = 1, clip = \"k4\", bars = 4 }]",
+        )
+        .replace(
+            "play = [{ at = 3, clip = \"a1\", bars = 2 }]",
+            "play = [{ at = 2, clip = \"a1\", bars = 3 }]",
+        )
+        .replace(
+            "play = [\n  { at = 1, clip = \"h\", bars = 2 },\n  { at = 3, clip = \"h\", bars = 2 },\n]",
+            "play = [\n  { at = 1, clip = \"h\", bars = 1 },\n  { at = 3, clip = \"h\", bars = 2 },\n]",
+        );
+    assert_ne!(r, s, "the reference must differ from the session song");
+    let reference = {
+        let song = parse_song(&r).unwrap();
+        let compiled = Arc::new(CompiledSong::new(&song, 48_000));
+        let opts = RenderOptions {
+            start_bar: 0,
+            end_bar: 4,
+            stems: false,
+        };
+        let mix = render(compiled, &opts).unwrap().mix;
+        mix.chunks(2).map(|f| f[0]).collect::<Vec<f32>>()
+    };
+    assert_eq!(reference.len(), 4 * 2 * RATE);
+
+    let e = env_with(&s);
+    let song_before = e.text();
+    let log = e.dir.path().join("edits.jsonl");
+    let log_before = fs::read_to_string(&log).ok();
+    let r = start_studio(&e);
+
+    let v = e.do_json(&["play"]);
+    assert_eq!(v["via"], "studio", "{v}");
+    // Half a bar in, a scene launched mid-bar lands at bar 1 (frame 96 000).
+    let mut left = r.pull_left(RATE);
+    let v = e.do_json(&["launch_scene", "scene=groove"]);
+    assert_eq!(v["via"], "studio", "{v}");
+    assert_eq!(v["result"], Value::Null, "{v}");
+    left.extend(r.pull_left(2 * RATE));
+    // Mid bar 1: hat's break clip lands at bar 2 (frame 192 000).
+    let v = e.do_json(&["launch_clip", "track=hat", "scene=break"]);
+    assert_eq!(v["via"], "studio", "{v}");
+    left.extend(r.pull_left(2 * RATE));
+    // Mid bar 2: every track goes back to the arrangement at bar 3.
+    let v = e.do_json(&["back_to_arrangement"]);
+    assert_eq!(v["via"], "studio", "{v}");
+    left.extend(r.pull_left(3 * RATE));
+    assert_eq!(left.len(), 384_000);
+
+    let first = left.iter().zip(&reference).position(|(a, b)| a != b);
+    assert!(
+        first.is_none(),
+        "first differing frame {first:?} (bar {:?})",
+        first.map(|f| f / 96_000)
+    );
+    assert!(rms(&left[96_000..]) > 1e-3, "silent session");
+    assert_eq!(e.text(), song_before, "the song file changed");
+    assert_eq!(
+        fs::read_to_string(&log).ok(),
+        log_before,
+        "edits.jsonl changed"
+    );
     r.handle.shutdown();
 }
