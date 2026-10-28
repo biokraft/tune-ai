@@ -63,6 +63,8 @@ function distortionMode(song: SongView | null, track: string, rest: string): str
   return id === "dist" ? "distortion" : `distortion ${id}`;
 }
 
+const SCENE = /^scenes\.([^.]+)$/;
+const SCENE_SLOT = /^scenes\.([^.]+)\.slots\.([^.]+)$/;
 const MIX = /^mix\.(.+)$/;
 const TRACK = /^tracks\.([^.]+)(?:\.(.+))?$/;
 const SECTION = /^sections\[(\d+)\]\.(bars|name|lanes|play\.(.+))$/;
@@ -86,6 +88,15 @@ function describeWith(c: Change, song: SongView | null, span: Span): string {
     return `Upgraded the song file to format version ${show(c.new)} (comments kept)`;
   }
   if (c.path === "sections") return "Arrangement";
+  if (c.path === "scenes") return "Scene order";
+
+  const scene = SCENE.exec(c.path);
+  if (scene) {
+    const what = c.old === null ? "added" : c.new === null ? "removed" : "changed";
+    return `Scene ${scene[1]} ${what}`;
+  }
+  const slot = SCENE_SLOT.exec(c.path);
+  if (slot) return `${slot[2]} in scene ${slot[1]} ${span(c.old, c.new)}`.trim();
 
   const pattern = PATTERN.exec(c.path);
   if (pattern) {
@@ -205,6 +216,13 @@ export function describeTarget(k: KeptTarget, song: SongView | null): string {
     what = lane[1] === "mix" ? `mix ${lane[2]} automation` : `${lane[2]} automation on ${lane[1]}`;
   } else if (path === "sections") {
     what = "the sections";
+  } else if (path === "scenes") {
+    what = "the scene order";
+  } else if (SCENE.test(path)) {
+    what = `scene ${SCENE.exec(path)![1]}`;
+  } else if (SCENE_SLOT.test(path)) {
+    const [, s, t] = SCENE_SLOT.exec(path)!;
+    what = `${t}'s slot in scene ${s}`;
   } else {
     what = leafLabel(path, song);
   }

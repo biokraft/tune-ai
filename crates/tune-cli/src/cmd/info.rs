@@ -138,6 +138,27 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
             if !clip_texts.is_empty() {
                 let _ = write!(text, "\nclips: {}", clip_texts.join(", "));
             }
+            let mut scenes = Vec::new();
+            let mut scene_texts = Vec::new();
+            for (id, scene) in &song.scenes {
+                let slots: Vec<String> = scene
+                    .slots
+                    .iter()
+                    .map(|(t, c)| format!("{t} {c}"))
+                    .collect();
+                scene_texts.push(format!(
+                    "{id} ({})",
+                    if slots.is_empty() {
+                        "no clips".into()
+                    } else {
+                        slots.join(", ")
+                    }
+                ));
+                scenes.push(json!({ "id": id, "slots": scene.slots }));
+            }
+            if !scene_texts.is_empty() {
+                let _ = write!(text, "\nscenes: {}", scene_texts.join(", "));
+            }
             let mut success = Success {
                 text,
                 json: json!({
@@ -149,6 +170,7 @@ pub fn run(path: &Path, json: bool) -> ExitCode {
                     "sections": Value::Array(sections),
                     "tracks": Value::Array(tracks),
                     "clips": Value::Array(clips),
+                    "scenes": Value::Array(scenes),
                 }),
             };
             note_migration(path, loaded.migrated_from, json, &mut success);

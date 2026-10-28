@@ -43,6 +43,31 @@
       }
     },
     {
+      "cmd": "launch_clip",
+      "args": {
+        "track": "acid",
+        "scene": "groove"
+      }
+    },
+    {
+      "cmd": "launch_scene",
+      "args": {
+        "scene": "groove"
+      }
+    },
+    {
+      "cmd": "stop_clip",
+      "args": {
+        "track": "hat"
+      }
+    },
+    {
+      "cmd": "back_to_arrangement",
+      "args": {
+        "track": null
+      }
+    },
+    {
       "cmd": "undo"
     },
     {
@@ -276,6 +301,41 @@
       "args": {
         "index": 1,
         "name": "drop"
+      }
+    },
+    {
+      "cmd": "add_scene",
+      "args": {
+        "scene": "jam",
+        "index": 1
+      }
+    },
+    {
+      "cmd": "remove_scene",
+      "args": {
+        "scene": "groove"
+      }
+    },
+    {
+      "cmd": "rename_scene",
+      "args": {
+        "scene": "groove",
+        "to": "drop"
+      }
+    },
+    {
+      "cmd": "move_scene",
+      "args": {
+        "scene": "break",
+        "index": 0
+      }
+    },
+    {
+      "cmd": "set_slot",
+      "args": {
+        "scene": "groove",
+        "track": "acid",
+        "clip": "a1"
       }
     },
     {

@@ -10,13 +10,14 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tune_engine::{AudioOut, CompiledSong, LiveProcessor, RenderOptions, render};
+use tune_engine::{AudioOut, CompiledSong, LiveProcessor, RenderOptions, TrackPlay, render};
 use tune_song::parse_song;
 use tune_studio::{
     Action, Command, EditLog, Event, Origin, RunTag, SongPath, Source, StudioCommand, StudioConfig,
     StudioError, StudioHandle, StudioState, set_paths,
 };
 
+const SESSION: &str = include_str!("../../tune-song/tests/fixtures/session.toml");
 const MINI: &str = include_str!("../../tune-song/tests/fixtures/v2/mini.toml");
 /// The longest any test waits for one thing.
 // Generous: FSEvents delivery can take seconds while the machine is busy
@@ -67,12 +68,17 @@ struct Fixture {
 }
 
 fn fixture(text: &str) -> Fixture {
+    fixture_on(text, |slot| Box::new(CaptureOut { slot }))
+}
+
+/// [`fixture`] on the device `audio` makes from the fixture's slot.
+fn fixture_on(text: &str, audio: impl FnOnce(Slot) -> Box<dyn AudioOut>) -> Fixture {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("song.toml");
     fs::write(&path, text).expect("write song");
     let slot = Slot::default();
     let config = StudioConfig {
-        audio: Box::new(CaptureOut { slot: slot.clone() }),
+        audio: audio(slot.clone()),
         songs_root: dir.path().to_owned(),
     };
     let studio = tune_studio::Studio::spawn(config, Some(path.clone())).expect("spawns");
@@ -807,6 +813,33 @@ fn failed_play_publishes_stopped_state() {
     assert_eq!(playing, Some(false), "the last state says stopped");
 }
 
+/// A device that fails to start leaves the cursor where the stopped
+/// playback left it, not at the bar the failed play asked for.
+#[test]
+fn failed_play_keeps_the_cursor() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.toml");
+    fs::write(&path, MINI).unwrap();
+    let config = StudioConfig {
+        audio: Box::new(OnceOut {
+            slot: Slot::default(),
+            started: false,
+        }),
+        songs_root: dir.path().to_owned(),
+    };
+    let studio = tune_studio::Studio::spawn(config, Some(path)).unwrap();
+    studio.call(play(Some(1))).unwrap();
+    assert!(matches!(
+        studio.call(play(Some(3))),
+        Err(StudioError::Audio(_))
+    ));
+    let state = studio
+        .call(Command::Studio(StudioCommand::GetState))
+        .unwrap();
+    assert_eq!(state["playing"], json!(false));
+    assert_eq!(state["cursor_bar"], json!(1));
+}
+
 /// An undo that changes no value still moves the history (here: a save
 /// that only added a comment), so the state goes out.
 #[test]
@@ -1018,4 +1051,644 @@ fn a_new_track_plays_live_and_is_one_undo_step() {
     assert_eq!(undone[0]["path"], json!("tracks.bass"));
     f.disk_until(WAIT, "lost the track", |t| !t.contains("bass"));
     assert_eq!(f.disk(), MINI);
+}
+
+/// A scene move changes no value the `Song` comparison can see, yet the
+/// engine's scene order must follow it: the studio swaps on the write.
+#[test]
+fn a_scene_move_reaches_the_playing_engine() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.pull(2_000);
+    let swaps = || {
+        lock(&f.slot)
+            .as_ref()
+            .expect("audio is playing")
+            .swaps_applied()
+    };
+    let before = swaps();
+    let move_break = Action::MoveScene {
+        scene: "break".into(),
+        index: 0,
+    };
+    f.studio
+        .run_actions(vec![move_break], Origin::claude(None))
+        .expect("moves");
+    // The swap lands at the next step.
+    f.pull(12_000);
+    assert_eq!(swaps(), before + 1, "the move was swapped in");
+    let moved = parse_song(&f.disk()).expect("parses");
+    assert_eq!(moved.scenes.keys().collect::<Vec<_>>(), ["break", "groove"]);
+}
+
+// ----- Plan 10: live session actions -----
+
+fn live(action: Action) -> Command {
+    Command::Action(action)
+}
+
+fn launch_clip(track: &str, scene: &str) -> Action {
+    Action::LaunchClip {
+        track: track.into(),
+        scene: scene.into(),
+    }
+}
+
+fn launch_scene(scene: &str) -> Action {
+    Action::LaunchScene {
+        scene: scene.into(),
+    }
+}
+
+fn stop_clip(track: &str) -> Action {
+    Action::StopClip {
+        track: track.into(),
+    }
+}
+
+fn back(track: Option<&str>) -> Action {
+    Action::BackToArrangement {
+        track: track.map(Into::into),
+    }
+}
+
+/// `text` with `from` replaced by `to`, which must be there once.
+fn swapped(text: &str, from: &str, to: &str) -> String {
+    assert_eq!(text.matches(from).count(), 1, "`{from}` once in the song");
+    text.replacen(from, to, 1)
+}
+
+/// The session fixture's `play` lines.
+const KICK_PLAY: &str =
+    "play = [\n  { at = 1, clip = \"k4\", bars = 2 },\n  { at = 3, clip = \"k4\", bars = 2 },\n]";
+const ACID_PLAY: &str = "play = [{ at = 3, clip = \"a1\", bars = 2 }]";
+const HAT_PLAY: &str =
+    "play = [\n  { at = 1, clip = \"h\", bars = 2 },\n  { at = 3, clip = \"h\", bars = 2 },\n]";
+
+/// `text` without its `[[automation]]` table (the last thing in the file).
+fn without_lane(text: &str) -> String {
+    let at = text
+        .find("\n# the filter opens")
+        .expect("the session fixture's lane");
+    format!("{}\n", &text[..at])
+}
+
+/// `text` with acid playing a1 from bar 2 (1-based) to the end, the way a
+/// launch landing at bar 1 (0-based) plays it, and no lane.
+fn acid_launched_at_bar_1(text: &str) -> String {
+    let launched = swapped(
+        text,
+        ACID_PLAY,
+        "play = [{ at = 2, clip = \"a1\", bars = 3 }]",
+    );
+    without_lane(&launched)
+}
+
+/// Fails at the first sample where `got` and `want` differ.
+fn assert_same(got: &[f32], want: &[f32], what: &str) {
+    assert_eq!(got.len(), want.len(), "{what}: lengths");
+    if let Some(i) = got
+        .iter()
+        .zip(want)
+        .position(|(a, b)| a.to_bits() != b.to_bits())
+    {
+        panic!(
+            "{what}: first differs at frame {} ({} vs {})",
+            i / 2,
+            got[i],
+            want[i]
+        );
+    }
+    assert!(got.iter().any(|s| *s != 0.0), "{what}: silent");
+}
+
+#[test]
+fn launches_land_at_bar_lines_in_the_studio() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    let mut frames = f.pull(48_000);
+    assert_eq!(f.call(live(launch_clip("acid", "groove"))), Value::Null);
+    frames.extend(f.pull(384_000 - 48_000));
+    let want = render_bars(&acid_launched_at_bar_1(SESSION), 0, 4);
+    assert_same(&frames, &want, "launched at bar 1");
+}
+
+#[test]
+fn a_live_action_never_writes_the_file() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    let log_lines = || {
+        fs::read_to_string(f.path.with_file_name("edits.jsonl"))
+            .map(|t| t.lines().count())
+            .unwrap_or(0)
+    };
+    let before = log_lines();
+    let r1 = RunTag::new("r1", None).expect("a run");
+    for action in [
+        launch_clip("acid", "groove"),
+        launch_scene("groove"),
+        stop_clip("hat"),
+        back(None),
+    ] {
+        assert_eq!(f.call(live(action.clone())), Value::Null, "{action:?}");
+        let out = f
+            .studio
+            .run_actions(vec![action.clone()], Origin::claude(Some(r1.clone())))
+            .expect("runs");
+        assert_eq!(out.results, [Value::Null], "{action:?}");
+        assert!(out.changes.is_empty(), "{action:?}");
+        assert_eq!(out.file_hash, None, "{action:?}");
+    }
+    // Not in a batch: a batch holds song edits only.
+    let bpm = Action::SetValue {
+        path: "song.bpm".parse().expect("a path"),
+        value: json!(130),
+    };
+    let err = f
+        .studio
+        .run_actions(
+            vec![bpm, launch_scene("groove")],
+            Origin::claude(Some(r1.clone())),
+        )
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "a batch holds song edits only; run `launch_scene` on its own"
+    );
+    f.quiet(Duration::from_millis(300), "applied", |e| {
+        matches!(e, Event::Applied { .. })
+    });
+    assert_eq!(f.disk(), SESSION);
+    assert_eq!(log_lines(), before);
+    let state = f.call(Command::Studio(StudioCommand::GetState));
+    assert_eq!(state["can_undo"], json!(false));
+    assert_eq!(state["playing"], json!(true));
+    let records = EditLog::for_song(&f.path).read_records().expect("reads");
+    assert!(records.is_empty(), "{records:?}");
+}
+
+#[test]
+fn launching_while_stopped_starts_playback() {
+    let f = fixture(SESSION);
+    f.call(Command::Action(Action::SeekBar { bar: 1 }));
+    assert_eq!(f.call(live(launch_scene("groove"))), Value::Null);
+    let state = f.call(Command::Studio(StudioCommand::GetState));
+    assert_eq!(state["playing"], json!(true));
+    assert_eq!(state["cursor_bar"], json!(1));
+    let frames = f.pull(3 * 96_000);
+    // Groove: kick k4 and acid a1 from the cursor, hat stopped (its empty
+    // slot); none of them follows the lane.
+    let kick = swapped(
+        SESSION,
+        KICK_PLAY,
+        "play = [{ at = 2, clip = \"k4\", bars = 3 }]",
+    );
+    let hat = swapped(
+        &kick,
+        HAT_PLAY,
+        "play = [{ at = 1, clip = \"h\", bars = 1 }]",
+    );
+    let want = render_bars(&acid_launched_at_bar_1(&hat), 1, 4);
+    assert_same(&frames, &want, "groove from bar 1");
+}
+
+#[test]
+fn stop_and_back_while_stopped_change_nothing() {
+    let f = fixture(SESSION);
+    assert_eq!(f.call(live(stop_clip("acid"))), Value::Null);
+    assert_eq!(f.call(live(back(None))), Value::Null);
+    assert_eq!(f.call(live(back(Some("acid")))), Value::Null);
+    let state = f.call(Command::Studio(StudioCommand::GetState));
+    assert_eq!(state["playing"], json!(false));
+    assert!(lock(&f.slot).is_none(), "no playback started");
+    sleep(Duration::from_millis(300));
+    assert_eq!(f.disk(), SESSION);
+}
+
+#[test]
+fn session_action_errors() {
+    let f = fixture(SESSION);
+    let refusals = [
+        (launch_scene("drop"), "there is no scene `drop`"),
+        (launch_clip("acid", "drop"), "there is no scene `drop`"),
+        (launch_clip("bass", "groove"), "there is no track `bass`"),
+        (stop_clip("bass"), "there is no track `bass`"),
+        (back(Some("bass")), "there is no track `bass`"),
+        (
+            launch_clip("acid", "break"),
+            "scene `break` has no clip for track `acid`",
+        ),
+    ];
+    // Stopped: a refused launch starts nothing.
+    for (action, message) in &refusals {
+        let err = f.studio.call(live(action.clone())).unwrap_err();
+        assert_eq!(err.to_string(), *message, "{action:?}");
+    }
+    let state = f.call(Command::Studio(StudioCommand::GetState));
+    assert_eq!(state["playing"], json!(false));
+    // Playing: nothing is cued.
+    f.call(play(Some(0)));
+    let mut frames = f.pull(BLOCK);
+    for (action, message) in &refusals {
+        let err = f.studio.call(live(action.clone())).unwrap_err();
+        assert!(matches!(err, StudioError::Edit(_)), "{err:?}");
+        assert_eq!(err.to_string(), *message, "{action:?}");
+    }
+    frames.extend(f.pull(384_000 - BLOCK));
+    assert_same(&frames, &render_bars(SESSION, 0, 4), "the arrangement");
+}
+
+/// Review focus: a cue sent while a swap is on its way would name the old
+/// song's indices; it waits until the newest swap plays.
+#[test]
+fn a_launch_during_a_reload_waits_for_the_swap() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    let mut frames = f.pull(24_000);
+    f.call(Command::Action(Action::SetTrackMix {
+        track: "hat".into(),
+        gain_db: Some(-12.0),
+        pan: None,
+        mute: None,
+        solo: None,
+    }));
+    // At once: the swap has not played, so the cue waits.
+    assert_eq!(f.call(live(launch_clip("acid", "groove"))), Value::Null);
+    // The swap lands at step 4.
+    frames.extend(f.pull(6_000));
+    // The actor's ticks send the cue.
+    sleep(Duration::from_millis(200));
+    frames.extend(f.pull(384_000 - 30_000));
+    let edited = swapped(SESSION, "gain_db = -10", "gain_db = -12");
+    let want = render_bars(&acid_launched_at_bar_1(&edited), 0, 4);
+    // Before step 4 the hat still played at the old gain.
+    assert_same(&frames[48_000..], &want[48_000..], "after the swap");
+}
+
+#[test]
+fn a_knob_release_on_a_launched_track_writes() {
+    // Without a launch, the lane drives the cutoff in bar 2.
+    let plain = fixture(SESSION);
+    plain.call(play(Some(0)));
+    plain.pull(2 * 96_000 + 6_000);
+    assert_eq!(
+        plain.call(knob("acid303.cutoff", 900.0, true)),
+        json!({ "automated": true })
+    );
+
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.call(live(launch_clip("acid", "groove")));
+    f.pull(2 * 96_000 + 6_000);
+    assert_eq!(f.call(knob("acid303.cutoff", 900.0, true)), Value::Null);
+    f.disk_until(WAIT, "took the cutoff", |t| {
+        acid_value(t, "acid303.cutoff") == 900.0
+    });
+    // Back on the arrangement, the lane drives it again (once the swap of
+    // the write played, so the return is sent at once).
+    land(&f);
+    f.call(live(back(Some("acid"))));
+    assert_eq!(
+        f.call(knob("acid303.cutoff", 800.0, true)),
+        json!({ "automated": true })
+    );
+    // Stopping playback puts every track back on the arrangement.
+    f.call(live(stop_clip("acid")));
+    f.call(Command::Action(Action::Stop));
+    f.call(Command::Action(Action::SeekBar { bar: 2 }));
+    assert_eq!(
+        f.call(knob("acid303.cutoff", 800.0, true)),
+        json!({ "automated": true })
+    );
+}
+
+/// A cue waiting behind a swap resolves against the song that swap
+/// brings: when an edit took its scene away, it is dropped and said so.
+#[test]
+fn a_waiting_cue_whose_scene_went_is_dropped() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.pull(BLOCK);
+    f.call(Command::Action(Action::SetTrackMix {
+        track: "hat".into(),
+        gain_db: Some(-12.0),
+        pan: None,
+        mute: None,
+        solo: None,
+    }));
+    assert_eq!(f.call(live(launch_clip("acid", "groove"))), Value::Null);
+    f.call(Command::Action(Action::RemoveScene {
+        scene: "groove".into(),
+    }));
+    // The swap lands; the next tick resolves the cue against it.
+    f.pull(6_000);
+    let want = "dropped `launch_clip`: there is no scene `groove` any more";
+    f.wait(
+        "the dropped cue",
+        |e| matches!(e, Event::Error { message } if message == want),
+    );
+}
+
+/// What the engine plays on track `track` (an index into the song).
+fn engine_play(f: &Fixture, track: usize) -> TrackPlay {
+    let slot = lock(&f.slot);
+    let processor = slot.as_ref().expect("audio is playing");
+    processor.session(track).expect("a track of the song").0
+}
+
+/// The acid track's index in the session fixture.
+const ACID: usize = 1;
+
+/// Lets a swap sent by the last edit land (it lands at the next step) and
+/// the actor's tick see it.
+fn land(f: &Fixture) {
+    f.pull(6_000);
+    sleep(Duration::from_millis(150));
+}
+
+fn rename_track(f: &Fixture, track: &str, to: &str) {
+    f.call(Command::Action(Action::RenameTrack {
+        track: track.into(),
+        to: to.into(),
+    }));
+}
+
+/// A track renamed away and back, each rename landing, is a new track to
+/// the engine, which plays it from the arrangement: the lane drives its
+/// knob again.
+#[test]
+fn a_renamed_track_follows_the_arrangement_again() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.call(live(launch_clip("acid", "groove")));
+    f.pull(2 * 96_000 + 6_000);
+    assert!(matches!(engine_play(&f, ACID), TrackPlay::Clip(_)));
+    rename_track(&f, "acid", "lead");
+    land(&f);
+    rename_track(&f, "lead", "acid");
+    land(&f);
+    assert_eq!(engine_play(&f, ACID), TrackPlay::Arrangement);
+    assert_eq!(
+        f.call(knob("acid303.cutoff", 900.0, true)),
+        json!({ "automated": true })
+    );
+}
+
+/// Review I2: two renames within one step collapse into one swap, which
+/// takes the engine from a song with `acid` to a song with `acid`, so the
+/// track keeps its launched clip; the studio agrees and the release
+/// writes.
+#[test]
+fn a_rename_and_back_within_one_step_keeps_the_launched_clip() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.call(live(launch_clip("acid", "groove")));
+    f.pull(2 * 96_000 + 6_000);
+    rename_track(&f, "acid", "lead");
+    rename_track(&f, "lead", "acid");
+    land(&f);
+    assert!(matches!(engine_play(&f, ACID), TrackPlay::Clip(_)));
+    assert_eq!(f.call(knob("acid303.cutoff", 900.0, true)), Value::Null);
+    f.disk_until(WAIT, "took the cutoff", |t| {
+        acid_value(t, "acid303.cutoff") == 900.0
+    });
+}
+
+/// A cue dropped before it was sent took no track off the arrangement.
+#[test]
+fn a_dropped_cue_marks_nothing() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.pull(BLOCK);
+    f.call(Command::Action(Action::SetTrackMix {
+        track: "hat".into(),
+        gain_db: Some(-12.0),
+        pan: None,
+        mute: None,
+        solo: None,
+    }));
+    f.call(live(launch_clip("acid", "groove")));
+    f.call(Command::Action(Action::RemoveScene {
+        scene: "groove".into(),
+    }));
+    land(&f);
+    let want = "dropped `launch_clip`: there is no scene `groove` any more";
+    f.wait(
+        "the dropped cue",
+        |e| matches!(e, Event::Error { message } if message == want),
+    );
+    f.pull(2 * 96_000);
+    assert_eq!(engine_play(&f, ACID), TrackPlay::Arrangement);
+    assert_eq!(
+        f.call(knob("acid303.cutoff", 900.0, true)),
+        json!({ "automated": true })
+    );
+}
+
+/// A return to the arrangement still waiting to be sent leaves the track
+/// off it: the engine still plays the launched clip, and a release there
+/// writes until the return is sent.
+#[test]
+fn a_waiting_return_keeps_the_track_off_the_arrangement_until_sent() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.call(live(launch_clip("acid", "groove")));
+    f.pull(2 * 96_000 + 6_000);
+    f.call(Command::Action(Action::SetTrackMix {
+        track: "hat".into(),
+        gain_db: Some(-12.0),
+        pan: None,
+        mute: None,
+        solo: None,
+    }));
+    // The swap has not played, so the return waits.
+    f.call(live(back(Some("acid"))));
+    assert_eq!(f.call(knob("acid303.cutoff", 900.0, true)), Value::Null);
+    land(&f);
+    // Sent: the lane drives the cutoff again (from the next bar line).
+    assert_eq!(
+        f.call(knob("acid303.cutoff", 800.0, true)),
+        json!({ "automated": true })
+    );
+}
+
+/// A launch that starts playback takes its tracks off the arrangement too.
+#[test]
+fn a_launch_that_starts_playback_marks_its_track() {
+    let f = fixture(SESSION);
+    assert_eq!(f.call(live(launch_clip("acid", "groove"))), Value::Null);
+    f.pull(2 * 96_000 + 6_000);
+    assert!(matches!(engine_play(&f, ACID), TrackPlay::Clip(_)));
+    assert_eq!(f.call(knob("acid303.cutoff", 900.0, true)), Value::Null);
+}
+
+/// A device that plays its first block the moment it starts, as `NullOut`
+/// and a real device may, before `start` even returns, then parks the
+/// processor for the test to pull.
+struct EagerOut {
+    slot: Slot,
+    first: Arc<Mutex<Vec<f32>>>,
+}
+
+impl AudioOut for EagerOut {
+    fn sample_rate(&mut self, wanted: u32) -> Result<u32, String> {
+        Ok(wanted)
+    }
+
+    fn start(&mut self, mut processor: LiveProcessor) -> Result<Box<dyn Send>, String> {
+        let mut block = vec![0.0_f32; 2 * BLOCK];
+        processor.process(&mut block);
+        *self.first.lock().unwrap_or_else(PoisonError::into_inner) = block;
+        *lock(&self.slot) = Some(processor);
+        Ok(Box::new(Parked(self.slot.clone())))
+    }
+}
+
+/// Review I1: a launch that starts playback is cued before the device
+/// runs, so it lands at the cursor's bar line even when the first block
+/// plays at once.
+#[test]
+fn a_launch_that_starts_playback_lands_at_the_cursor_on_an_eager_device() {
+    let first = Arc::new(Mutex::new(Vec::new()));
+    let f = fixture_on(SESSION, |slot| {
+        Box::new(EagerOut {
+            slot,
+            first: first.clone(),
+        })
+    });
+    f.call(Command::Action(Action::SeekBar { bar: 1 }));
+    assert_eq!(f.call(live(launch_scene("groove"))), Value::Null);
+    let mut frames = first.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    assert_eq!(frames.len(), 2 * BLOCK, "the device played its first block");
+    frames.extend(f.pull(3 * 96_000 - BLOCK));
+    let kick = swapped(
+        SESSION,
+        KICK_PLAY,
+        "play = [{ at = 2, clip = \"k4\", bars = 3 }]",
+    );
+    let hat = swapped(
+        &kick,
+        HAT_PLAY,
+        "play = [{ at = 1, clip = \"h\", bars = 1 }]",
+    );
+    let want = render_bars(&acid_launched_at_bar_1(&hat), 1, 4);
+    assert_same(&frames, &want, "groove from the first block");
+}
+
+// ---------------- undo during session play ----------------
+
+fn run_r1(f: &Fixture, actions: Vec<Action>) {
+    let r1 = RunTag::new("r1", None).expect("a run");
+    f.studio
+        .run_actions(actions, Origin::claude(Some(r1)))
+        .expect("runs");
+}
+
+/// ⌘Z of a run that removed a launched track: the engine plays the restored
+/// track from the arrangement, and the actor agrees (its lane drives the
+/// cutoff again).
+#[test]
+fn undo_of_a_removed_launched_track_restores_it_to_the_arrangement() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.call(live(launch_clip("acid", "groove")));
+    f.pull(2 * 96_000 + 6_000);
+    assert!(matches!(engine_play(&f, ACID), TrackPlay::Clip(_)));
+    run_r1(
+        &f,
+        vec![Action::RemoveTrack {
+            track: "acid".into(),
+        }],
+    );
+    land(&f);
+    f.call(Command::Action(Action::Undo));
+    land(&f);
+    let p = engine_play(&f, ACID);
+    let r = f.call(knob("acid303.cutoff", 900.0, true));
+    assert_eq!(p, TrackPlay::Arrangement);
+    assert_eq!(r, json!({ "automated": true }));
+}
+
+/// The same through `undo_run`: the removed launched track comes back on the
+/// arrangement, in the engine and in the actor.
+#[test]
+fn undo_run_of_a_removed_launched_track_restores_it_to_the_arrangement() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.call(live(launch_clip("acid", "groove")));
+    f.pull(2 * 96_000 + 6_000);
+    run_r1(
+        &f,
+        vec![Action::RemoveTrack {
+            track: "acid".into(),
+        }],
+    );
+    land(&f);
+    f.studio
+        .run_actions(
+            vec![Action::UndoRun { run: "r1".into() }],
+            Origin::claude(None),
+        )
+        .expect("undo run");
+    land(&f);
+    let p = engine_play(&f, ACID);
+    let r = f.call(knob("acid303.cutoff", 900.0, true));
+    assert_eq!(p, TrackPlay::Arrangement);
+    assert_eq!(r, json!({ "automated": true }));
+}
+
+/// A scene launch queued behind a move_scene swap resolves against the
+/// moved order: groove (acid a1) must launch, not the scene now at groove's
+/// old row (break, where acid is empty and stops).
+#[test]
+fn a_launch_behind_a_scene_move_names_the_right_scene() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.pull(BLOCK);
+    f.call(Command::Action(Action::MoveScene {
+        scene: "break".into(),
+        index: 0,
+    }));
+    f.call(live(launch_scene("groove")));
+    land(&f);
+    f.pull(2 * 96_000);
+    let p = engine_play(&f, ACID);
+    assert!(matches!(p, TrackPlay::Clip(_)), "{p:?}");
+}
+
+/// `undo_run` of a pure scene reorder while playing reaches the engine (the
+/// scene-order trap through run undo and the actor).
+#[test]
+fn undo_run_of_a_scene_move_reaches_the_engine() {
+    let f = fixture(SESSION);
+    f.call(play(Some(0)));
+    f.pull(BLOCK);
+    run_r1(
+        &f,
+        vec![Action::MoveScene {
+            scene: "break".into(),
+            index: 0,
+        }],
+    );
+    land(&f);
+    let applied_before = {
+        let s = lock(&f.slot);
+        s.as_ref().unwrap().swaps_applied()
+    };
+    f.studio
+        .run_actions(
+            vec![Action::UndoRun { run: "r1".into() }],
+            Origin::claude(None),
+        )
+        .expect("undo run");
+    land(&f);
+    let applied_after = {
+        let s = lock(&f.slot);
+        s.as_ref().unwrap().swaps_applied()
+    };
+    assert!(applied_after > applied_before, "no swap for the order undo");
+    f.call(live(launch_scene("groove")));
+    land(&f);
+    f.pull(2 * 96_000);
+    assert!(matches!(engine_play(&f, ACID), TrackPlay::Clip(_)));
 }

@@ -697,6 +697,11 @@ impl StudioCore {
         self.doc.song()
     }
 
+    /// The song text as it stands in memory.
+    pub fn text(&self) -> String {
+        self.doc.text()
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -857,6 +862,8 @@ fn holds(whole: &SongPath, part: &SongPath) -> bool {
             | SongPath::TrackParam { track: t, .. }
             | SongPath::SectionPlay { track: t, .. },
         ) => t == track,
+        (SongPath::Scenes, SongPath::Scene { .. }) => true,
+        (SongPath::Scene { scene }, SongPath::SceneSlot { scene: s, .. }) => s == scene,
         _ => false,
     }
 }

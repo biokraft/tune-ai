@@ -497,3 +497,33 @@ fn flush_keeps_unseen_external_for_report() {
     assert!(core.on_disk_text(disk(&s)).is_some());
     assert!(core.take_unreported_external().is_none());
 }
+
+/// A reorder of the scenes changes no slot, so a pending slot edit merges.
+#[test]
+fn pending_slot_edit_merges_over_a_scene_reorder() {
+    const SESSION: &str = include_str!("../../tune-song/tests/fixtures/session.toml");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("song.toml");
+    fs::write(&path, SESSION).expect("write fixture");
+    let mut core = StudioCore::open(&path).expect("opens");
+    let slot: SongPath = "scenes.groove.slots.hat".parse().unwrap();
+    let edit = Action::SetValue {
+        path: slot.clone(),
+        value: json!("h"),
+    };
+    core.apply_edit(&edit, Instant::now()).unwrap();
+
+    let groove = "# jam rows\n[scenes.groove]\nslots = { kick = \"k4\", acid = \"a1\" }\n\n";
+    let hats = "# hats alone\n[scenes.break]\nslots = { hat = \"h\" }\n\n";
+    let text = SESSION.replace(&format!("{groove}{hats}"), &format!("{hats}{groove}"));
+    assert_ne!(text, SESSION);
+    fs::write(&path, &text).unwrap();
+
+    let ext = core.on_disk_text(text).expect("a change");
+    assert!(ext.offered.is_empty(), "{:?}", ext.offered);
+    assert_eq!(ext.merged.len(), 1);
+    assert_eq!(ext.merged[0].path, slot);
+    let merged = fs::read_to_string(&path).unwrap();
+    assert!(merged.contains("acid = \"a1\", hat = \"h\" }"), "{merged}");
+    assert!(merged.find("[scenes.break]") < merged.find("[scenes.groove]"));
+}

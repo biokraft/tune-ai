@@ -38,6 +38,16 @@ pub struct Removed {
     pub placements: Vec<(String, Placement)>,
     /// The `mix.duck_source` a removed track was, now cleared.
     pub duck_source: Option<String>,
+    /// Scene slots that went with a removed scene, in scene and slot order.
+    pub slots: Vec<RemovedSlot>,
+}
+
+/// A scene slot an edit removed: the clip `track` held in `scene`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemovedSlot {
+    pub scene: String,
+    pub track: String,
+    pub clip: String,
 }
 
 /// Why an edit was refused.
@@ -49,7 +59,7 @@ pub enum EditOpError {
     NoSuchTrack(String),
     #[error("`mix` is reserved for the mix params")]
     MixReserved,
-    /// `what` is `track`, `device` or `clip`.
+    /// `what` is `track`, `device`, `clip` or `scene`.
     #[error("a {what} id is lower-case letters, digits and `_`, got `{id}`")]
     BadId { what: &'static str, id: String },
     #[error("unknown instrument `{name}` (expected {expected})")]
@@ -91,6 +101,16 @@ pub enum EditOpError {
     },
     #[error("index {index} is out of bounds (the chain has {len})")]
     IndexOutOfBounds { index: usize, len: usize },
+    #[error("scene `{0}` already exists")]
+    SceneExists(String),
+    #[error("there is no scene `{0}`")]
+    NoSuchScene(String),
+    /// A launch of a slot that holds no clip.
+    #[error("scene `{scene}` has no clip for track `{track}`")]
+    EmptySlot { scene: String, track: String },
+    /// `index` is 0-based, as the scene edits take it.
+    #[error("index {index} is out of bounds (the song has {len} scenes)")]
+    SceneIndexOutOfBounds { index: usize, len: usize },
 }
 
 /// Appends track `id` playing a new `module` instrument: its device id is
@@ -126,7 +146,8 @@ pub fn add_track(
 
 /// Removes track `id`, its lane stretches (listed in `removed.lanes`) and,
 /// when it is the explicit `mix.duck_source`, that setting
-/// (`removed.duck_source`). Its placements go with it and are not listed.
+/// (`removed.duck_source`). Its placements go with it and are not listed; its
+/// scene slots go too and are listed in `removed.slots`.
 pub fn remove_track(song: &Song, id: &str) -> Result<Edited, EditOpError> {
     track_of(song, id)?;
     let mut song = song.clone();
@@ -136,11 +157,13 @@ pub fn remove_track(song: &Song, id: &str) -> Result<Edited, EditOpError> {
         removed.duck_source = song.mix.duck_source.take();
     }
     let kept = take_lanes(&mut song, &mut removed, |l| l.track == id);
+    take_slots(&mut song, &mut removed, |track, _| track == id);
     Ok(edited(song, kept, removed))
 }
 
 /// Renames track `id` to `to`, keeping its place among the tracks and
-/// following it in its lane stretches and an explicit `mix.duck_source`.
+/// following it in its lane stretches, its scene slots (the key keeps its
+/// place in the scene) and an explicit `mix.duck_source`.
 pub fn rename_track(song: &Song, id: &str, to: &str) -> Result<Edited, EditOpError> {
     track_of(song, id)?;
     if id == to {
@@ -157,6 +180,14 @@ pub fn rename_track(song: &Song, id: &str, to: &str) -> Result<Edited, EditOpErr
         .collect();
     for lane in song.automation.iter_mut().filter(|l| l.track == id) {
         lane.track = to.to_owned();
+    }
+    for scene in song.scenes.values_mut() {
+        if scene.slots.contains_key(id) {
+            scene.slots = std::mem::take(&mut scene.slots)
+                .into_iter()
+                .map(|(k, v)| if k == id { (to.to_owned(), v) } else { (k, v) })
+                .collect();
+        }
     }
     if song.mix.duck_source.as_deref() == Some(id) {
         song.mix.duck_source = Some(to.to_owned());
@@ -279,6 +310,7 @@ pub fn rename_device(
 /// - its lane stretches (`removed.lanes`),
 /// - the placements of clips the new module cannot play, `removed.placements`
 ///   (the clips stay in the pool),
+/// - the scene slots of the track holding such clips, `removed.slots`,
 /// - an explicit `mix.duck_source` naming the track, when the new module
 ///   plays no drum clips (`removed.duck_source`).
 ///
@@ -313,6 +345,15 @@ pub fn set_instrument(
         });
     song.tracks[track].play = played;
     removed.placements = gone.into_iter().map(|p| (track.to_owned(), p)).collect();
+    let cannot: Vec<String> = song
+        .clips
+        .iter()
+        .filter(|(_, clip)| !module.plays(clip.kind()))
+        .map(|(id, _)| id.clone())
+        .collect();
+    take_slots(&mut song, &mut removed, |t, clip| {
+        t == track && cannot.iter().any(|c| c == clip)
+    });
     if song.mix.duck_source.as_deref() == Some(track) && !module.plays(ClipKind::Drum) {
         removed.duck_source = song.mix.duck_source.take();
     }
@@ -332,7 +373,8 @@ pub fn add_clip(song: &Song, id: &str, clip: Clip) -> Result<Edited, EditOpError
 }
 
 /// Removes clip `id` and every placement of it (listed in
-/// `removed.placements`, track by track in song order).
+/// `removed.placements`, track by track in song order) and every scene slot
+/// holding it (`removed.slots`).
 pub fn remove_clip(song: &Song, id: &str) -> Result<Edited, EditOpError> {
     clip_of(song, id)?;
     let mut song = song.clone();
@@ -347,11 +389,12 @@ pub fn remove_clip(song: &Song, id: &str) -> Result<Edited, EditOpError> {
             .placements
             .extend(gone.into_iter().map(|p| (track_id.clone(), p)));
     }
+    take_slots(&mut song, &mut removed, |_, clip| clip == id);
     Ok(untouched_lanes(song, removed))
 }
 
 /// Renames clip `id` to `to`, keeping its place in the pool and following
-/// it in every placement.
+/// it in every placement and scene slot.
 pub fn rename_clip(song: &Song, id: &str, to: &str) -> Result<Edited, EditOpError> {
     clip_of(song, id)?;
     if id == to {
@@ -366,6 +409,11 @@ pub fn rename_clip(song: &Song, id: &str, to: &str) -> Result<Edited, EditOpErro
     for placement in song.tracks.values_mut().flat_map(|t| &mut t.play) {
         if placement.clip == id {
             placement.clip = to.to_owned();
+        }
+    }
+    for clip in song.scenes.values_mut().flat_map(|s| s.slots.values_mut()) {
+        if clip == id {
+            *clip = to.to_owned();
         }
     }
     Ok(untouched_lanes(song, Removed::default()))
@@ -549,7 +597,7 @@ fn placement_at(play: &[Placement], track: &str, start_bar: u32) -> Result<usize
         })
 }
 
-fn clip_of<'s>(song: &'s Song, id: &str) -> Result<&'s Clip, EditOpError> {
+pub(crate) fn clip_of<'s>(song: &'s Song, id: &str) -> Result<&'s Clip, EditOpError> {
     song.clips
         .get(id)
         .ok_or_else(|| EditOpError::NoSuchClip(id.to_owned()))
@@ -570,7 +618,7 @@ pub fn check_new_clip(song: &Song, id: &str) -> Result<(), EditOpError> {
     Ok(())
 }
 
-fn track_of<'s>(song: &'s Song, id: &str) -> Result<&'s Track, EditOpError> {
+pub(crate) fn track_of<'s>(song: &'s Song, id: &str) -> Result<&'s Track, EditOpError> {
     song.tracks
         .get(id)
         .ok_or_else(|| EditOpError::NoSuchTrack(id.to_owned()))
@@ -604,7 +652,7 @@ fn device_exists(track: &str, device: &str) -> EditOpError {
 
 /// Whether `id` is lower-case letters, digits and `_`, as the validator
 /// wants of a track, device or clip id.
-fn well_formed(id: &str) -> bool {
+pub(crate) fn well_formed(id: &str) -> bool {
     !id.is_empty()
         && id
             .chars()
@@ -695,8 +743,27 @@ fn take_lanes(song: &mut Song, removed: &mut Removed, gone: impl Fn(&Lane) -> bo
     kept
 }
 
+/// Moves the scene slots `gone` selects (given a slot's track and clip) into
+/// `removed.slots`, in scene order and then the slot's order.
+fn take_slots(song: &mut Song, removed: &mut Removed, gone: impl Fn(&str, &str) -> bool) {
+    for (scene_id, scene) in &mut song.scenes {
+        let slots = std::mem::take(&mut scene.slots);
+        for (track, clip) in slots {
+            if gone(&track, &clip) {
+                removed.slots.push(RemovedSlot {
+                    scene: scene_id.clone(),
+                    track,
+                    clip,
+                });
+            } else {
+                scene.slots.insert(track, clip);
+            }
+        }
+    }
+}
+
 /// `song` with every stretch still the old one, in the old order.
-fn untouched_lanes(song: Song, removed: Removed) -> Edited {
+pub(crate) fn untouched_lanes(song: Song, removed: Removed) -> Edited {
     let kept = (0..song.automation.len()).collect();
     edited(song, kept, removed)
 }

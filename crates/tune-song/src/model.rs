@@ -22,12 +22,22 @@ pub struct Song {
     pub tracks: IndexMap<String, Track>,
     /// The clip pool, in song-file order.
     pub clips: IndexMap<String, Clip>,
+    /// The session scenes in file order (the row order). `IndexMap` equality ignores order:
+    /// compare `scenes.keys()` where the order matters.
+    pub scenes: IndexMap<String, Scene>,
     /// Named stretches laid end to end from bar 0; they set the song length.
     pub sections: Vec<Section>,
     /// Every lane stretch, in song-file order.
     pub automation: Vec<Lane>,
     /// The `[mix]` table: master mode, duck source and bus params.
     pub mix: Mix,
+}
+
+/// One session row: which clip each track's slot holds.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Scene {
+    /// Track id → clip id, in file order; a track without an entry has an empty slot.
+    pub slots: IndexMap<String, String>,
 }
 
 impl Song {

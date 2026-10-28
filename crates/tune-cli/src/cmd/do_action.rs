@@ -57,6 +57,13 @@ fn do_actions(a: &Args) -> Result<Success, Vec<Failure>> {
         run_actions(a.song, &actions, &Origin::claude(run)).map_err(|e| failures(a.song, e))?;
     let mut lines = Vec::new();
     match actions.as_slice() {
+        // A session action says nothing: it lands at the next bar line.
+        [
+            Action::LaunchClip { .. }
+            | Action::LaunchScene { .. }
+            | Action::StopClip { .. }
+            | Action::BackToArrangement { .. },
+        ] => {}
         // Undo and redo print what they changed, like an edit.
         [one] if one.kind() == ActionKind::Live => lines.push(format!("ran {}", one.name())),
         // A run undo says what it reverted and kept.
@@ -141,11 +148,21 @@ fn result_lines(result: &Value) -> Vec<String> {
                 p["at"]
             ));
         }
+        for slot in removed["slots"].as_array().into_iter().flatten() {
+            lines.push(format!(
+                "removed slot {} on {} in scene {}",
+                slot["clip"].as_str().unwrap_or("?"),
+                slot["track"].as_str().unwrap_or("?"),
+                slot["scene"].as_str().unwrap_or("?")
+            ));
+        }
         if let Some(src) = removed["duck_source"].as_str() {
             lines.push(format!("cleared duck source {src}"));
         }
     }
-    if lines.is_empty() && !result.is_null() {
+    // A `removed` result with nothing listed says nothing more than the
+    // change line above it.
+    if lines.is_empty() && !result.is_null() && result.get("removed").is_none() {
         lines.push(result.to_string());
     }
     lines

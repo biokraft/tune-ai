@@ -766,3 +766,51 @@ bars = 2
     let dbfs = 20.0 * f64::from(peak).log10();
     assert!(dbfs > -60.0, "acid stem peak {dbfs} dBFS");
 }
+
+fn session() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/session.toml")
+}
+
+#[test]
+fn info_lists_scenes() {
+    let out = tune()
+        .arg("info")
+        .arg(session())
+        .arg("--json")
+        .assert()
+        .success();
+    let v = json_of(&out.get_output().stdout);
+    assert_eq!(
+        v["scenes"],
+        json!([
+            {"id": "groove", "slots": {"kick": "k4", "acid": "a1"}},
+            {"id": "break", "slots": {"hat": "h"}},
+        ])
+    );
+    let out = tune().arg("info").arg(session()).assert().success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(
+        text.lines()
+            .any(|l| l == "scenes: groove (kick k4, acid a1), break (hat h)"),
+        "{text}"
+    );
+
+    let out = tune()
+        .arg("info")
+        .arg(v2("mini.toml"))
+        .arg("--json")
+        .assert()
+        .success();
+    assert_eq!(json_of(&out.get_output().stdout)["scenes"], json!([]));
+    let out = tune().arg("info").arg(v2("mini.toml")).assert().success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(!text.contains("scenes:"), "{text}");
+
+    let out = tune()
+        .arg("validate")
+        .arg(session())
+        .arg("--json")
+        .assert()
+        .success();
+    assert_eq!(json_of(&out.get_output().stdout)["ok"], true);
+}

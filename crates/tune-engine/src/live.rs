@@ -3,10 +3,11 @@
 //!
 //! The two halves talk through two lock-free SPSC queues ([`rtrb`]):
 //!
-//! - Commands (controller to processor): swap, seek, loop, knob override.
-//!   The processor drains them at the start of each
+//! - Commands (controller to processor): swap, seek, loop, knob override,
+//!   session cue. The processor drains them at the start of each
 //!   [`LiveProcessor::process`] call, so a seek, loop or override change
-//!   takes effect at the next sample. A swap is handed to the [`Engine`],
+//!   takes effect at the next sample, and a cue waits for the next bar line
+//!   (see [`Engine::cue`]). A swap is handed to the [`Engine`],
 //!   which applies it at the next step boundary.
 //! - Garbage (processor to controller): every [`SongUpdate`] comes back in
 //!   the same box, now holding the old song and every runtime the new song
@@ -20,9 +21,10 @@
 //! update goes straight back as garbage.
 //!
 //! Every swap the controller sends carries a generation, one higher than the
-//! last. Every override carries the generation of the last swap sent, and the
-//! processor drops it unless the engine is playing that generation, because
-//! its track index may belong to another song.
+//! last. Every override and every session cue carries the generation of the
+//! last swap sent, and the processor drops it unless the engine is playing
+//! that generation, because its track (and clip or scene) index may belong
+//! to another song.
 //!
 //! The processor publishes position, bar, finished, the number of applied
 //! swaps, the playing generation and the number of overrides set through
@@ -35,7 +37,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use rtrb::{Consumer, Producer, RingBuffer};
 
 use crate::compile::{CompiledSong, ParamTarget};
-use crate::engine::{Engine, TrackRuntime};
+use crate::engine::{Cued, Engine, SessionCue, TrackPlay, TrackRuntime};
 use crate::mixer::MixRuntime;
 
 /// Capacity of each queue.
@@ -114,6 +116,12 @@ enum Command {
         track: usize,
         target: ParamTarget,
         plain: Option<f64>,
+    },
+    Cue {
+        /// The generation the controller had sent last: the song whose
+        /// indices `cue` names.
+        generation: u64,
+        cue: SessionCue,
     },
 }
 
@@ -217,6 +225,17 @@ impl LiveController {
             track,
             target,
             plain,
+        })
+    }
+
+    /// Sends `cue`, stamped with the generation of the last swap sent; the
+    /// processor drops it unless the engine plays that generation (as
+    /// overrides), since its indices name that song. It lands at the next
+    /// bar line (see [`Engine::cue`]).
+    pub fn cue(&mut self, cue: SessionCue) -> Result<(), LiveError> {
+        self.send(Command::Cue {
+            generation: self.generation,
+            cue,
         })
     }
 
@@ -348,6 +367,17 @@ impl LiveProcessor {
         self.sample_rate
     }
 
+    /// Swaps this processor has applied so far.
+    pub fn swaps_applied(&self) -> u64 {
+        self.engine.swaps_applied()
+    }
+
+    /// What track `track` plays and what is cued for it, as of the last
+    /// block (see [`Engine::session`]).
+    pub fn session(&self, track: usize) -> Option<(TrackPlay, Option<Cued>)> {
+        self.engine.session(track)
+    }
+
     fn drain_commands(&mut self) {
         while let Ok(command) = self.commands.peek() {
             if let Command::Swap(_) = command {
@@ -380,6 +410,12 @@ impl LiveProcessor {
                     // Meant for a song that has not landed (or never will).
                     if generation == self.engine.generation() {
                         self.engine.set_override(track, target, plain);
+                    }
+                }
+                Command::Cue { generation, cue } => {
+                    // Like an override: its indices name that song.
+                    if generation == self.engine.generation() {
+                        self.engine.cue(cue);
                     }
                 }
             }

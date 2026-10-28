@@ -15,6 +15,7 @@ use tune_song::{
 };
 
 use super::arrange::{block_start, rerank, write_automation, write_plays};
+use super::scenes::{clear_slots, rename_slot_clip, rename_slot_track};
 use super::{
     EditError, SongDoc, fx_table, notes_value, put_instrument_setting, toml_number, track_table,
 };
@@ -37,8 +38,10 @@ impl SongDoc {
     pub fn remove_track(&mut self, track: &str) -> Result<Removed, EditError> {
         let edited = tune_song::remove_track(&self.song, track)?;
         let clears_source = edited.removed.duck_source.is_some();
+        let slots = edited.removed.slots.clone();
         self.write_edited(edited, |doc| {
             remove_track_table(doc, track)?;
+            clear_slots(doc, &slots)?;
             if clears_source && let Some(mut mix) = root_child(doc, "mix") {
                 mix.remove("duck_source");
             }
@@ -52,10 +55,12 @@ impl SongDoc {
     pub fn rename_track(&mut self, track: &str, to: &str) -> Result<(), EditError> {
         let edited = tune_song::rename_track(&self.song, track, to)?;
         let renames_source = self.song.mix.duck_source.as_deref() == Some(track);
+        let old = self.song.clone();
         self.write_edited(edited, |doc| {
             rename_keys(root_child(doc, "tracks")?, |k| {
                 (k == track).then(|| to.to_owned())
             })?;
+            rename_slot_track(doc, &old, track, to)?;
             if renames_source && let Some(mut mix) = root_child(doc, "mix") {
                 mix.put("duck_source", Value::from(to));
             }
@@ -133,10 +138,12 @@ impl SongDoc {
         let edited = tune_song::set_instrument(&self.song, Registry::builtin(), track, module)?;
         let old = self.song.clone();
         let new = edited.arranged.song.clone();
+        let slots = edited.removed.slots.clone();
         self.write_edited(edited, |doc| {
             let device = &new.tracks[track].instrument;
             track_table(doc, track)?.put("instrument", Value::from(device.module.name));
             remove_params(doc, track, &format!("{}.", old.tracks[track].instrument.id))?;
+            clear_slots(doc, &slots)?;
             write_plays(doc, &old, &new)
         })
     }
@@ -192,11 +199,13 @@ impl SongDoc {
         let edited = tune_song::remove_clip(&self.song, clip)?;
         let old = self.song.clone();
         let new = edited.arranged.song.clone();
+        let slots = edited.removed.slots.clone();
         self.write_edited(edited, |doc| {
             match doc.as_table_mut().get_mut("clips")? {
                 Item::Table(clips) => clips.remove(clip)?,
                 _ => return None,
             };
+            clear_slots(doc, &slots)?;
             write_plays(doc, &old, &new)
         })
     }
@@ -212,6 +221,7 @@ impl SongDoc {
             rename_keys(root_child(doc, "clips")?, |k| {
                 (k == clip).then(|| to.to_owned())
             })?;
+            rename_slot_clip(doc, &old, clip, to)?;
             write_plays(doc, &old, &new)
         })?;
         Ok(())
@@ -390,7 +400,7 @@ impl SongDoc {
     /// the lane stretches it kept, and commits the copy only when it
     /// describes exactly the edited song. An edit that changes nothing
     /// writes nothing.
-    fn write_edited(
+    pub(super) fn write_edited(
         &mut self,
         edited: Edited,
         write: impl FnOnce(&mut DocumentMut) -> Option<()>,
@@ -832,7 +842,7 @@ pub(super) fn insert_track(doc: &mut DocumentMut, id: &str, track: &Track) -> Op
 
 /// Where [`insert_table`] puts a table among its container's.
 #[derive(Clone, Copy)]
-enum Place<'a> {
+pub(super) enum Place<'a> {
     /// Right after this sibling's table.
     After(&'a str),
     /// Right before this sibling's table (and the comments above it).
@@ -847,7 +857,7 @@ enum Place<'a> {
 /// table yet is created after the last table, in the file's order, of any
 /// of `anchors`. A container written as inline entries gets an inline
 /// entry.
-fn insert_table(
+pub(super) fn insert_table(
     doc: &mut DocumentMut,
     container: &str,
     id: &str,
@@ -961,7 +971,7 @@ pub(super) fn remove_track_table(doc: &mut DocumentMut, id: &str) -> Option<()> 
 
 /// Renames the keys of `slot` that `rename` gives a new name for, keeping
 /// their order, spacing and values.
-fn rename_keys(slot: Slot<'_>, rename: impl Fn(&str) -> Option<String>) -> Option<()> {
+pub(super) fn rename_keys(slot: Slot<'_>, rename: impl Fn(&str) -> Option<String>) -> Option<()> {
     let renamed = |key: Key| match rename(key.get()) {
         Some(new) => Key::new(new)
             .with_leaf_decor(key.leaf_decor().clone())

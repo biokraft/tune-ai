@@ -36,6 +36,8 @@ pub(crate) struct RawSong {
     pub patterns: Vec<(At<String>, RawPattern)>,
     /// v2 only.
     pub clips: Vec<(At<String>, RawClip)>,
+    /// v2 only: the `[scenes.<id>]` tables, in file order.
+    pub scenes: Vec<(At<String>, RawScene)>,
     /// `None` when the file has no `sections` key at all.
     pub sections: Option<Vec<RawSection>>,
     /// v2 only: the top-level `[[automation]]` stretches, in file order.
@@ -105,6 +107,11 @@ pub(crate) struct RawNote {
     /// 16th steps.
     pub len: Option<At<f64>>,
     pub vel: Option<At<i64>>,
+}
+
+pub(crate) struct RawScene {
+    /// Track id to clip id, in file order.
+    pub slots: Vec<(At<String>, At<String>)>,
 }
 
 pub(crate) struct RawPlacement {
@@ -312,6 +319,24 @@ pub(crate) fn read(
         (patterns, Vec::new())
     };
 
+    let scenes = if v2 {
+        sub_tables(&root, "scenes", errors)
+            .into_iter()
+            .filter_map(|(id, v)| {
+                let what = format!("[scenes.{}]", id.value);
+                let f = Fields::open(v, &what, SCENE_KEYS, errors)?;
+                Some((
+                    id,
+                    RawScene {
+                        slots: f.str_table(errors, "slots"),
+                    },
+                ))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     let sections = root.get("sections").map(|v| {
         tables_in_array(v, "`sections`", errors)
             .into_iter()
@@ -367,6 +392,7 @@ pub(crate) fn read(
         tracks,
         patterns,
         clips,
+        scenes,
         sections,
         automation,
     })
@@ -374,10 +400,22 @@ pub(crate) fn read(
 
 /// What a v1 file gets for a key that only version 2 has.
 const V2_SHAPE: &str = "this looks like a version 2 song: add `version = 2` to [song]";
-const ROOT_HINTS_V1: &[(&str, &str)] = &[("clips", V2_SHAPE), ("automation", V2_SHAPE)];
+const ROOT_HINTS_V1: &[(&str, &str)] = &[
+    ("clips", V2_SHAPE),
+    ("automation", V2_SHAPE),
+    ("scenes", V2_SHAPE),
+];
 const TRACK_HINTS_V1: &[(&str, &str)] = &[("play", V2_SHAPE)];
 const ROOT_KEYS_V1: &[&str] = &["song", "mix", "tracks", "patterns", "sections"];
-const ROOT_KEYS_V2: &[&str] = &["song", "mix", "tracks", "clips", "sections", "automation"];
+const ROOT_KEYS_V2: &[&str] = &[
+    "song",
+    "mix",
+    "tracks",
+    "clips",
+    "scenes",
+    "sections",
+    "automation",
+];
 const ROOT_HINTS_V2: &[(&str, &str)] = &[(
     "patterns",
     "a version 2 file keeps patterns as [clips.<id>] with `kind`",
@@ -423,6 +461,7 @@ const NOTES_CLIP_HINTS: &[(&str, &str)] = &[(
 )];
 const NOTE_KEYS: &[&str] = &["start", "pitch", "len", "vel"];
 const PLACEMENT_KEYS: &[&str] = &["at", "clip", "bars", "offset"];
+const SCENE_KEYS: &[&str] = &["slots"];
 const SECTION_KEYS_V1: &[&str] = &["name", "bars", "play", "automation"];
 const SECTION_KEYS_V2: &[&str] = &["name", "bars"];
 const SECTION_HINTS_V2: &[(&str, &str)] = &[

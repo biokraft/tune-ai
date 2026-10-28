@@ -31,6 +31,7 @@ use crate::path::{SongPath, TrackField};
 
 mod arrange;
 mod items;
+mod scenes;
 
 use arrange::{Tables, block_start, rerank, section_tables, write_automation, write_plays};
 
@@ -71,6 +72,9 @@ pub enum EditError {
         "this file writes `{key}` as {form}; the studio can't edit that form yet, so change it by hand"
     )]
     UnsupportedForm { key: String, form: String },
+    /// The file writes its scenes in a form `action` cannot edit.
+    #[error("`{action}` needs each scene as its own [scenes.<id>] table; edit this form by hand")]
+    ScenesByHand { action: &'static str },
     #[error("the edit would make the song invalid:\n{}", summary(.0))]
     Invalid(Vec<SongError>),
     /// The studio could not carry out an edit it accepted: a bug, never a
@@ -428,6 +432,17 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
                     .collect(),
             )
         }
+        SongPath::Scenes => Value::Array(song.scenes.keys().cloned().map(Value::from).collect()),
+        SongPath::Scene { scene } => {
+            let slots = &song.scenes.get(scene)?.slots;
+            json!({ "slots": slots })
+        }
+        SongPath::SceneSlot { scene, track } => song
+            .scenes
+            .get(scene)?
+            .slots
+            .get(track)
+            .map_or(Value::Null, |clip| Value::from(clip.as_str())),
         SongPath::Sections => Value::Array(
             song.sections
                 .iter()
@@ -698,17 +713,90 @@ fn apply(
             let v = toml_edit::Value::from(string()?);
             section_table(doc, *i).ok_or_else(missing)?.put("name", v);
         }
+        SongPath::SceneSlot { scene, track } => {
+            let clip = match value {
+                Value::Null => None,
+                Value::String(clip) if clip.is_empty() => None,
+                Value::String(clip) => Some(clip.as_str()),
+                _ => return Err(bad("expected a clip id or null")),
+            };
+            let scene_table = root_child(doc, "scenes")
+                .and_then(|s| s.child(scene))
+                .filter(|_| song.scenes.contains_key(scene))
+                .ok_or_else(missing)?;
+            put_slot(scene_table, track, clip).ok_or_else(missing)?;
+        }
         SongPath::SectionBars(_) | SongPath::SectionPlay { .. } => {
             unreachable!("SongDoc::set runs these as section operations")
         }
         SongPath::Version
         | SongPath::Track { .. }
         | SongPath::SectionLanes(_)
-        | SongPath::Sections => {
+        | SongPath::Sections
+        | SongPath::Scenes
+        | SongPath::Scene { .. } => {
             return Err(EditError::ReadOnly(path.to_string()));
         }
     }
     Ok(())
+}
+
+/// Sets (`Some`) or clears (`None`) the slot of `track` in a scene's table:
+/// the key of its `slots` table, inline or not. A scene without `slots` gets
+/// them, and the last slot's removal takes the `slots` key with it.
+fn put_slot(mut scene: Slot<'_>, track: &str, clip: Option<&str>) -> Option<()> {
+    let Some(clip) = clip else {
+        let present = match &scene {
+            Slot::Table(t) => t.contains_key("slots"),
+            Slot::Inline(t) => t.contains_key("slots"),
+        };
+        if !present {
+            return Some(());
+        }
+        let emptied = {
+            let slots = match &mut scene {
+                Slot::Table(t) => Slot::of(t.get_mut("slots")?)?,
+                Slot::Inline(t) => Slot::Inline(t.get_mut("slots")?.as_inline_table_mut()?),
+            };
+            remove_slot(slots, track)
+        };
+        if emptied {
+            scene.remove("slots");
+        }
+        return Some(());
+    };
+    scene
+        .child_or_new("slots")?
+        .put(track, toml_edit::Value::from(clip));
+    Some(())
+}
+
+/// Removes `track` from a `slots` table and says whether the `slots` key
+/// should go too: only an inline table that this removal emptied (a `slots`
+/// table with a header keeps its header and comments, and an already empty
+/// one is left as it is). An inline table keeps the space before its closing
+/// brace.
+fn remove_slot(slots: Slot<'_>, track: &str) -> bool {
+    match slots {
+        Slot::Table(t) => {
+            t.remove(track);
+            false
+        }
+        Slot::Inline(t) => {
+            let was_last = t.iter().last().is_some_and(|(k, _)| k == track);
+            let suffix = t
+                .get(track)
+                .and_then(|v| v.decor().suffix().and_then(|s| s.as_str()))
+                .map(str::to_owned);
+            if t.remove(track).is_none() {
+                return false;
+            }
+            if let (true, Some(suffix), Some((_, last))) = (was_last, suffix, t.iter_mut().last()) {
+                last.decor_mut().set_suffix(suffix);
+            }
+            t.is_empty()
+        }
+    }
 }
 
 /// The TOML array for a `clips.<c>.notes` value, laid out as

@@ -21,9 +21,14 @@ struct S {
 }
 
 fn open() -> S {
+    open_on(FIXTURE)
+}
+
+/// A studio core on a temp copy of `text`.
+fn open_on(text: &str) -> S {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("song.toml");
-    fs::write(&path, FIXTURE).unwrap();
+    fs::write(&path, text).unwrap();
     let core = StudioCore::open(&path).unwrap();
     S {
         _dir: dir,
@@ -1349,9 +1354,13 @@ struct F {
 }
 
 fn closed() -> F {
+    closed_on(FIXTURE)
+}
+
+fn closed_on(text: &str) -> F {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("song.toml");
-    fs::write(&path, FIXTURE).unwrap();
+    fs::write(&path, text).unwrap();
     F { _dir: dir, path }
 }
 
@@ -1741,4 +1750,851 @@ fn a_removed_tracks_lane_stays_off_a_track_made_by_hand() {
     );
     assert_eq!(f.text(), text);
     assert_eq!(f.value("automation.acid.acid303.cutoff"), json!([]));
+}
+
+// ----- Plan 10: scenes -----
+
+const SESSION: &str = include_str!("../../tune-song/tests/fixtures/session.toml");
+
+/// A studio core on a temp copy of the session fixture (scenes `groove`
+/// and `break`).
+fn session() -> S {
+    open_on(SESSION)
+}
+
+fn session_song() -> tune_song::Song {
+    SongDoc::parse(SESSION).unwrap().song().clone()
+}
+
+fn add_scene(scene: &str, index: Option<usize>) -> Action {
+    Action::AddScene {
+        scene: scene.into(),
+        index,
+    }
+}
+
+fn move_scene(scene: &str, index: usize) -> Action {
+    Action::MoveScene {
+        scene: scene.into(),
+        index,
+    }
+}
+
+fn set_slot(scene: &str, track: &str, clip: Option<&str>) -> Action {
+    Action::SetSlot {
+        scene: scene.into(),
+        track: track.into(),
+        clip: clip.map(Into::into),
+    }
+}
+
+impl S {
+    /// The scene ids in row order.
+    fn scenes(&self) -> Vec<String> {
+        self.core.song().scenes.keys().cloned().collect()
+    }
+}
+
+#[test]
+fn scene_edits_revert() {
+    let mut s = session();
+    s.agent("r1", &[add_scene("jam", None)]);
+    s.agent("r1", &[set_slot("jam", "acid", Some("a1"))]);
+    s.agent("r1", &[move_scene("jam", 0)]);
+    s.agent("r1", &[set_slot("groove", "hat", Some("h"))]);
+    let run_state = s.text();
+
+    let u = s.undo_run("r1");
+    assert_eq!((u.kept, u.already), (vec![], vec![]));
+    assert_eq!(
+        sorted(u.reverted),
+        ["scenes", "scenes.groove.slots.hat", "scenes.jam"]
+    );
+    assert_eq!(target_changes(&session_song(), s.core.song()), vec![]);
+    assert_eq!(s.scenes(), ["groove", "break"]);
+    assert_eq!(s.text(), SESSION);
+
+    // One undo step: ⌘Z brings the run's state back.
+    s.core.undo(Source::Human).unwrap();
+    assert_eq!(s.text(), run_state);
+
+    // A slot the run filled and emptied again in a scene it made folds
+    // into the scene: no key left behind.
+    let mut s = session();
+    s.agent("r1", &[add_scene("jam", None)]);
+    s.agent("r1", &[set_slot("jam", "acid", Some("a1"))]);
+    s.agent("r1", &[set_slot("jam", "acid", None)]);
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(u.reverted, reverted(&["scenes.jam"]));
+    assert_eq!(s.text(), SESSION);
+}
+
+#[test]
+fn a_slot_changed_later_is_kept() {
+    let mut s = session();
+    s.agent(
+        "r1",
+        &[
+            set_slot("groove", "kick", None),
+            set("song.bpm", json!(130)),
+        ],
+    );
+    s.human(set("scenes.groove.slots.kick", json!("h")));
+    let u = s.undo_run("r1");
+    assert_eq!(
+        u.kept,
+        vec![kept("scenes.groove.slots.kick", Some(Source::Human))]
+    );
+    assert_eq!(u.reverted, reverted(&["song.bpm"]));
+    assert_eq!(s.value("scenes.groove.slots.kick"), json!("h"));
+    assert_eq!(s.value("song.bpm"), json!(120));
+
+    // Set back to its value before the run: already there.
+    let mut s = session();
+    s.agent(
+        "r1",
+        &[
+            set_slot("groove", "kick", None),
+            set("song.bpm", json!(130)),
+        ],
+    );
+    s.human(set("scenes.groove.slots.kick", json!("k4")));
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(u.already, vec![target("scenes.groove.slots.kick")]);
+    assert_eq!(u.reverted, reverted(&["song.bpm"]));
+    assert_eq!(target_changes(&session_song(), s.core.song()), vec![]);
+}
+
+#[test]
+fn a_scene_the_run_made_and_the_producer_filled_is_kept() {
+    let mut s = session();
+    s.agent("r1", &[add_scene("jam", None)]);
+    s.human(set_slot("jam", "hat", Some("h")));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept("scenes.jam", Some(Source::Human))]);
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["groove", "break", "jam"]);
+    assert_eq!(s.value("scenes.jam.slots.hat"), json!("h"));
+}
+
+#[test]
+fn a_clip_the_run_made_and_the_producer_slotted_is_kept() {
+    let mut s = session();
+    s.agent(
+        "r1",
+        &[Action::AddClip {
+            clip: "lead".into(),
+            kind: "notes".into(),
+            steps: None,
+            bars: Some(1),
+            notes: None,
+        }],
+    );
+    s.human(set_slot("groove", "acid", Some("lead")));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept,
+        vec![KeptTarget {
+            target: target("clips.lead"),
+            item: None,
+            reason: KeptReason::StillUsed,
+            by: None,
+            // The validator says why: the slot names the clip.
+            message: Some("unknown clip `lead`".into()),
+        }]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.value("scenes.groove.slots.acid"), json!("lead"));
+}
+
+#[test]
+fn rename_scene_goes_back_whole() {
+    let rename = Action::RenameScene {
+        scene: "groove".into(),
+        to: "drop".into(),
+    };
+    let mut s = session();
+    s.agent("r1", std::slice::from_ref(&rename));
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(sorted(u.reverted), ["scenes.drop", "scenes.groove"]);
+    assert_eq!(target_changes(&session_song(), s.core.song()), vec![]);
+    // Back in place with its slots and the comment above it.
+    assert_eq!(s.text(), SESSION);
+
+    let mut s = session();
+    s.agent("r1", &[rename]);
+    s.human(set_slot("drop", "hat", Some("h")));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        kept_targets(&u, Some(Source::Human)),
+        ["scenes.drop", "scenes.groove"]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["drop", "break"]);
+}
+
+#[test]
+fn remove_track_reverts_with_its_slots() {
+    let mut s = session();
+    s.agent(
+        "r1",
+        &[Action::RemoveTrack {
+            track: "acid".into(),
+        }],
+    );
+    assert_eq!(s.value("scenes.groove.slots.acid"), Value::Null);
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(s.value("scenes.groove.slots.acid"), json!("a1"));
+    assert_eq!(target_changes(&session_song(), s.core.song()), vec![]);
+}
+
+#[test]
+fn rename_track_takes_its_slots_back() {
+    let mut s = session();
+    s.agent(
+        "r1",
+        &[Action::RenameTrack {
+            track: "acid".into(),
+            to: "bass".into(),
+        }],
+    );
+    assert_eq!(s.value("scenes.groove.slots.bass"), json!("a1"));
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(s.value("scenes.groove.slots.acid"), json!("a1"));
+    assert_eq!(s.value("scenes.groove.slots.bass"), Value::Null);
+    assert_eq!(target_changes(&session_song(), s.core.song()), vec![]);
+}
+
+#[test]
+fn the_order_is_kept_when_scenes_changed_since() {
+    let mut s = session();
+    s.agent("r1", &[move_scene("break", 0)]);
+    s.human(add_scene("jam", None));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept("scenes", Some(Source::Human))]);
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["break", "groove", "jam"]);
+
+    // A slot edit is no change to the order: the move goes back.
+    let mut s = session();
+    s.agent("r1", &[move_scene("break", 0)]);
+    s.human(set_slot("groove", "hat", Some("h")));
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(u.reverted, reverted(&["scenes"]));
+    assert_eq!(s.scenes(), ["groove", "break"]);
+    assert_eq!(s.value("scenes.groove.slots.hat"), json!("h"));
+}
+
+// ----- Plan 10: scenes, adversarial -----
+
+/// Protects the producer's removal of a scene: a slot the run set (here,
+/// emptied) in it does not bring the scene back.
+#[test]
+fn a_slot_in_a_scene_the_producer_removed_stays_gone() {
+    let mut s = session();
+    s.agent("r1", &[set_slot("groove", "kick", None)]);
+    s.human(Action::RemoveScene {
+        scene: "groove".into(),
+    });
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept,
+        vec![kept("scenes.groove.slots.kick", Some(Source::Human))]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["break"]);
+
+    // With the studio closed and the scene's table deleted by hand, nothing
+    // in the log says so; the slot's scene is not there to take it.
+    let f = closed_on(SESSION);
+    f.agent("r1", &[set_slot("groove", "kick", None)]);
+    f.hand(
+        "# jam rows\n[scenes.groove]\nslots = { acid = \"a1\" }\n\n",
+        "",
+    );
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept
+            .iter()
+            .map(|k| (k.target.to_string(), k.reason))
+            .collect::<Vec<_>>(),
+        [("scenes.groove.slots.kick".to_owned(), KeptReason::StillUsed)]
+    );
+    assert_eq!(f.text(), text);
+    assert_eq!(f.value("scenes.groove"), Value::Null);
+}
+
+/// Protects the producer's move of a scene the run made: undoing the run
+/// would delete the row they placed, so it is kept, slot and all.
+#[test]
+fn a_scene_the_run_made_and_the_producer_moved_is_kept() {
+    let mut s = session();
+    s.agent("r1", &[add_scene("jam", None)]);
+    s.agent("r1", &[set_slot("jam", "acid", Some("a1"))]);
+    s.human(move_scene("jam", 0));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept("scenes.jam", Some(Source::Human))]);
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["jam", "groove", "break"]);
+    assert_eq!(s.value("scenes.jam.slots.acid"), json!("a1"));
+}
+
+/// Protects a scene the producer made under the id of one the run
+/// removed: the run's old scene does not replace it.
+#[test]
+fn a_scene_the_producer_made_again_is_kept() {
+    let mut s = session();
+    s.agent(
+        "r1",
+        &[Action::RemoveScene {
+            scene: "break".into(),
+        }],
+    );
+    s.human(add_scene("break", Some(0)));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept("scenes.break", Some(Source::Human))]);
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["break", "groove"]);
+    assert_eq!(s.value("scenes.break"), json!({ "index": 0, "slots": {} }));
+}
+
+/// Protects a slot the producer set by hand with the studio closed,
+/// between two of the run's writes to it: the run's second write carried
+/// their value, so neither it nor the run's first value is written back.
+#[test]
+fn a_slot_changed_by_hand_between_the_runs_writes_is_kept() {
+    let f = closed_on(SESSION);
+    f.agent("r1", &[set_slot("groove", "kick", Some("h"))]);
+    f.hand(
+        "slots = { kick = \"h\", acid = \"a1\" }",
+        "slots = { kick = \"k2\", acid = \"a1\" }\n\n[clips.k2]\nkind = \"drum\"\nsteps = \"x.x.x.x.x.x.x.x.\"",
+    );
+    f.agent("r1", &[set_slot("groove", "kick", None)]);
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept("scenes.groove.slots.kick", None)]);
+    assert_eq!(f.text(), text);
+    assert_eq!(f.value("scenes.groove.slots.kick"), Value::Null);
+
+    // A slot the producer added by hand to a scene the run made, before the
+    // run filled another of its slots: the scene is not the run's alone.
+    let f = closed_on(SESSION);
+    f.agent("r1", &[add_scene("jam", None)]);
+    f.hand("[scenes.jam]\n", "[scenes.jam]\nslots = { hat = \"h\" }\n");
+    f.agent("r1", &[set_slot("jam", "acid", Some("a1"))]);
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept("scenes.jam", None)]);
+    assert_eq!(f.text(), text);
+}
+
+/// Protects a track the producer made under the id of one the run
+/// removed: the old track's slots do not come back to it.
+#[test]
+fn a_track_the_producer_made_again_gets_no_old_slots() {
+    let mut s = session();
+    s.agent(
+        "r1",
+        &[Action::RemoveTrack {
+            track: "acid".into(),
+        }],
+    );
+    s.human(Action::AddTrack {
+        track: "acid".into(),
+        instrument: "acid303".into(),
+    });
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let names = kept_targets(&u, Some(Source::Human));
+    assert!(
+        names.contains(&"scenes.groove.slots.acid".to_owned()),
+        "{names:?}"
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.value("scenes.groove.slots.acid"), Value::Null);
+}
+
+/// The producer's scene above it moved the run's scene down a row. Its
+/// row counts (ruling I2): it is not where the run left it, so it is kept,
+/// by the producer, rather than guessed about (an accepted over-keep).
+#[test]
+fn a_scene_the_run_made_is_kept_when_a_scene_was_added_above() {
+    let mut s = session();
+    s.agent("r1", &[add_scene("jam", None)]);
+    s.human(add_scene("intro", Some(0)));
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![kept("scenes.jam", Some(Source::Human))]);
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(s.scenes(), ["intro", "groove", "break", "jam"]);
+}
+
+// ----- Plan 10: slots and scenes whose clip or track was rebuilt -----
+
+fn add_clip_a1_again() -> Action {
+    Action::AddClip {
+        clip: "a1".into(),
+        kind: "acid".into(),
+        steps: Some("C3 . . .".into()),
+        bars: None,
+        notes: None,
+    }
+}
+
+/// Protects a clip the producer made under the id of one the run removed:
+/// the run's old slot does not come back to play it.
+#[test]
+fn a_clip_the_producer_made_again_gets_no_old_slot() {
+    let mut s = session();
+    s.agent("r1", &[Action::RemoveClip { clip: "a1".into() }]);
+    s.human(add_clip_a1_again());
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let names = kept_targets(&u, Some(Source::Human));
+    assert!(
+        names.contains(&"scenes.groove.slots.acid".to_owned()),
+        "{names:?}"
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.value("scenes.groove.slots.acid"), Value::Null);
+}
+
+/// Protects the producer's rebuild of a clip a slot the run emptied held:
+/// the slot does not come back to name their new clip.
+#[test]
+fn a_slot_whose_clip_the_producer_rebuilt_is_kept() {
+    let mut s = session();
+    s.agent("r1", &[set_slot("groove", "acid", None)]);
+    s.human(Action::RemoveClip { clip: "a1".into() });
+    s.human(add_clip_a1_again());
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        u.kept,
+        vec![kept("scenes.groove.slots.acid", Some(Source::Human))]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.value("scenes.groove.slots.acid"), Value::Null);
+}
+
+/// Protects a track the producer made again under the id of one a scene
+/// the run removed has a slot for: the scene does not come back with a
+/// slot on their new track.
+#[test]
+fn a_scene_whose_track_the_producer_rebuilt_is_kept() {
+    let mut s = session();
+    s.agent(
+        "r1",
+        &[Action::RemoveScene {
+            scene: "groove".into(),
+        }],
+    );
+    s.human(Action::RemoveTrack {
+        track: "acid".into(),
+    });
+    s.human(Action::AddTrack {
+        track: "acid".into(),
+        instrument: "acid303".into(),
+    });
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept("scenes.groove", Some(Source::Human))]);
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["break"]);
+    assert_eq!(s.value("scenes.groove"), Value::Null);
+}
+
+// ----- Plan 10: the scene order around the run's own scenes -----
+
+/// The session fixture with a third, empty scene `drop` after `break`.
+fn three_scenes() -> String {
+    SESSION.replacen("[[sections]]", "[scenes.drop]\n\n[[sections]]", 1)
+}
+
+fn remove_scene(scene: &str) -> Action {
+    Action::RemoveScene {
+        scene: scene.into(),
+    }
+}
+
+/// The run's own adds and removes around its moves are the run's: the
+/// order goes back with them, nothing kept, nobody blamed.
+#[test]
+fn the_order_goes_back_around_the_runs_own_scenes() {
+    let cases: [&[Action]; 4] = [
+        &[
+            add_scene("jam", None),
+            move_scene("jam", 0),
+            set_slot("jam", "acid", Some("a1")),
+        ],
+        &[
+            move_scene("break", 0),
+            add_scene("jam", None),
+            move_scene("jam", 0),
+        ],
+        &[
+            add_scene("jam", None),
+            move_scene("jam", 0),
+            remove_scene("jam"),
+        ],
+        &[move_scene("break", 0), remove_scene("groove")],
+    ];
+    for actions in cases {
+        let mut s = session();
+        for a in actions {
+            s.agent("r1", std::slice::from_ref(a));
+        }
+        let u = s.undo_run("r1");
+        assert_eq!(u.kept, vec![], "{actions:?}");
+        assert_eq!(s.scenes(), ["groove", "break"], "{actions:?}");
+        assert_eq!(
+            target_changes(&session_song(), s.core.song()),
+            vec![],
+            "{actions:?}"
+        );
+    }
+
+    // A scene the run removed after moving it comes back before the order
+    // is put back, so it lands in its place.
+    let three = three_scenes();
+    let mut s = open_on(&three);
+    for a in [
+        move_scene("drop", 0),
+        remove_scene("drop"),
+        move_scene("break", 0),
+    ] {
+        s.agent("r1", &[a]);
+    }
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(s.scenes(), ["groove", "break", "drop"]);
+}
+
+/// Protects a reorder by hand with the studio closed between two of the
+/// run's writes: the run's later write carried it, so the order is kept
+/// with `by` null, and so are the scenes the run added or removed in it.
+#[test]
+fn a_scene_reorder_by_hand_between_the_runs_writes_is_kept() {
+    // The producer moved `drop` down a row; the run then removed it.
+    let f = closed_on(&three_scenes());
+    f.agent("r1", &[move_scene("drop", 0)]);
+    f.hand("[scenes.drop]\n\n# jam rows\n", "# jam rows\n");
+    f.hand("# hats alone\n", "[scenes.drop]\n\n# hats alone\n");
+    f.agent("r1", &[remove_scene("drop")]);
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(kept_targets(&u, None), ["scenes", "scenes.drop"]);
+    assert_eq!(f.text(), text);
+
+    // The producer swapped the rows back; the run then added a scene.
+    let f = closed_on(SESSION);
+    f.agent("r1", &[move_scene("break", 0)]);
+    let block = "# hats alone\n[scenes.break]\nslots = { hat = \"h\" }\n\n";
+    f.hand(block, "");
+    f.hand("[[sections]]", &format!("{block}[[sections]]"));
+    f.agent("r1", &[add_scene("jam", None)]);
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(kept_targets(&u, None), ["scenes", "scenes.jam"]);
+    assert_eq!(f.text(), text);
+}
+
+/// Protects the producer's move of a scene through the studio between two
+/// of the run's writes: the order and the run's scene in it are kept, by
+/// the producer.
+#[test]
+fn a_scene_move_through_the_studio_between_the_runs_writes_is_kept() {
+    let mut s = session();
+    s.agent("r1", &[move_scene("break", 0)]);
+    s.human(move_scene("groove", 0));
+    s.agent("r1", &[add_scene("jam", None)]);
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        kept_targets(&u, Some(Source::Human)),
+        ["scenes", "scenes.jam"]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["groove", "break", "jam"]);
+
+    // The same with a move of the run's after its add: the add is the
+    // run's next change to the order after the producer's move, and it
+    // gives no value of the order to go back to, so the order is kept.
+    let mut s = session();
+    s.agent("r1", &[move_scene("break", 0)]);
+    s.human(move_scene("groove", 0));
+    s.agent("r1", &[add_scene("jam", None)]);
+    s.agent("r1", &[move_scene("jam", 0)]);
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        kept_targets(&u, Some(Source::Human)),
+        ["scenes", "scenes.jam"]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["jam", "groove", "break"]);
+}
+
+// ----- review round 2: scenes -----
+
+fn rename_scene(scene: &str, to: &str) -> Action {
+    Action::RenameScene {
+        scene: scene.into(),
+        to: to.into(),
+    }
+}
+
+/// C1 (p04): the producer renamed the run's renamed scene again. The old
+/// name does not come back beside theirs.
+#[test]
+fn a_scene_rename_the_producer_renamed_again_is_kept_whole() {
+    let mut s = session();
+    s.agent("r1", &[rename_scene("groove", "drop")]);
+    s.human(rename_scene("drop", "drop2"));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!((&u.reverted, &u.already), (&vec![], &vec![]));
+    assert_eq!(
+        kept_targets(&u, Some(Source::Human)),
+        ["scenes.drop", "scenes.groove"]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["drop2", "break"]);
+}
+
+/// C1 (p05): the producer removed the run's renamed scene. It does not
+/// come back under its old name, with the studio open or closed.
+#[test]
+fn a_scene_rename_the_producer_removed_is_kept_whole() {
+    let mut s = session();
+    s.agent("r1", &[rename_scene("groove", "drop")]);
+    s.human(remove_scene("drop"));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!((&u.reverted, &u.already), (&vec![], &vec![]));
+    assert_eq!(
+        kept_targets(&u, Some(Source::Human)),
+        ["scenes.drop", "scenes.groove"]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["break"]);
+
+    // Studio closed, the scene's table deleted by hand: nothing logged.
+    let f = closed_on(SESSION);
+    f.agent("r1", &[rename_scene("groove", "drop")]);
+    f.hand(
+        "# jam rows\n[scenes.drop]\nslots = { kick = \"k4\", acid = \"a1\" }\n\n",
+        "",
+    );
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!((&u.reverted, &u.already), (&vec![], &vec![]));
+    assert_eq!(kept_targets(&u, None), ["scenes.drop", "scenes.groove"]);
+    assert_eq!(f.text(), text);
+}
+
+/// I1: a scene rename goes back by renaming in place, wherever the scene
+/// sits now and whatever the run did to its slots, so its table keeps the
+/// comment above it.
+#[test]
+fn a_scene_rename_goes_back_in_place() {
+    // The run moved the renamed scene down a row.
+    let mut s = session();
+    s.agent("r1", &[rename_scene("groove", "drop")]);
+    s.agent("r1", &[move_scene("drop", 1)]);
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(s.scenes(), ["groove", "break"]);
+    assert_eq!(s.text(), SESSION);
+
+    // The run filled a slot of the renamed scene.
+    let mut s = session();
+    s.agent("r1", &[rename_scene("groove", "drop")]);
+    s.agent("r1", &[set_slot("drop", "hat", Some("h"))]);
+    let u = s.undo_run("r1");
+    assert_eq!(u.kept, vec![]);
+    assert_eq!(s.text(), SESSION);
+}
+
+/// I2 (p31): with the studio closed, the producer moved the run's new
+/// scene by hand after the run. Nothing in the log says so, but the scene
+/// is not where the run left it: it is kept, not deleted with their move.
+#[test]
+fn a_scene_moved_by_hand_after_the_run_is_kept() {
+    let f = closed_on(SESSION);
+    f.agent("r1", &[add_scene("jam", None)]);
+    f.hand("[scenes.jam]\n", "");
+    f.hand("# jam rows\n", "[scenes.jam]\n\n# jam rows\n");
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(u.kept, vec![kept("scenes.jam", None)]);
+    assert_eq!(f.text(), text);
+
+    // p51: the run renamed a scene, the producer moved it below `break`
+    // by hand. The rename is kept whole, the producer's row order stays.
+    let f = closed_on(SESSION);
+    f.agent("r1", &[rename_scene("groove", "drop")]);
+    let groove = "# jam rows\n[scenes.drop]\nslots = { kick = \"k4\", acid = \"a1\" }\n\n";
+    f.hand(groove, "");
+    f.hand("[[sections]]", &format!("{groove}[[sections]]"));
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(kept_targets(&u, None), ["scenes.drop", "scenes.groove"]);
+    assert_eq!(f.text(), text);
+}
+
+/// I2 (p57): the producer added a scene above the run's renamed one. Its
+/// row moved down: kept rather than guessed, by the producer (an
+/// accepted over-keep), and their top row stays on top.
+#[test]
+fn a_scene_shifted_by_a_scene_added_above_is_kept() {
+    let mut s = session();
+    s.agent("r1", &[rename_scene("groove", "drop")]);
+    s.human(add_scene("intro", Some(0)));
+    let text = s.text();
+    let u = s.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    assert_eq!(
+        kept_targets(&u, Some(Source::Human)),
+        ["scenes.drop", "scenes.groove"]
+    );
+    assert_eq!(s.text(), text);
+    assert_eq!(s.scenes(), ["intro", "drop", "break"]);
+}
+
+// ----- review round 3: scenes -----
+
+/// M1 (p19): with the studio closed, the run removed a track and the
+/// producer made a track under its id by hand, with a new scene slotting
+/// it. The run's old slot does not come back onto their track.
+#[test]
+fn a_removed_tracks_slot_stays_off_a_track_made_by_hand() {
+    let f = closed_on(SESSION);
+    f.agent(
+        "r1",
+        &[Action::RemoveTrack {
+            track: "acid".into(),
+        }],
+    );
+    f.hand(
+        "[clips.k4]",
+        "[tracks.acid]\ninstrument = \"acid303\"\n\n[clips.k4]",
+    );
+    f.hand(
+        "[[sections]]",
+        "[scenes.jam]\nslots = { acid = \"a1\" }\n\n[[sections]]",
+    );
+    let text = f.text();
+    let u = f.undo_run("r1");
+    assert_eq!(u.reverted, vec![]);
+    let names = kept_targets(&u, None);
+    for t in ["scenes.groove.slots.acid", "tracks.acid"] {
+        assert!(names.contains(&t.to_owned()), "{t}: {names:?}");
+    }
+    assert_eq!(f.text(), text);
+    assert_eq!(f.value("scenes.groove.slots.acid"), Value::Null);
+    assert_eq!(f.value("scenes.jam.slots.acid"), json!("a1"));
+}
+
+/// M3: an order put that changes nothing is not listed as reverted. The
+/// run added a scene, moved it to the top and removed it again: the order
+/// is back already.
+#[test]
+fn an_order_already_back_is_not_reverted() {
+    let mut s = session();
+    s.agent("r1", &[add_scene("jam", None)]);
+    s.agent("r1", &[move_scene("jam", 0)]);
+    s.agent("r1", &[remove_scene("jam")]);
+    let u = s.undo_run("r1");
+    assert_eq!((&u.reverted, &u.kept), (&vec![], &vec![]));
+    let mut already: Vec<String> = u.already.iter().map(Target::to_string).collect();
+    already.sort();
+    assert_eq!(already, ["scenes", "scenes.jam"]);
+    assert_eq!(s.scenes(), ["groove", "break"]);
+}
+
+/// An audio device that holds the processor and never plays it.
+struct ParkedOut;
+
+impl tune_engine::AudioOut for ParkedOut {
+    fn sample_rate(&mut self, wanted: u32) -> Result<u32, String> {
+        Ok(wanted)
+    }
+
+    fn start(&mut self, processor: tune_engine::LiveProcessor) -> Result<Box<dyn Send>, String> {
+        Ok(Box::new(processor))
+    }
+}
+
+#[test]
+fn launches_are_not_part_of_a_run_end_to_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.toml");
+    fs::write(&path, SESSION).unwrap();
+    let config = tune_studio::StudioConfig {
+        audio: Box::new(ParkedOut),
+        songs_root: dir.path().to_owned(),
+    };
+    let studio = tune_studio::Studio::spawn(config, Some(path.clone())).unwrap();
+    let launch = Action::LaunchClip {
+        track: "acid".into(),
+        scene: "groove".into(),
+    };
+    studio.run_actions(vec![launch], run("r1")).unwrap();
+    studio.run_actions(vec![cutoff(820.0)], run("r1")).unwrap();
+    let records = EditLog::for_song(&path).read_records().unwrap();
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].run.as_deref(), Some("r1"));
+    assert_eq!(records[0].actions, ["set_value"]);
+
+    let out = studio
+        .run_actions(vec![undo_action("r1")], Origin::human())
+        .unwrap();
+    let undo: RunUndo = serde_json::from_value(out.results[0].clone()).unwrap();
+    assert_eq!(undo.reverted, reverted(&["tracks.acid.acid303.cutoff"]));
+    assert!(undo.kept.is_empty(), "{:?}", undo.kept);
+    assert_eq!(fs::read_to_string(&path).unwrap(), SESSION);
+
+    let scene = Action::LaunchScene {
+        scene: "groove".into(),
+    };
+    studio.run_actions(vec![scene], run("r2")).unwrap();
+    let err = studio
+        .run_actions(vec![undo_action("r2")], Origin::human())
+        .unwrap_err();
+    assert_eq!(err.to_string(), "no edits of run `r2` in the edit log");
+    studio.shutdown();
 }

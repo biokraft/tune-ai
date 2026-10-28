@@ -69,6 +69,34 @@ pub const ACTIONS: &[ActionSpec] = &[
             "[start, end): 0-based bars, end not included, e.g. [2, 6]; left out stops looping",
         )],
     ),
+    // ----- live session -----
+    action(
+        "launch_clip",
+        Live,
+        "Launches the clip in a scene's slot for a track at the next bar line; from that bar \
+         the track is off the arrangement (its lanes do not drive it) until it is sent back. \
+         Starts playback when stopped.",
+        &[TRACK, arg("scene", Id, "scene id")],
+    ),
+    action(
+        "launch_scene",
+        Live,
+        "Launches a scene at the next bar line: each track plays its slot's clip, and a track \
+         with an empty slot stops. Starts playback when stopped.",
+        &[arg("scene", Id, "scene id")],
+    ),
+    action(
+        "stop_clip",
+        Live,
+        "Silences a track from the next bar line until it is sent back to the arrangement.",
+        &[TRACK],
+    ),
+    action(
+        "back_to_arrangement",
+        Live,
+        "Sends a track, or every track, back to the arrangement at the next bar line.",
+        &[opt("track", Id, "track id; every track when left out")],
+    ),
     // ----- history -----
     action(
         "undo",
@@ -423,6 +451,56 @@ pub const ACTIONS: &[ActionSpec] = &[
         &[
             arg("index", Int, "0-based section"),
             arg("name", Text, "new name"),
+        ],
+    ),
+    // ----- scenes -----
+    action(
+        "add_scene",
+        Edit,
+        "Adds an empty scene before scene `index` (appended by default). `index` is 0-based.",
+        &[
+            arg(
+                "scene",
+                Id,
+                "new scene id: lower-case letters, digits and `_`",
+            ),
+            opt(
+                "index",
+                Int,
+                "0-based position among the scenes; the end by default",
+            ),
+        ],
+    ),
+    action(
+        "remove_scene",
+        Edit,
+        "Removes a scene with its slots (the result lists them).",
+        &[arg("scene", Id, "scene id")],
+    ),
+    action(
+        "rename_scene",
+        Edit,
+        "Renames a scene, keeping its place.",
+        &[arg("scene", Id, "scene id"), arg("to", Id, "new scene id")],
+    ),
+    action(
+        "move_scene",
+        Edit,
+        "Moves a scene to `index` (0-based), as a removal then an insertion.",
+        &[
+            arg("scene", Id, "scene id"),
+            arg("index", Int, "0-based position among the scenes"),
+        ],
+    ),
+    action(
+        "set_slot",
+        Edit,
+        "Puts a clip in a scene's slot for a track; no clip empties the slot. The track's \
+         instrument must be able to play the clip.",
+        &[
+            arg("scene", Id, "scene id"),
+            TRACK,
+            opt("clip", Id, "clip id; left out or empty clears the slot"),
         ],
     ),
     // ----- lanes -----

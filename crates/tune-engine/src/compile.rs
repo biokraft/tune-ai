@@ -5,7 +5,7 @@
 use tune_dsp::acid303::AcidStep;
 use tune_dsp::acid303::math::db2amp;
 use tune_dsp::{DrumHit, ParamSpec, STRIP_PARAMS, find_spec};
-use tune_modules::{ACCENT_VELOCITY, ModuleDescriptor, NoteEvent, NoteId};
+use tune_modules::{ACCENT_VELOCITY, ClipKind, ModuleDescriptor, NoteEvent, NoteId};
 use tune_song::{
     Clip, Device, MIX_TRACK_ID, MasterMode, MixUnit, NoteClip, Song, TICKS_PER_STEP, Track,
     find_mix_param,
@@ -118,6 +118,13 @@ pub struct CompiledSong {
     pub tracks: Vec<CompiledTrack>,
     /// One compiled clip per `Song::clips` entry, in the same order.
     pub clips: Vec<CompiledClip>,
+    /// One id per `clips` entry, in the same order.
+    pub clip_ids: Vec<String>,
+    /// One kind per `clips` entry, in the same order.
+    pub clip_kinds: Vec<ClipKind>,
+    /// The session scenes in `Song::scenes` order (the row order). Only
+    /// live play launches them; the arrangement never reads them.
+    pub scenes: Vec<CompiledScene>,
     /// The named sections, for bar maps; the engine plays `regions`.
     pub sections: Vec<CompiledSection>,
     /// The arrangement cut wherever a section, a placement or a lane
@@ -125,6 +132,15 @@ pub struct CompiledSong {
     /// covering the whole song.
     pub regions: Vec<CompiledRegion>,
     pub mix: CompiledMix,
+}
+
+/// One session row with its ids resolved.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompiledScene {
+    pub id: String,
+    /// Per track (like `tracks`): the clip its slot holds, an index into
+    /// `clips`; `None` for an empty slot.
+    pub slots: Vec<Option<usize>>,
 }
 
 /// The `track` of a lane (or a knob override) aimed at the mix: a mix param
@@ -307,6 +323,26 @@ impl CompiledSong {
             })
             .collect();
 
+        let clip_ids = song.clips.keys().cloned().collect();
+        let clip_kinds = song.clips.values().map(Clip::kind).collect();
+        let scenes =
+            song.scenes
+                .iter()
+                .map(|(id, scene)| CompiledScene {
+                    id: id.clone(),
+                    slots: song
+                        .tracks
+                        .keys()
+                        .map(|t| {
+                            let clip = scene.slots.get(t)?;
+                            Some(song.clips.get_index_of(clip).unwrap_or_else(|| {
+                                panic!("unknown clip `{clip}` in a validated song")
+                            }))
+                        })
+                        .collect(),
+                })
+                .collect();
+
         let track_index = |id: &str| {
             song.tracks
                 .get_index_of(id)
@@ -357,6 +393,9 @@ impl CompiledSong {
             total_bars: song.total_bars(),
             tracks,
             clips,
+            clip_ids,
+            clip_kinds,
+            scenes,
             sections,
             regions,
             mix,
@@ -366,6 +405,16 @@ impl CompiledSong {
     /// Index of the track with `id`.
     pub fn track_index(&self, id: &str) -> Option<usize> {
         self.tracks.iter().position(|t| t.id == id)
+    }
+
+    /// Index of the clip with `id`.
+    pub fn clip_index(&self, id: &str) -> Option<usize> {
+        self.clip_ids.iter().position(|c| c == id)
+    }
+
+    /// Index of the scene with `id`.
+    pub fn scene_index(&self, id: &str) -> Option<usize> {
+        self.scenes.iter().position(|s| s.id == id)
     }
 
     /// Resolves `param_id` (`<device id>.<param>`, or a strip id) on track

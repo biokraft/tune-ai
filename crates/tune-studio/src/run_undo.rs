@@ -19,12 +19,13 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tune_dsp::STRIP_PARAMS;
+use tune_song::Song;
 
 use crate::doc::{EditError, SongDoc};
 use crate::error::StudioError;
 use crate::log::{ActionRecord, Source};
 use crate::path::SongPath;
-use crate::target::{Target, TargetChange, target_value};
+use crate::target::{Target, TargetChange, target_value, without_index};
 
 /// What undoing a run did.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
@@ -124,8 +125,8 @@ struct Waiting {
 /// A section edit's changes (the sections, and the placements and lane
 /// stretches of the records that changed them) go back together or not
 /// at all: kept whole when any part of it would be kept, written in one
-/// go otherwise. So does each rename (of a track, clip or device) with
-/// everything its record changed.
+/// go otherwise. So does each rename (of a track, clip, device or scene)
+/// with everything its record changed.
 pub fn undo_run(
     doc: &mut SongDoc,
     records: &[ActionRecord],
@@ -142,6 +143,7 @@ pub fn undo_run(
         .rev()
         .find_map(|&i| records[i].run_title.clone());
     let plans = plan(records, &mine);
+    let renames = scene_renames(records, &mine);
     let key = |k: usize| (plans[k].last, plans[k].pos);
 
     // Each unit is one target, or a group that goes back whole (the
@@ -153,6 +155,10 @@ pub fn undo_run(
     let mut groups = rename_groups(&plans, records, &mine);
     if !section.is_empty() {
         groups.insert(0, section.clone());
+    }
+    let order = scene_order_group(&plans);
+    if !order.is_empty() {
+        groups.push(order);
     }
     let groups = merged(groups);
     let mut units: Vec<(Vec<usize>, bool)> = (0..plans.len())
@@ -172,6 +178,11 @@ pub fn undo_run(
         kept: Vec::new(),
         already: Vec::new(),
     };
+    // The scenes not where the run left them, read before any revert moves
+    // one.
+    let moved: Vec<Option<Option<Source>>> = (plans.iter())
+        .map(|p| moved_since(doc.song(), p, records, &mine, run))
+        .collect();
     let mut waiting = Vec::new();
     for (unit, grouped) in units {
         // Each part's decision, and for a part the run changed, who last
@@ -184,7 +195,7 @@ pub fn undo_run(
                 let decision = if is_list(&p.target) {
                     decide_list(doc, p, &others, &foreign, records)
                 } else {
-                    decide(doc, p, &foreign, records)
+                    decide(doc, p, &others, &foreign, records, moved[k])
                 };
                 let decision = match track_kept(doc, &plans, &unit, p, records, run) {
                     Some(by) if !matches!(decision, Decision::Kept(_)) => {
@@ -260,8 +271,8 @@ pub fn undo_run(
         if puts.is_empty() {
             continue;
         }
-        match put_all(doc, &puts) {
-            Ok(()) => out.reverted.extend(reverted_items(puts)),
+        match put_all(doc, &puts, &renames) {
+            Ok(idle) => written(&mut out, puts, idle),
             Err(error) => waiting.push(Waiting { puts, error }),
         }
     }
@@ -270,8 +281,8 @@ pub fn undo_run(
         let before = waiting.len();
         let mut still = Vec::new();
         for w in waiting {
-            match put_all(doc, &w.puts) {
-                Ok(()) => out.reverted.extend(reverted_items(w.puts)),
+            match put_all(doc, &w.puts, &renames) {
+                Ok(idle) => written(&mut out, w.puts, idle),
                 Err(error) => still.push(Waiting { error, ..w }),
             }
         }
@@ -295,9 +306,9 @@ pub fn undo_run(
     Ok(out)
 }
 
-/// For a part of a track (a lane param's stretches) outside the unit of
-/// the run's plan of that whole track: `Some` with its `by` when that
-/// plan is kept. A track the run removed that someone made again (by hand
+/// For a part of a track (a lane param's stretches, its slot in a scene)
+/// outside the unit of the run's plan of that whole track: `Some` with its
+/// `by` when that plan is kept. A track the run removed that someone made again (by hand
 /// too) is kept, and what the run took with it must not come back onto
 /// theirs. The track's plan is decided now: the reverts before its turn
 /// (its parts, in the same write) do not change its value.
@@ -309,7 +320,9 @@ fn track_kept(
     records: &[ActionRecord],
     run: &str,
 ) -> Option<Option<Source>> {
-    let Target::Lanes { track, .. } = &p.target else {
+    let (Target::Lanes { track, .. } | Target::Value(SongPath::SceneSlot { track, .. })) =
+        &p.target
+    else {
         return None;
     };
     let k = plans
@@ -318,8 +331,9 @@ fn track_kept(
     if unit.contains(&k) {
         return None;
     }
-    let (_, foreign) = other_writes(&plans[k], records, run);
-    match decide(doc, &plans[k], &foreign, records) {
+    let (others, foreign) = other_writes(&plans[k], records, run);
+    // A track has no row: only a scene plan is `moved`.
+    match decide(doc, &plans[k], &others, &foreign, records, None) {
         Decision::Kept(kept) => Some(kept.first().and_then(|k| k.by)),
         _ => None,
     }
@@ -338,6 +352,64 @@ fn kept_whole(p: &Plan, by: Option<Source>) -> Vec<KeptTarget> {
             message: None,
         })
         .collect()
+}
+
+/// For a scene plan whose scene is in `song` and was there after the run:
+/// `Some` when it is not at the row the run left it on, with the source of
+/// the last other write since that changed the scenes (`None` when the log
+/// has none: a hand edit). The run's row for it is its index when the run
+/// last wrote it, carried through the run's later scene writes (each
+/// order it set, the scenes it added or removed above it).
+fn moved_since(
+    song: &Song,
+    p: &Plan,
+    records: &[ActionRecord],
+    mine: &[usize],
+    run: &str,
+) -> Option<Option<Source>> {
+    let Target::Scene(id) = &p.target else {
+        return None;
+    };
+    let index = |v: &Value| v["index"].as_u64().and_then(|n| usize::try_from(n).ok());
+    let mut at = index(&p.after)?;
+    let now = song.scenes.get_index_of(id)?;
+    let from = p.touched.iter().rev().find(|(_, old)| old.is_some())?.0;
+    for r in mine.iter().filter(|&&i| i > from).map(|&i| &records[i]) {
+        if let Some(c) = r.targets.iter().find(|c| c.target == Target::SceneOrder) {
+            at = elements(&c.new)
+                .iter()
+                .position(|s| s.as_str() == Some(id.as_str()))?;
+            continue;
+        }
+        let scenes = r
+            .targets
+            .iter()
+            .filter(|c| matches!(c.target, Target::Scene(_)));
+        let gone = scenes
+            .clone()
+            .filter(|c| c.new.is_null() && !c.old.is_null());
+        at -= gone
+            .filter(|c| index(&c.old).is_some_and(|n| n < at))
+            .count();
+        let came = scenes.filter(|c| c.old.is_null() && !c.new.is_null());
+        let mut came: Vec<usize> = came.filter_map(|c| index(&c.new)).collect();
+        came.sort_unstable();
+        for n in came {
+            if n <= at {
+                at += 1;
+            }
+        }
+    }
+    if now == at {
+        return None;
+    }
+    let scenes = |c: &TargetChange| matches!(c.target, Target::Scene(_) | Target::SceneOrder);
+    let by = (p.last + 1..records.len())
+        .rev()
+        .filter(|&j| records[j].run.as_deref() != Some(run))
+        .find(|&j| records[j].targets.iter().any(scenes))
+        .map(|j| records[j].source);
+    Some(by)
 }
 
 /// Whether the run changed `p`'s target: its value after the run's last
@@ -433,13 +505,19 @@ fn section_group(plans: &[Plan], records: &[ActionRecord], mine: &[usize]) -> Ve
     group
 }
 
-/// One group per record of the run that renamed a track, clip or device:
-/// every plan its changes belong to (the target, or the item the run
+/// One group per record of the run that renamed a track, clip, device or
+/// scene: every plan its changes belong to (the target, or the item the run
 /// created that it folded into). A rename is a removal and an addition
-/// (`tracks.<old>` gone, `tracks.<new>` made, the lanes moved over):
-/// reverting one half without the other doubles the item or orphans it.
+/// (`tracks.<old>` gone, `tracks.<new>` made, the lanes and slots moved
+/// over): reverting one half without the other doubles the item or orphans
+/// it.
 fn rename_groups(plans: &[Plan], records: &[ActionRecord], mine: &[usize]) -> Vec<Vec<usize>> {
-    const RENAMES: [&str; 3] = ["rename_track", "rename_clip", "rename_device"];
+    const RENAMES: [&str; 4] = [
+        "rename_track",
+        "rename_clip",
+        "rename_device",
+        "rename_scene",
+    ];
     let renames = mine.iter().map(|&i| &records[i]).filter(|r| {
         let mut actions = r.actions.iter();
         actions.any(|a| RENAMES.contains(&a.as_str()))
@@ -460,6 +538,30 @@ fn rename_groups(plans: &[Plan], records: &[ActionRecord], mine: &[usize]) -> Ve
         })
         .filter(|g| !g.is_empty())
         .collect()
+}
+
+/// The plans of the scene order the run changed and of each scene it names
+/// that the run added or removed: they go back together (the order put
+/// last, once the scenes are back or gone) or are kept together. Empty
+/// when the run moved no scene, or added or removed none the order names.
+fn scene_order_group(plans: &[Plan]) -> Vec<usize> {
+    let Some(order) = plans.iter().position(|p| p.target == Target::SceneOrder) else {
+        return Vec::new();
+    };
+    let named = |s: &str| {
+        let values = [&plans[order].before, &plans[order].after];
+        let mut ids = values.into_iter().filter_map(Value::as_array).flatten();
+        ids.any(|id| id.as_str() == Some(s))
+    };
+    let mut group = vec![order];
+    group.extend((0..plans.len()).filter(|&k| {
+        let p = &plans[k];
+        matches!(&p.target, Target::Scene(s) if named(s)) && p.before.is_null() != p.after.is_null()
+    }));
+    if group.len() == 1 {
+        return Vec::new();
+    }
+    group
 }
 
 /// `groups` with every two that share a plan joined into one.
@@ -486,7 +588,8 @@ fn merged(groups: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
 
 /// The run's targets, in the order the run first changed them. A change
 /// to a part of an item the run created (a leaf of a new track, effect,
-/// instrument or clip, a new track's placements) folds into that item.
+/// instrument or clip, a new track's placements, a new scene's slots) folds
+/// into that item.
 fn plan(records: &[ActionRecord], mine: &[usize]) -> Vec<Plan> {
     let mut plans: Vec<Plan> = Vec::new();
     for &i in mine {
@@ -501,7 +604,7 @@ fn plan(records: &[ActionRecord], mine: &[usize]) -> Vec<Plan> {
                     Some(k) => {
                         let p = &mut plans[k];
                         if !approx(p, &c.old, &p.after) {
-                            p.gaps.push((p.last, i));
+                            p.gaps.push((p.gap_start(), i));
                         }
                         p.after = c.new.clone();
                         (k, Some(c.old.clone()))
@@ -526,13 +629,83 @@ fn plan(records: &[ActionRecord], mine: &[usize]) -> Vec<Plan> {
             p.pos = pos;
             p.touched.push((i, own));
         }
+        fold_scenes_into_order(&mut plans, &records[i], i);
     }
     plans
+}
+
+/// Folds the scenes record `i` of the run added or removed into the scene
+/// order the run changed before it: the order's value names every scene,
+/// but a write that only adds or removes one records no `scenes` change.
+/// An added scene goes in at its new index; a removed one must sit where
+/// the order has it (checked before any goes), else something the log
+/// does not show moved it, and the order has a gap there.
+fn fold_scenes_into_order(plans: &mut [Plan], record: &ActionRecord, i: usize) {
+    if record
+        .targets
+        .iter()
+        .any(|c| c.target == Target::SceneOrder)
+    {
+        return;
+    }
+    let Some(p) = plans.iter_mut().find(|p| p.target == Target::SceneOrder) else {
+        return;
+    };
+    let changes: Vec<(usize, &str, &TargetChange)> = record
+        .targets
+        .iter()
+        .enumerate()
+        .filter_map(|(pos, c)| match &c.target {
+            Target::Scene(s) if c.old.is_null() != c.new.is_null() => Some((pos, s.as_str(), c)),
+            _ => None,
+        })
+        .collect();
+    let Some(&(pos, ..)) = changes.last() else {
+        return;
+    };
+    let index = |v: &Value| v["index"].as_u64().and_then(|n| usize::try_from(n).ok());
+    let mut ids: Vec<String> = elements(&p.after)
+        .iter()
+        .filter_map(|id| id.as_str().map(str::to_owned))
+        .collect();
+    let gone = changes.iter().filter(|(_, _, c)| c.new.is_null());
+    let mut known = gone
+        .clone()
+        .all(|(_, s, c)| ids.iter().position(|id| id == s) == index(&c.old));
+    ids.retain(|id| !gone.clone().any(|(_, s, _)| id == s));
+    for (_, s, c) in changes.iter().filter(|(_, _, c)| c.old.is_null()) {
+        match index(&c.new) {
+            Some(at) if at <= ids.len() && !ids.iter().any(|id| id == s) => {
+                ids.insert(at, (*s).to_owned());
+            }
+            _ => known = false,
+        }
+    }
+    if !known {
+        p.gaps.push((p.gap_start(), i));
+    }
+    p.after = Value::Array(ids.into_iter().map(Value::from).collect());
+    p.last = i;
+    p.pos = pos;
+    p.touched.push((i, None));
 }
 
 impl Plan {
     fn side(&self) -> (&Target, &Value, &Value) {
         (&self.target, &self.before, &self.after)
+    }
+
+    /// The record a gap found now starts at: the run's last change to the
+    /// target. For the scene order, the last whose value the log gave: a
+    /// scene the run added or removed since is folded into the order the
+    /// run knew, so a change by someone else before the fold shows only
+    /// at the run's next change to the order.
+    fn gap_start(&self) -> usize {
+        if self.target != Target::SceneOrder {
+            return self.last;
+        }
+        let read = self.touched.iter().rev().find(|(_, old)| old.is_some());
+        read.map_or(self.last, |&(i, _)| i)
     }
 
     /// Whether something the edit log does not show changed the target
@@ -547,8 +720,17 @@ impl Plan {
 }
 
 /// A target other than a list: back to its value before the run, unless
-/// it holds that already or someone changed it later.
-fn decide(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionRecord]) -> Decision {
+/// it holds that already or someone changed it later. A slot or scene is
+/// also kept when another write since rebuilt a track or clip it names
+/// (see [`names_rebuilt`]).
+fn decide(
+    doc: &SongDoc,
+    p: &Plan,
+    others: &[usize],
+    foreign: &[usize],
+    records: &[ActionRecord],
+    moved: Option<Option<Source>>,
+) -> Decision {
     let current = target_value(doc.song(), &p.target);
     if approx(p, &current, &p.before) {
         return Decision::Already;
@@ -566,6 +748,20 @@ fn decide(doc: &SongDoc, p: &Plan, foreign: &[usize], records: &[ActionRecord]) 
     // held then is not known, so it is kept.
     if p.unlogged_gap(foreign) {
         return kept(None);
+    }
+    // A track or clip it names was made, removed or rebuilt since: putting
+    // it back would point it at what is there now.
+    let rebuilt = others.iter().rev().find(|&&j| {
+        let mut targets = records[j].targets.iter();
+        targets.any(|c| names_rebuilt(p, &c.target))
+    });
+    if let Some(&j) = rebuilt {
+        return kept(Some(records[j].source));
+    }
+    // A scene not at the row the run left it on: someone added, removed or
+    // moved a scene since, and putting it back would guess where.
+    if let Some(by) = moved {
+        return kept(by);
     }
     let mut before = p.before.clone();
     if let Some(&j) = foreign.last() {
@@ -722,6 +918,34 @@ fn decide_list(
     }
 }
 
+/// Whether a change to `other` makes, removes or rebuilds a track or clip
+/// that plan `p`, a slot or a scene, names in its value before or after
+/// the run: the slot's track and clip, a scene's slot tracks and clips. Only
+/// the slot or scene looks at this: a clip the run made is not kept because
+/// the producer slotted it (the song refuses its removal instead).
+fn names_rebuilt(p: &Plan, other: &Target) -> bool {
+    let values = [&p.before, &p.after];
+    let (tracks, clips): (Vec<&str>, Vec<&str>) = match &p.target {
+        Target::Value(SongPath::SceneSlot { track, .. }) => (
+            vec![track.as_str()],
+            values.iter().filter_map(|v| v.as_str()).collect(),
+        ),
+        Target::Scene(_) => {
+            let slots = values.iter().filter_map(|v| v["slots"].as_object());
+            slots
+                .flat_map(|m| m.iter())
+                .filter_map(|(t, c)| Some((t.as_str(), c.as_str()?)))
+                .unzip()
+        }
+        _ => return false,
+    };
+    match other {
+        Target::Track(t) => tracks.contains(&t.as_str()),
+        Target::Clip(c) => clips.contains(&c.as_str()),
+        _ => false,
+    }
+}
+
 /// Whether a change to `other` rebuilds what element `e` of list `list`
 /// belongs to, so that `e` would not come back to the thing it left: for a
 /// placement, its track, its clip or the sections (which set what its bars
@@ -790,14 +1014,24 @@ type Put = (Target, Value, Vec<Option<Value>>);
 /// a section edit's sections go last (the placements move back inside the
 /// longer song first), else first (the song grows back before they move);
 /// failing both, a put the song refuses waits for the others (a renamed
-/// track's lane goes back once the track is there).
-fn put_all(doc: &mut SongDoc, puts: &[Put]) -> Result<(), EditError> {
-    let in_order = |order: Vec<&Put>| -> Result<SongDoc, EditError> {
+/// track's lane goes back once the track is there). The scene order goes
+/// last in each: it can only place the scenes that are there. Gives
+/// whether the scenes came out as they were, ids and order.
+fn put_all(
+    doc: &mut SongDoc,
+    puts: &[Put],
+    renames: &[(String, String)],
+) -> Result<bool, EditError> {
+    let in_order = |order: Vec<&Put>| -> Result<(SongDoc, bool), EditError> {
         let mut copy = doc.clone();
-        for (target, value, _) in order {
-            copy.put(target, value)?;
+        let renamed = rename_scenes_back(&mut copy, &order, renames);
+        let (orders, rest): (Vec<&Put>, Vec<&Put>) =
+            order.into_iter().partition(|p| p.0 == Target::SceneOrder);
+        for (target, value, _) in rest.into_iter().chain(orders) {
+            copy.put(target, &with_old_names(target, value, &renamed))?;
         }
-        Ok(copy)
+        let idle = scene_ids(&copy) == scene_ids(doc);
+        Ok((copy, idle))
     };
     let (sections, rest): (Vec<&Put>, Vec<&Put>) =
         puts.iter().partition(|p| p.0 == Target::Sections);
@@ -807,36 +1041,181 @@ fn put_all(doc: &mut SongDoc, puts: &[Put]) -> Result<(), EditError> {
             let sections_first = (!sections.is_empty())
                 .then(|| in_order(sections.into_iter().chain(rest).collect()).ok())
                 .flatten();
-            match sections_first.or_else(|| waiting_for_others(doc, puts)) {
+            match sections_first.or_else(|| waiting_for_others(doc, puts, renames)) {
                 Some(copy) => copy,
                 None => return Err(e),
             }
         }
     };
-    *doc = copy;
-    Ok(())
+    *doc = copy.0;
+    Ok(copy.1)
+}
+
+/// The scene ids of `doc`, in row order.
+fn scene_ids(doc: &SongDoc) -> Vec<String> {
+    doc.song().scenes.keys().cloned().collect()
+}
+
+/// Lists the targets `puts` wrote as reverted; the scene order among them
+/// as already back when the write left the scenes as they were, ids and
+/// order (`order_idle`): the run's own later edits had put the order back.
+fn written(out: &mut RunUndo, puts: Vec<Put>, order_idle: bool) {
+    let (idle, rest): (Vec<Put>, Vec<Put>) = puts
+        .into_iter()
+        .partition(|p| order_idle && p.0 == Target::SceneOrder);
+    out.already.extend(idle.into_iter().map(|p| p.0));
+    out.reverted.extend(reverted_items(rest));
 }
 
 /// Puts each value on one copy of `doc`, a refused one again after the
 /// others, until all are in (`Some`) or none of the rest goes in.
-fn waiting_for_others(doc: &SongDoc, puts: &[Put]) -> Option<SongDoc> {
+fn waiting_for_others(
+    doc: &SongDoc,
+    puts: &[Put],
+    renames: &[(String, String)],
+) -> Option<(SongDoc, bool)> {
     let mut copy = doc.clone();
-    let mut rest: Vec<&Put> = puts.iter().collect();
-    while !rest.is_empty() {
-        let before = rest.len();
-        rest.retain(|(target, value, _)| {
-            let mut next = copy.clone();
-            let refused = next.put(target, value).is_err();
-            if !refused {
-                copy = next;
+    let renamed = rename_scenes_back(&mut copy, &puts.iter().collect::<Vec<_>>(), renames);
+    // The scene order once all the others are in.
+    let (orders, others): (Vec<&Put>, Vec<&Put>) =
+        puts.iter().partition(|p| p.0 == Target::SceneOrder);
+    for mut rest in [others, orders] {
+        while !rest.is_empty() {
+            let before = rest.len();
+            rest.retain(|(target, value, _)| {
+                let mut next = copy.clone();
+                let value = with_old_names(target, value, &renamed);
+                let refused = next.put(target, &value).is_err();
+                if !refused {
+                    copy = next;
+                }
+                refused
+            });
+            if rest.len() == before {
+                return None;
             }
-            refused
-        });
-        if rest.len() == before {
-            return None;
         }
     }
-    Some(copy)
+    let idle = scene_ids(&copy) == scene_ids(doc);
+    Some((copy, idle))
+}
+
+/// Undoes in place each scene rename of the run (`renames`, old name to
+/// new) that `puts` take back: the new name to go, the old one to come
+/// back, the scene under its new name there and none under the old. The
+/// scene is renamed where it sits now, so its table keeps its comments
+/// and the producer's rows keep their order; then its slots are set to the
+/// old value's. The song is the one the puts give, but for the scene's
+/// place, which is the scene order's to put back; the two puts then change
+/// nothing. A rename the song refuses is left to the puts.
+fn rename_scenes_back<'r>(
+    doc: &mut SongDoc,
+    puts: &[&Put],
+    renames: &'r [(String, String)],
+) -> Vec<&'r (String, String)> {
+    let mut renamed = Vec::new();
+    let put = |id: &str| {
+        puts.iter()
+            .find(|(t, _, _)| matches!(t, Target::Scene(s) if s == id))
+            .map(|(_, v, _)| v)
+    };
+    for rename in renames {
+        let (old, new) = rename;
+        let (Some(value), Some(gone)) = (put(old), put(new)) else {
+            continue;
+        };
+        let scenes = &doc.song().scenes;
+        if value.is_null()
+            || !gone.is_null()
+            || scenes.contains_key(old)
+            || !scenes.contains_key(new)
+        {
+            continue;
+        }
+        let mut next = doc.clone();
+        if next.rename_scene(new, old).is_err() {
+            continue;
+        }
+        let want = value["slots"].as_object();
+        let now: Vec<String> = next.song().scenes[old.as_str()]
+            .slots
+            .keys()
+            .cloned()
+            .collect();
+        let tracks = now
+            .into_iter()
+            .chain(want.into_iter().flat_map(|m| m.keys().cloned()));
+        let mut ok = true;
+        for track in tracks {
+            let path = SongPath::SceneSlot {
+                scene: old.clone(),
+                track: track.clone(),
+            };
+            let clip = want
+                .and_then(|m| m.get(&track))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let current = target_value(next.song(), &Target::Value(path.clone()));
+            if current != clip && next.set(&path, &clip).is_err() {
+                ok = false;
+                break;
+            }
+        }
+        if ok {
+            *doc = next;
+            renamed.push(rename);
+        }
+    }
+    renamed
+}
+
+/// `value` for `target`, a scene order naming a scene renamed back
+/// (`renamed`, old name to new) by its old name.
+fn with_old_names(target: &Target, value: &Value, renamed: &[&(String, String)]) -> Value {
+    if *target != Target::SceneOrder || renamed.is_empty() {
+        return value.clone();
+    }
+    let old = |id: &Value| {
+        let back = renamed
+            .iter()
+            .find(|(_, new)| id.as_str() == Some(new.as_str()));
+        back.map_or_else(|| id.clone(), |(old, _)| Value::from(old.as_str()))
+    };
+    Value::Array(elements(value).iter().map(old).collect())
+}
+
+/// The run's scene renames, old name to new, a chain of them (`a` to `b`,
+/// then `b` to `c`) as one: in each record that renamed a scene, a scene
+/// gone and one come with the same place and slots.
+fn scene_renames(records: &[ActionRecord], mine: &[usize]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for r in mine.iter().map(|&i| &records[i]) {
+        if !r.actions.iter().any(|a| a == "rename_scene") {
+            continue;
+        }
+        let scene = |c: &TargetChange| match &c.target {
+            Target::Scene(s) => Some(s.clone()),
+            _ => None,
+        };
+        for gone in r
+            .targets
+            .iter()
+            .filter(|c| c.new.is_null() && !c.old.is_null())
+        {
+            let Some(old) = scene(gone) else { continue };
+            let came = r.targets.iter().find(|c| {
+                c.old.is_null() && !c.new.is_null() && c.new == gone.old && scene(c).is_some()
+            });
+            let Some(new) = came.and_then(scene) else {
+                continue;
+            };
+            match out.iter_mut().find(|(_, to)| *to == old) {
+                Some(chain) => chain.1 = new,
+                None => out.push((old, new)),
+            }
+        }
+    }
+    out
 }
 
 fn reverted_items(puts: Vec<Put>) -> Vec<TargetItem> {
@@ -851,12 +1230,13 @@ fn reverted_items(puts: Vec<Put>) -> Vec<TargetItem> {
 }
 
 /// Whether `x` and `y` are the same value of the planned target: a track
-/// regardless of its position; an effect chain by its devices' ids and
-/// modules in order, plus the whole of each device the run added (the
-/// others' params are targets of their own); anything else exactly.
+/// or a scene regardless of its position (the scene order is a target of
+/// its own); an effect chain by its devices' ids and modules in order,
+/// plus the whole of each device the run added (the others' params are
+/// targets of their own); anything else exactly.
 fn approx(p: &Plan, x: &Value, y: &Value) -> bool {
     match &p.target {
-        Target::Track(_) => without_index(x) == without_index(y),
+        Target::Track(_) | Target::Scene(_) => without_index(x) == without_index(y),
         Target::Fx(_) => {
             let before = device_keys(&p.before);
             let added: Vec<(&str, &str)> = device_keys(&p.after)
@@ -872,14 +1252,6 @@ fn approx(p: &Plan, x: &Value, y: &Value) -> bool {
         }
         _ => x == y,
     }
-}
-
-fn without_index(v: &Value) -> Value {
-    let mut v = v.clone();
-    if let Some(map) = v.as_object_mut() {
-        map.remove("index");
-    }
-    v
 }
 
 /// A device value's (id, module).
@@ -904,8 +1276,22 @@ fn device_ids(v: &Value) -> Vec<&str> {
 }
 
 /// Whether a change to one target can change the other. Each side is a
-/// target with its old and new value.
+/// target with its old and new value. The scene order (`scenes`) holds
+/// which scenes there are and their order, not their slots: it overlaps
+/// itself and every `scenes.<s>`, not the slot leaves under them.
 fn overlap(a: (&Target, &Value, &Value), b: (&Target, &Value, &Value)) -> bool {
+    let order_and_slot = |x: &Target, y: &Target| {
+        matches!(
+            (x, y),
+            (
+                Target::SceneOrder,
+                Target::Value(SongPath::SceneSlot { .. })
+            )
+        )
+    };
+    if order_and_slot(a.0, b.0) || order_and_slot(b.0, a.0) {
+        return false;
+    }
     let (x, y) = (a.0.to_string(), b.0.to_string());
     x == y || under(&x, &y) || under(&y, &x) || holds(a, b.0) || holds(b, a.0)
 }
@@ -916,11 +1302,15 @@ fn under(part: &str, whole: &str) -> bool {
     part.strip_prefix(whole).is_some_and(|r| r.starts_with('.'))
 }
 
-/// The holdings the target strings do not show: a track holds its lanes,
-/// an instrument or chain the params of its devices (in either value).
+/// The holdings the target strings do not show: a track holds its lanes
+/// and its slot in every scene, an instrument or chain the params of its
+/// devices (in either value).
 fn holds((whole, old, new): (&Target, &Value, &Value), part: &Target) -> bool {
     match (whole, part) {
-        (Target::Track(t), Target::Lanes { track, .. }) => t == track,
+        (
+            Target::Track(t),
+            Target::Lanes { track, .. } | Target::Value(SongPath::SceneSlot { track, .. }),
+        ) => t == track,
         (
             Target::Instrument(t) | Target::Fx(t),
             Target::Value(SongPath::TrackParam { track, param }),
@@ -933,7 +1323,8 @@ fn holds((whole, old, new): (&Target, &Value, &Value), part: &Target) -> bool {
 
 /// The plan of the item the run created that `target` is a part of: a
 /// track (anything under `tracks.<t>`), an effect (its params and
-/// settings), a new instrument (the same) or a clip (its leaves).
+/// settings), a new instrument (the same), a clip (its leaves) or a scene
+/// (its slots).
 fn owner(plans: &[Plan], target: &Target) -> Option<usize> {
     let find = |item: Target, created: &dyn Fn(&Plan) -> bool| {
         plans.iter().position(|p| p.target == item && created(p))
@@ -974,6 +1365,9 @@ fn owner(plans: &[Plan], target: &Target) -> Option<usize> {
     {
         return find(Target::Clip(clip.clone()), &new);
     }
+    if let Target::Value(SongPath::SceneSlot { scene, .. }) = target {
+        return find(Target::Scene(scene.clone()), &new);
+    }
     None
 }
 
@@ -982,6 +1376,17 @@ fn owner(plans: &[Plan], target: &Target) -> Option<usize> {
 /// and is kept.
 fn fold(item: &Target, after: &mut Value, c: &TargetChange) {
     let new = c.new.clone();
+    // A slot is a key of the scene's `slots`: an emptied one has none.
+    if let (Target::Scene(_), Target::Value(SongPath::SceneSlot { track, .. })) = (item, &c.target)
+    {
+        if let Some(slots) = after.get_mut("slots").and_then(Value::as_object_mut) {
+            match new {
+                Value::Null => slots.remove(track),
+                clip => slots.insert(track.clone(), clip),
+            };
+        }
+        return;
+    }
     let slot = match (item, &c.target) {
         (Target::Track(_), Target::Instrument(_)) => after.get_mut("instrument"),
         (Target::Track(_), Target::Fx(_)) => after.get_mut("fx"),
