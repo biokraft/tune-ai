@@ -34,11 +34,13 @@ impl SongDoc {
             .get_index_of(scene)
             .and_then(|at| self.song.scenes.get_index(at))
             .map(|(next, _)| next.clone());
-        self.write_edited(edited, |doc| {
-            let place = next.as_deref().map_or(Place::Last, Place::Before);
-            insert_table(doc, "scenes", scene, &text, place, SCENE_ANCHORS)
-        })?;
-        Ok(())
+        let expected = edited.arranged.song;
+        let mut doc = self.doc.clone();
+        let place = next.as_deref().map_or(Place::Last, Place::Before);
+        insert_table(&mut doc, "scenes", scene, &text, place, SCENE_ANCHORS)
+            .ok_or_else(|| broken("written into"))?;
+        // Checked by the keys too, so a table put on the wrong row is caught.
+        self.commit_scenes(doc, &expected)
     }
 
     /// Removes scene `scene` with the comments above its table (see
