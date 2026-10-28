@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toPlain } from "@tune/ui";
 import type { Command, ParamView } from "../client/protocol";
 import { frameThrottle } from "../lib/frameThrottle";
 
@@ -11,8 +12,11 @@ type Live = { value: number; committed: boolean };
 const settled = (a: number, b: number) => Math.abs(a - b) <= Math.abs(b) * 1e-3 + 1e-9;
 
 export type ParamDrag = {
-  /** The value to show on `p`'s knob: the held or just-released value, else the studio's. */
-  valueOf(p: ParamView): number;
+  /**
+   * The value to show on `p`'s knob: the held or just-released value, else the value of the lane
+   * driving it (`lane`, normalized), else the studio's.
+   */
+  valueOf(p: ParamView, lane?: number | null): number;
   /** A knob moved: shown at once, sent at most once per frame (commit false). */
   change(id: string, value: number): void;
   /** A knob was released or stepped: sent with commit true. */
@@ -22,20 +26,18 @@ export type ParamDrag = {
 /**
  * Drag handling shared by every group of knobs that edits one track's params through
  * `set_param`: the live-value map, the frame-throttled uncommitted sends, and the settle window
- * that keeps a released value on the knob until the studio's state shows it. `onAutomated(id)`
- * fires when the studio answers a release with "automated here" (nothing was written).
+ * that keeps a released value on the knob until the studio's state shows it. A release on an
+ * automated param moves the lane instead (the studio's job), which the knob shows once the
+ * settle window ends.
  */
 export function useParamDrag(
   track: string,
   send: (cmd: Command) => Promise<unknown>,
   params: ParamView[],
-  onAutomated?: (id: string) => void,
 ): ParamDrag {
   const [live, setLive] = useState<Map<string, Live>>(new Map());
   const sendRef = useRef(send);
   sendRef.current = send;
-  const automatedRef = useRef(onAutomated);
-  automatedRef.current = onAutomated;
 
   const throttle = useMemo(
     () =>
@@ -74,7 +76,7 @@ export function useParamDrag(
     });
 
   return {
-    valueOf: (p) => live.get(p.id)?.value ?? p.value,
+    valueOf: (p, lane) => live.get(p.id)?.value ?? (lane == null ? p.value : toPlain(p, lane)),
     change(id, value) {
       setLiveValue(id, value, false);
       throttle.push(id, value);
@@ -83,14 +85,7 @@ export function useParamDrag(
       throttle.cancel(id);
       setLiveValue(id, value, true);
       sendRef.current({ cmd: "set_param", args: { track, param: id, value, commit: true } }).then(
-        (r) => {
-          if (r && typeof r === "object" && "automated" in r && r.automated) {
-            dropLive(id, value);
-            automatedRef.current?.(id);
-          } else {
-            setTimeout(() => dropLive(id, value), SETTLE_MS);
-          }
-        },
+        () => setTimeout(() => dropLive(id, value), SETTLE_MS),
         () => dropLive(id, value),
       );
     },

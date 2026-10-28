@@ -1,5 +1,5 @@
 import { createContext, useContext, useRef, useSyncExternalStore } from "react";
-import { playheadStep } from "../lib/song";
+import { knobStep, playheadStep } from "../lib/song";
 import type { StudioStore, StudioView } from "./studioStore";
 
 /**
@@ -53,6 +53,12 @@ const noStore: StudioStore = {
 export function usePlayheadStep(): number | null {
   const store = useContext(StudioStoreContext) ?? noStore;
   return useStudioSelector(store, playheadStep);
+}
+
+/** The song step knobs read their lanes at (see `knobStep`); re-renders per step while playing. */
+export function useKnobStep(): number {
+  const store = useContext(StudioStoreContext) ?? noStore;
+  return useStudioSelector(store, knobStep);
 }
 
 /** The playhead's 0-based bar and beat while playing, else null. */

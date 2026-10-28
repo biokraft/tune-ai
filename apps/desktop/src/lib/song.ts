@@ -16,6 +16,42 @@ export function sectionAtBar(sections: SectionView[], bar: number): number | nul
   return i < 0 ? null : i;
 }
 
+/**
+ * The normalized value of breakpoints `points` at bar offset `x`: the first point's value before
+ * it, linear between points, the last point's value after it. Mirrors `lane_value` in tune-song.
+ */
+function laneValue(points: [number, number][], x: number): number {
+  const i = points.findIndex(([bar]) => bar > x);
+  if (i === 0) return points[0]![1];
+  if (i < 0) return points[points.length - 1]![1];
+  const [b0, v0] = points[i - 1]!;
+  const [b1, v1] = points[i]!;
+  return v0 + ((v1 - v0) * (x - b0)) / (b1 - b0);
+}
+
+/** The normalized value `track`'s lane for `param` has at song step `step`, or null off its stretches. */
+export function laneValueAt(
+  song: SongView,
+  track: string,
+  param: string,
+  step: number,
+): number | null {
+  const bar = step / STEPS_PER_BAR;
+  const i = sectionAtBar(song.sections, Math.floor(bar));
+  if (i === null) return null;
+  const section = song.sections[i]!;
+  const x = bar - section.start_bar;
+  const lane = section.lanes.find(
+    (l) => l.track === track && l.param === param && x >= l.from && x < l.to,
+  );
+  return lane ? laneValue(lane.points, x) : null;
+}
+
+/** Where knobs read their lanes: the playhead while playing, else the cursor's bar line. */
+export function knobStep(view: StudioView): number {
+  return playheadStep(view) ?? (view.state?.cursor_bar ?? 0) * STEPS_PER_BAR;
+}
+
 /** Name of the section whose bars equal the half-open `loop`, else null. */
 export function loopSectionName(
   sections: SectionView[],

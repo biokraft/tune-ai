@@ -35,13 +35,13 @@ use std::time::{Duration, Instant};
 use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::Value;
-use tune_song::{FORMAT_VERSION, Song};
+use tune_song::{FORMAT_VERSION, Song, lane_value, round_split_value};
 
 use crate::action::{
     Action, ActionKind, ActionsOutcome, ApplyCtx, Origin, Via, apply_action, apply_all,
 };
 use crate::diff::{Change, diff_files, diff_songs, is_whole_replace, version_change};
-use crate::doc::SongDoc;
+use crate::doc::{SongDoc, lane_param_spec};
 use crate::error::{ErrorView, StudioError};
 use crate::log::{ActionRecord, EditEntry, EditLog, Source, entries_for, text_hash};
 use crate::path::SongPath;
@@ -49,6 +49,9 @@ use crate::set::write_atomic;
 use crate::target::{TargetChange, target_changes};
 use crate::view::SongView;
 
+/// A knob's shift of a lane stretch is rounded to 1 / this (four decimal
+/// places of the normalized value), so the file keeps short numbers.
+const LANE_SHIFT_SCALE: f64 = 1e4;
 /// Quiet time after the last edit of a burst before it is written.
 pub const WRITE_DEBOUNCE: Duration = Duration::from_millis(150);
 /// Most undo steps kept; the oldest goes first.
@@ -690,6 +693,34 @@ impl StudioCore {
             .automation
             .iter()
             .any(|l| l.track == track && l.param == param && l.span().contains(&bar))
+    }
+
+    /// The edit a knob released at `value` (plain) makes on an automated
+    /// param: the stretch of the lane under `at` (0-based bars, fractional)
+    /// moves up or down by the step from the lane's value there to `value`,
+    /// each point held to 0..=1, so the curve keeps its shape. `None` when no
+    /// stretch of the lane covers `at`.
+    pub fn lane_shift(&self, track: &str, param: &str, value: f64, at: f64) -> Option<Action> {
+        let song = self.doc.song();
+        let bar = at.max(0.0).floor() as u32;
+        let lane = song
+            .automation
+            .iter()
+            .find(|l| l.track == track && l.param == param && l.span().contains(&bar))?;
+        let spec = lane_param_spec(song, track, param)?;
+        let now = lane_value(&lane.points, at - f64::from(lane.start_bar));
+        let step = (spec.to_normalized(value) - now) * LANE_SHIFT_SCALE;
+        let step = step.round() / LANE_SHIFT_SCALE;
+        let points = lane
+            .points
+            .iter()
+            .map(|&(bar, v)| [bar, round_split_value((v + step).clamp(0.0, 1.0))])
+            .collect();
+        Some(Action::SetLanePoints {
+            param: format!("{track}.{param}"),
+            at: lane.start_bar + 1,
+            points,
+        })
     }
 
     /// The current song, pending edits included.

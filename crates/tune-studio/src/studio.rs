@@ -175,8 +175,7 @@ impl Drop for Inner {
 
 impl StudioHandle {
     /// Runs `cmd` and returns its result: `null` for most commands, the
-    /// song list for `list_songs`, the state for `get_state`, the changes for `undo`/`redo`, and
-    /// `{"automated": true}` for a knob released on an automated param.
+    /// song list for `list_songs`, the state for `get_state`, and the changes for `undo`/`redo`.
     /// Blocks for at most 5 s.
     pub fn call(&self, cmd: Command) -> Result<Value, StudioError> {
         let (reply_tx, reply_rx) = mpsc::channel();
@@ -890,10 +889,17 @@ impl Actor {
     }
 
     /// A knob let go: the value is written, unless a lane drives the param
-    /// at the current bar (never on a track a session action took off the
-    /// arrangement); either way the live override ends.
+    /// at the playhead (never on a track a session action took off the
+    /// arrangement), where the stretch under it moves by the knob's step
+    /// instead (see [`Core::lane_shift`]); either way the live override ends.
     fn release(&mut self, action: &Action) -> Result<Value, StudioError> {
-        let Action::SetParam { track, param, .. } = action else {
+        let Action::SetParam {
+            track,
+            param,
+            value,
+            ..
+        } = action
+        else {
             unreachable!()
         };
         if self
@@ -904,14 +910,13 @@ impl Actor {
             self.drag = None;
         }
         self.released = Some((track.clone(), param.clone(), Instant::now()));
-        let bar = self.current_bar();
+        let at = self.current_position();
         let off_arrangement = self.off_arrangement.contains(track);
         let core = &mut self.song.as_mut().ok_or(StudioError::NoSong)?.core;
-        if !off_arrangement && core.is_automated(track, param, bar) {
-            self.clear_overrides();
-            return Ok(json!({ "automated": true }));
-        }
-        let result = core.apply_edit(action, Instant::now());
+        let shift = (!off_arrangement)
+            .then(|| core.lane_shift(track, param, *value, at))
+            .flatten();
+        let result = core.apply_edit(shift.as_ref().unwrap_or(action), Instant::now());
         // The override goes even when the edit fails or changes nothing.
         self.song_changed(true);
         let changes = result?;
@@ -1169,14 +1174,6 @@ impl Actor {
         }
     }
 
-    /// Ends every knob override by swapping the newest song in again.
-    fn clear_overrides(&mut self) {
-        if let Some(player) = &mut self.player {
-            player.retry = Some(true);
-        }
-        self.send_swap();
-    }
-
     /// Sends the held knob's value as an override, resolved against the
     /// newest song sent (track ids, not indices, survive a reload).
     fn send_drag(&mut self) {
@@ -1271,12 +1268,18 @@ impl Actor {
         self.song.as_ref().map_or(0, |s| s.core.song().total_bars())
     }
 
-    /// The bar a knob release is judged at: the playing bar, else the
-    /// cursor.
-    fn current_bar(&self) -> u32 {
-        match &self.player {
-            Some(player) => player.bar(self.total_bars()),
-            None => self.cursor_bar,
+    /// Where a knob release is judged, in 0-based bars to the step: the
+    /// playhead, else the cursor (bar 0 once the song has finished).
+    fn current_position(&mut self) -> f64 {
+        let total = self.total_bars();
+        match &mut self.player {
+            Some(player) if !player.controller.finished() => {
+                let position = player.controller.position();
+                let step = player.playing().clock.step_at(position);
+                (step as f64 / 16.0).min(f64::from(total))
+            }
+            Some(_) => 0.0,
+            None => f64::from(self.cursor_bar),
         }
     }
 

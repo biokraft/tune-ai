@@ -492,18 +492,55 @@ fn own_write_is_quiet() {
     });
 }
 
+/// The plain cutoff whose normalized value is `n`.
+fn cutoff_at(n: f64) -> f64 {
+    let (_, spec) =
+        tune_dsp::find_spec(tune_dsp::acid303::ACID303_PARAMS, "acid303.cutoff").unwrap();
+    spec.to_plain(n)
+}
+
 #[test]
-fn automated_release_writes_nothing() {
+fn automated_release_shifts_the_stretch() {
     let f = fixture(MINI);
-    // Section `b` has a cutoff lane.
+    // Section `b` (bars 3-4) has the cutoff stretch [[0, 0.1], [2, 0.8]];
+    // at its start the lane reads 0.1, so a release at 0.4 moves every
+    // point up by 0.3, the last one held at 1.
     f.call(Command::Action(Action::SeekBar { bar: 2 }));
     assert_eq!(
-        f.call(knob("acid303.cutoff", 900.0, true)),
-        json!({ "automated": true })
+        f.call(knob("acid303.cutoff", cutoff_at(0.4), true)),
+        Value::Null
     );
-    sleep(Duration::from_millis(300));
-    assert_eq!(f.disk(), MINI);
-    assert_eq!(f.human_log_lines(), 0);
+    let text = f.disk_until(WAIT, "shifted stretch", |t| t != MINI);
+    assert_eq!(
+        text,
+        MINI.replace(
+            "points = [[0, 0.1], [2, 0.8]]",
+            "points = [[0, 0.4], [2, 1]]"
+        )
+    );
+    assert_eq!(f.human_log_lines(), 1);
+    // The static value is untouched, and one undo puts the stretch back.
+    f.call(Command::Action(Action::Undo));
+    f.disk_until(WAIT, "undone", |t| t == MINI);
+}
+
+#[test]
+fn automated_release_reads_the_lane_at_the_playhead() {
+    let f = fixture(MINI);
+    f.call(Command::Action(Action::SeekBar { bar: 3 }));
+    // Bar 4 is one bar into the stretch: the lane reads 0.45 there.
+    assert_eq!(
+        f.call(knob("acid303.cutoff", cutoff_at(0.25), true)),
+        Value::Null
+    );
+    let text = f.disk_until(WAIT, "shifted stretch", |t| t != MINI);
+    assert_eq!(
+        text,
+        MINI.replace(
+            "points = [[0, 0.1], [2, 0.8]]",
+            "points = [[0, 0], [2, 0.6]]"
+        )
+    );
 }
 
 /// Review Focus 1: Claude saves while the producer holds a knob. The drag
@@ -1325,22 +1362,64 @@ fn a_launch_during_a_reload_waits_for_the_swap() {
     assert_same(&frames[48_000..], &want[48_000..], "after the swap");
 }
 
+/// Where a knob release on the acid cutoff was written.
+#[derive(Debug, PartialEq)]
+enum Landed {
+    /// The track's own cutoff value.
+    Static,
+    /// A stretch of the cutoff lane, the static value untouched.
+    Lane,
+}
+
+/// Releases the acid cutoff knob at `value` and waits for the write, once
+/// the file holds the acid track (an earlier rename or undo may still be
+/// on its way to disk).
+fn released(f: &Fixture, value: f64) -> Landed {
+    let lanes = |s: &tune_song::Song| -> Vec<tune_song::Lane> {
+        s.automation
+            .iter()
+            .filter(|l| l.track == "acid" && l.param == "acid303.cutoff")
+            .cloned()
+            .collect()
+    };
+    let cutoff = |s: &tune_song::Song| {
+        s.tracks
+            .get("acid")
+            .and_then(|t| t.instrument.params.get("cutoff").copied())
+    };
+    let before = f.disk_until(WAIT, "the acid track written", |t| {
+        parse_song(t).is_ok_and(|s| s.tracks.contains_key("acid"))
+    });
+    let before = parse_song(&before).unwrap();
+    assert_eq!(f.call(knob("acid303.cutoff", value, true)), Value::Null);
+    let text = f.disk_until(WAIT, "the release written", |t| {
+        parse_song(t).is_ok_and(|s| cutoff(&s) == Some(value) || lanes(&s) != lanes(&before))
+    });
+    let song = parse_song(&text).unwrap();
+    if lanes(&song) == lanes(&before) {
+        return Landed::Static;
+    }
+    assert_eq!(
+        cutoff(&song),
+        cutoff(&before),
+        "a lane release leaves the static value"
+    );
+    Landed::Lane
+}
+
 #[test]
 fn a_knob_release_on_a_launched_track_writes() {
     // Without a launch, the lane drives the cutoff in bar 2.
     let plain = fixture(SESSION);
     plain.call(play(Some(0)));
     plain.pull(2 * 96_000 + 6_000);
-    assert_eq!(
-        plain.call(knob("acid303.cutoff", 900.0, true)),
-        json!({ "automated": true })
-    );
+    assert_eq!(released(&plain, 900.0), Landed::Lane);
 
     let f = fixture(SESSION);
     f.call(play(Some(0)));
     f.call(live(launch_clip("acid", "groove")));
     f.pull(2 * 96_000 + 6_000);
-    assert_eq!(f.call(knob("acid303.cutoff", 900.0, true)), Value::Null);
+    assert_eq!(released(&f, 900.0), Landed::Static);
     f.disk_until(WAIT, "took the cutoff", |t| {
         acid_value(t, "acid303.cutoff") == 900.0
     });
@@ -1348,18 +1427,12 @@ fn a_knob_release_on_a_launched_track_writes() {
     // the write played, so the return is sent at once).
     land(&f);
     f.call(live(back(Some("acid"))));
-    assert_eq!(
-        f.call(knob("acid303.cutoff", 800.0, true)),
-        json!({ "automated": true })
-    );
+    assert_eq!(released(&f, 800.0), Landed::Lane);
     // Stopping playback puts every track back on the arrangement.
     f.call(live(stop_clip("acid")));
     f.call(Command::Action(Action::Stop));
     f.call(Command::Action(Action::SeekBar { bar: 2 }));
-    assert_eq!(
-        f.call(knob("acid303.cutoff", 800.0, true)),
-        json!({ "automated": true })
-    );
+    assert_eq!(released(&f, 800.0), Landed::Lane);
 }
 
 /// A cue waiting behind a swap resolves against the song that swap
@@ -1428,10 +1501,7 @@ fn a_renamed_track_follows_the_arrangement_again() {
     rename_track(&f, "lead", "acid");
     land(&f);
     assert_eq!(engine_play(&f, ACID), TrackPlay::Arrangement);
-    assert_eq!(
-        f.call(knob("acid303.cutoff", 900.0, true)),
-        json!({ "automated": true })
-    );
+    assert_eq!(released(&f, 900.0), Landed::Lane);
 }
 
 /// Review I2: two renames within one step collapse into one swap, which
@@ -1448,7 +1518,7 @@ fn a_rename_and_back_within_one_step_keeps_the_launched_clip() {
     rename_track(&f, "lead", "acid");
     land(&f);
     assert!(matches!(engine_play(&f, ACID), TrackPlay::Clip(_)));
-    assert_eq!(f.call(knob("acid303.cutoff", 900.0, true)), Value::Null);
+    assert_eq!(released(&f, 900.0), Landed::Static);
     f.disk_until(WAIT, "took the cutoff", |t| {
         acid_value(t, "acid303.cutoff") == 900.0
     });
@@ -1479,10 +1549,7 @@ fn a_dropped_cue_marks_nothing() {
     );
     f.pull(2 * 96_000);
     assert_eq!(engine_play(&f, ACID), TrackPlay::Arrangement);
-    assert_eq!(
-        f.call(knob("acid303.cutoff", 900.0, true)),
-        json!({ "automated": true })
-    );
+    assert_eq!(released(&f, 900.0), Landed::Lane);
 }
 
 /// A return to the arrangement still waiting to be sent leaves the track
@@ -1503,13 +1570,10 @@ fn a_waiting_return_keeps_the_track_off_the_arrangement_until_sent() {
     }));
     // The swap has not played, so the return waits.
     f.call(live(back(Some("acid"))));
-    assert_eq!(f.call(knob("acid303.cutoff", 900.0, true)), Value::Null);
+    assert_eq!(released(&f, 900.0), Landed::Static);
     land(&f);
     // Sent: the lane drives the cutoff again (from the next bar line).
-    assert_eq!(
-        f.call(knob("acid303.cutoff", 800.0, true)),
-        json!({ "automated": true })
-    );
+    assert_eq!(released(&f, 800.0), Landed::Lane);
 }
 
 /// A launch that starts playback takes its tracks off the arrangement too.
@@ -1519,7 +1583,7 @@ fn a_launch_that_starts_playback_marks_its_track() {
     assert_eq!(f.call(live(launch_clip("acid", "groove"))), Value::Null);
     f.pull(2 * 96_000 + 6_000);
     assert!(matches!(engine_play(&f, ACID), TrackPlay::Clip(_)));
-    assert_eq!(f.call(knob("acid303.cutoff", 900.0, true)), Value::Null);
+    assert_eq!(released(&f, 900.0), Landed::Static);
 }
 
 /// A device that plays its first block the moment it starts, as `NullOut`
@@ -1604,9 +1668,8 @@ fn undo_of_a_removed_launched_track_restores_it_to_the_arrangement() {
     f.call(Command::Action(Action::Undo));
     land(&f);
     let p = engine_play(&f, ACID);
-    let r = f.call(knob("acid303.cutoff", 900.0, true));
     assert_eq!(p, TrackPlay::Arrangement);
-    assert_eq!(r, json!({ "automated": true }));
+    assert_eq!(released(&f, 900.0), Landed::Lane);
 }
 
 /// The same through `undo_run`: the removed launched track comes back on the
@@ -1632,9 +1695,8 @@ fn undo_run_of_a_removed_launched_track_restores_it_to_the_arrangement() {
         .expect("undo run");
     land(&f);
     let p = engine_play(&f, ACID);
-    let r = f.call(knob("acid303.cutoff", 900.0, true));
     assert_eq!(p, TrackPlay::Arrangement);
-    assert_eq!(r, json!({ "automated": true }));
+    assert_eq!(released(&f, 900.0), Landed::Lane);
 }
 
 /// A scene launch queued behind a move_scene swap resolves against the
