@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use serde_json::json;
 use tune_studio::{
-    Command, EditEntry, EditLog, SongPath, Source, StudioCore, StudioError, set_paths,
+    Action, EditEntry, EditLog, SongPath, Source, StudioCore, StudioError, set_paths,
 };
 
 const FIXTURE: &str = include_str!("fixtures/commented.toml");
@@ -42,8 +42,8 @@ fn log(s: &Song) -> Vec<EditEntry> {
         .expect("read log")
 }
 
-fn cutoff(value: f64) -> Command {
-    Command::SetParam {
+fn cutoff(value: f64) -> Action {
+    Action::SetParam {
         track: "acid".into(),
         param: "acid303.cutoff".into(),
         value,
@@ -82,7 +82,7 @@ fn own_write_ignored() {
 
     assert!(core.on_disk_text(disk(&s)).is_none());
     assert_eq!(log(&s).len(), lines, "no new log line");
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert!(!core.can_undo(), "no new undo entry");
     assert_eq!(disk(&s), FIXTURE);
 }
@@ -118,7 +118,7 @@ fn external_edit_logged_and_undoable() {
     assert_eq!(entries[0].source, Source::External);
     assert_eq!(entries[0].path, "song.bpm");
 
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert_eq!(disk(&s), FIXTURE, "undo writes bpm 120 back");
     assert_eq!(core.song().bpm, 120.0);
 }
@@ -136,11 +136,8 @@ fn resize_merges_with_an_edit_of_a_later_partial_placement() {
     let s = song();
     fs::write(&s.path, &partial).unwrap();
     let mut core = open(&s);
-    core.apply_edit(
-        &Command::ResizeSection { index: 0, bars: 6 },
-        Instant::now(),
-    )
-    .unwrap();
+    core.apply_edit(&Action::ResizeSection { index: 0, bars: 6 }, Instant::now())
+        .unwrap();
     let text = partial.replacen("bars = 1, offset = 1 }", "bars = 1 }", 1);
     fs::write(&s.path, &text).unwrap();
 
@@ -220,8 +217,8 @@ fn external_text_matching_an_older_own_write_is_a_change() {
         .expect("Claude's change");
     core.apply_edit(&cutoff(820.0), Instant::now()).unwrap();
     core.flush().unwrap();
-    core.undo().unwrap(); // writes Claude's text back: an own write
-    core.undo().unwrap(); // and the fixture
+    core.undo(Source::Human).unwrap(); // writes Claude's text back: an own write
+    core.undo(Source::Human).unwrap(); // and the fixture
     assert!(core.is_own_write(&tune_studio::text_hash(&claude_text)));
     assert_eq!(core.song().bpm, 120.0);
 
@@ -282,13 +279,13 @@ fn merge_keeps_both_sides() {
     assert!(merged.contains("\"acid303.cutoff\" = 820"), "{merged}");
     assert!(merged.contains("# the squelch"));
 
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     let once = disk(&s);
     assert!(
         once.contains("bpm = 121") && once.contains(CUTOFF_500),
         "{once}"
     );
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert_eq!(disk(&s), FIXTURE);
 }
 
@@ -296,7 +293,7 @@ fn merge_keeps_both_sides() {
 fn pending_section_move_merges() {
     let s = song();
     let mut core = open(&s);
-    core.apply_edit(&Command::MoveSection { from: 1, to: 0 }, Instant::now())
+    core.apply_edit(&Action::MoveSection { from: 1, to: 0 }, Instant::now())
         .unwrap();
     let text = bpm_121(FIXTURE);
     fs::write(&s.path, &text).unwrap();
@@ -346,7 +343,7 @@ fn conflict_and_merge_together() {
     let mut core = open(&s);
     let t0 = Instant::now();
     core.apply_edit(&cutoff(820.0), t0).unwrap();
-    core.apply_edit(&Command::ResizeSection { index: 0, bars: 4 }, t0)
+    core.apply_edit(&Action::ResizeSection { index: 0, bars: 4 }, t0)
         .unwrap();
     let text = FIXTURE.replace(CUTOFF_500, "\"acid303.cutoff\" = 700");
     fs::write(&s.path, &text).unwrap();
@@ -381,7 +378,7 @@ fn whole_replace_offers_pending() {
     assert!(core.resolve_offered(false).unwrap().is_empty());
     assert!(core.offered().is_empty());
     assert_eq!(disk(&s), FIRST_ACID, "dropping writes nothing");
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     assert_eq!(disk(&s), FIXTURE, "byte for byte");
 }
 
@@ -409,8 +406,8 @@ fn pending_survives_invalid_external() {
         core.apply_edit(&cutoff(900.0), t0),
         Err(StudioError::FileInvalid)
     );
-    assert_eq!(core.undo(), Err(StudioError::FileInvalid));
-    assert_eq!(core.redo(), Err(StudioError::FileInvalid));
+    assert_eq!(core.undo(Source::Human), Err(StudioError::FileInvalid));
+    assert_eq!(core.redo(Source::Human), Err(StudioError::FileInvalid));
     assert!(core.flush().unwrap().is_empty());
     assert_eq!(disk(&s), "[song\n", "flush writes nothing");
 
@@ -490,7 +487,7 @@ fn flush_keeps_unseen_external_for_report() {
 
     // Undo flushes first, so it can find one too.
     fs::write(&s.path, FIXTURE.replace("bpm = 120", "bpm = 122")).unwrap();
-    core.undo().unwrap();
+    core.undo(Source::Human).unwrap();
     let ext = core.take_unreported_external().expect("found by undo");
     assert_eq!(ext.changes[0].path, SongPath::Bpm);
     assert_eq!(ext.changes[0].new, json!(122));
@@ -499,4 +496,34 @@ fn flush_keeps_unseen_external_for_report() {
     fs::write(&s.path, FIXTURE.replace("bpm = 120", "bpm = 123")).unwrap();
     assert!(core.on_disk_text(disk(&s)).is_some());
     assert!(core.take_unreported_external().is_none());
+}
+
+/// A reorder of the scenes changes no slot, so a pending slot edit merges.
+#[test]
+fn pending_slot_edit_merges_over_a_scene_reorder() {
+    const SESSION: &str = include_str!("../../tune-song/tests/fixtures/session.toml");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("song.toml");
+    fs::write(&path, SESSION).expect("write fixture");
+    let mut core = StudioCore::open(&path).expect("opens");
+    let slot: SongPath = "scenes.groove.slots.hat".parse().unwrap();
+    let edit = Action::SetValue {
+        path: slot.clone(),
+        value: json!("h"),
+    };
+    core.apply_edit(&edit, Instant::now()).unwrap();
+
+    let groove = "# jam rows\n[scenes.groove]\nslots = { kick = \"k4\", acid = \"a1\" }\n\n";
+    let hats = "# hats alone\n[scenes.break]\nslots = { hat = \"h\" }\n\n";
+    let text = SESSION.replace(&format!("{groove}{hats}"), &format!("{hats}{groove}"));
+    assert_ne!(text, SESSION);
+    fs::write(&path, &text).unwrap();
+
+    let ext = core.on_disk_text(text).expect("a change");
+    assert!(ext.offered.is_empty(), "{:?}", ext.offered);
+    assert_eq!(ext.merged.len(), 1);
+    assert_eq!(ext.merged[0].path, slot);
+    let merged = fs::read_to_string(&path).unwrap();
+    assert!(merged.contains("acid = \"a1\", hat = \"h\" }"), "{merged}");
+    assert!(merged.find("[scenes.break]") < merged.find("[scenes.groove]"));
 }

@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 
 use crate::FORMAT_VERSION;
 use crate::model::{
-    Clip, DEFAULT_VELOCITY, Device, Note, Placement, Song, TICKS_PER_STEP, pitch_name,
+    Clip, DEFAULT_VELOCITY, Device, Note, Placement, Scene, Song, TICKS_PER_STEP, Track, pitch_name,
 };
 
 impl Song {
@@ -51,7 +51,7 @@ impl Song {
                 let _ = writeln!(out, "params = {}", num_table(&params));
             }
             if !track.fx.is_empty() {
-                let fx: Vec<String> = track.fx.iter().map(fx_inline).collect();
+                let fx: Vec<String> = track.fx.iter().map(fx_entry_toml).collect();
                 let _ = writeln!(out, "fx = [{}]", fx.join(", "));
             }
             if !track.play.is_empty() {
@@ -60,20 +60,13 @@ impl Song {
         }
 
         for (id, clip) in &self.clips {
-            let _ = write!(out, "\n[clips.{}]\n", key(id));
-            let _ = writeln!(out, "kind = {}", string(clip.kind().name()));
-            match clip {
-                Clip::Notes(n) => {
-                    let _ = writeln!(out, "bars = {}", n.bars);
-                    if !n.notes.is_empty() {
-                        let _ = writeln!(out, "notes = {}", notes_toml(&n.notes));
-                    }
-                }
-                steps => {
-                    let text = steps.steps_text().expect("a steps clip has step notation");
-                    let _ = writeln!(out, "steps = {}", string(&text));
-                }
-            }
+            out.push('\n');
+            out.push_str(&clip_table_toml(id, clip));
+        }
+
+        for (id, scene) in &self.scenes {
+            out.push('\n');
+            out.push_str(&scene_table_toml(id, scene));
         }
 
         for section in &self.sections {
@@ -100,6 +93,79 @@ impl Song {
         }
         out
     }
+}
+
+/// The table of clip `id`, `[clips.<id>]` and its keys, as [`Song::to_toml`]
+/// writes it: `kind`, then `steps`, or `bars` and the `notes` when there
+/// are any. Ends with a newline.
+pub fn clip_table_toml(id: &str, clip: &Clip) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "[clips.{}]", key(id));
+    let _ = writeln!(out, "kind = {}", string(clip.kind().name()));
+    match clip {
+        Clip::Notes(n) => {
+            let _ = writeln!(out, "bars = {}", n.bars);
+            if !n.notes.is_empty() {
+                let _ = writeln!(out, "notes = {}", notes_toml(&n.notes));
+            }
+        }
+        steps => {
+            let text = steps.steps_text().expect("a steps clip has step notation");
+            let _ = writeln!(out, "steps = {}", string(&text));
+        }
+    }
+    out
+}
+
+/// The table of scene `id`, `[scenes.<id>]` and its `slots` when it has any,
+/// as [`Song::to_toml`] writes it. Ends with a newline.
+pub fn scene_table_toml(id: &str, scene: &Scene) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "[scenes.{}]", key(id));
+    if !scene.slots.is_empty() {
+        let slots: Vec<String> = scene
+            .slots
+            .iter()
+            .map(|(track, clip)| format!("{} = {}", key(track), string(clip)))
+            .collect();
+        let _ = writeln!(out, "slots = {{ {} }}", slots.join(", "));
+    }
+    out
+}
+
+/// The table of track `id`, `[tracks.<id>]` and its keys: the instrument,
+/// then only the fields that are not at their default (`gain_db`, `pan`,
+/// `mute`, `solo`), the `params` (the instrument's, then the strip's), the
+/// `fx` and the `play` list. Ends with a newline.
+pub fn track_table_toml(id: &str, track: &Track) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "[tracks.{}]", key(id));
+    let _ = writeln!(out, "instrument = {}", instrument(&track.instrument));
+    if track.gain_db != 0.0 {
+        let _ = writeln!(out, "gain_db = {}", num(track.gain_db));
+    }
+    if track.pan != 0.0 {
+        let _ = writeln!(out, "pan = {}", num(track.pan));
+    }
+    if track.mute {
+        out.push_str("mute = true\n");
+    }
+    if track.solo {
+        out.push_str("solo = true\n");
+    }
+    let mut params = device_params(&track.instrument);
+    params.extend(track.strip.iter().map(|(k, v)| (k.clone(), *v)));
+    if !params.is_empty() {
+        let _ = writeln!(out, "params = {}", num_table(&params));
+    }
+    if !track.fx.is_empty() {
+        let fx: Vec<String> = track.fx.iter().map(fx_entry_toml).collect();
+        let _ = writeln!(out, "fx = [{}]", fx.join(", "));
+    }
+    if !track.play.is_empty() {
+        let _ = writeln!(out, "play = {}", placements_toml(&track.play));
+    }
+    out
 }
 
 /// A track's `play` value: one placement inline (`[{ at = 1, clip = "k4",
@@ -187,9 +253,9 @@ fn device_head(device: &Device) -> Vec<String> {
     parts
 }
 
-/// `{ type = "<module>", [id = "<id>",] <setting> = "<value>", …, params =
-/// { … } }`: the head, then the explicit params.
-fn fx_inline(fx: &Device) -> String {
+/// An `fx` entry: `{ type = "<module>", [id = "<id>",] <setting> =
+/// "<value>", …, params = { … } }`: the head, then the explicit params.
+pub fn fx_entry_toml(fx: &Device) -> String {
     let mut parts = device_head(fx);
     let params = device_params(fx);
     if !params.is_empty() {

@@ -1,5 +1,5 @@
-//! Section operations: move, duplicate, delete or resize a section, or set
-//! what one track plays in it, carrying the placements and lane stretches
+//! Section operations: move, duplicate, delete, resize or insert a section, or
+//! set what one track plays in it, carrying the placements and lane stretches
 //! along.
 //!
 //! Every operation first splits the placements and stretches that cross the
@@ -13,7 +13,7 @@
 use std::ops::Range;
 
 use crate::model::{
-    Lane, Placement, SECTION_BARS, Song, lane_value, round_split_value, section_bars_error,
+    Lane, Placement, SECTION_BARS, Section, Song, lane_value, round_split_value, section_bars_error,
 };
 
 /// Where each stretch of the edited song came from, index-aligned with the
@@ -26,13 +26,17 @@ pub enum LaneOrigin {
     Split(usize),
     /// A copy made by [`duplicate_section`].
     Copy(usize),
+    /// A stretch with no old table (one an edit adds); the writer gives it
+    /// a table of its own.
+    New,
 }
 
 impl LaneOrigin {
-    /// The index into the old `automation`.
-    fn source(self) -> usize {
+    /// The index into the old `automation`, if the stretch came from one.
+    fn source(self) -> Option<usize> {
         match self {
-            Self::Kept(i) | Self::Split(i) | Self::Copy(i) => i,
+            Self::Kept(i) | Self::Split(i) | Self::Copy(i) => Some(i),
+            Self::New => None,
         }
     }
 }
@@ -183,6 +187,49 @@ pub fn resize_section(song: &Song, index: usize, bars: u32) -> Result<Arranged, 
     Ok(edit.finish())
 }
 
+/// Inserts an empty section `name` of `bars` bars before section `index`
+/// (`index == len` appends). A placement or stretch crossing the insert
+/// point is split there first, with its clip phase and values kept;
+/// everything from it on moves `bars` later. `bars` must be in
+/// [`SECTION_BARS`], as the validator wants.
+pub fn insert_section(
+    song: &Song,
+    index: usize,
+    name: &str,
+    bars: u32,
+) -> Result<Arranged, ArrangeError> {
+    let len = song.sections.len();
+    if index > len {
+        return Err(ArrangeError::OutOfBounds { index, len });
+    }
+    if !SECTION_BARS.contains(&bars) {
+        return Err(ArrangeError::Bars { bars });
+    }
+    // `check` is run for its overflow guard (the song may grow by `bars`)
+    // and needs an existing section's index: an append (`index == len`)
+    // names the last one. A valid song has a section, so that exists.
+    let near = index.min(len.saturating_sub(1));
+    check(song, near, bars)?;
+    let at: u32 = song.sections[..index].iter().map(|s| s.bars).sum();
+    let mut edit = Edit::new(song);
+    edit.split(at);
+    edit.remap(|span| {
+        if span.start >= at {
+            Fate::shifted(span, i64::from(bars))
+        } else {
+            Fate::keep(span)
+        }
+    });
+    edit.song.sections.insert(
+        index,
+        Section {
+            name: name.to_owned(),
+            bars,
+        },
+    );
+    Ok(edit.finish())
+}
+
 /// Makes track `track` play `clip` over all of section `section` from the
 /// clip's start, or nothing there when `clip` is `None`. Lanes are untouched.
 pub fn set_section_play(
@@ -301,7 +348,7 @@ impl Edit {
             if lane.start_bar < bar && bar < lane.span().end {
                 let (left, right) = split_lane(&lane, bar);
                 self.push(left, origin);
-                self.push(right, LaneOrigin::Split(origin.source()));
+                self.push(right, LaneOrigin::Split(source_of(origin)));
             } else {
                 self.push(lane, origin);
             }
@@ -334,7 +381,7 @@ impl Edit {
                 self.push(moved(&lane, span), origin);
             }
             if let Some(span) = copy {
-                self.push(moved(&lane, span), LaneOrigin::Copy(origin.source()));
+                self.push(moved(&lane, span), LaneOrigin::Copy(source_of(origin)));
             }
         }
     }
@@ -361,6 +408,14 @@ impl Edit {
             lanes: origins,
         }
     }
+}
+
+/// The old stretch an operation's own item came from: every item of a
+/// section operation starts as a kept stretch of the song.
+fn source_of(origin: LaneOrigin) -> usize {
+    origin
+        .source()
+        .expect("a section operation starts from kept stretches")
 }
 
 /// `lane` over the bars `span`, with the same points.

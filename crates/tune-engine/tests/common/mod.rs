@@ -16,6 +16,10 @@ pub const MINI: &str = include_str!("../../../tune-song/tests/fixtures/mini.toml
 /// The shared `mixed` fixture: `mini` plus the mixer.
 pub const MIXED: &str = include_str!("../../../tune-song/tests/fixtures/mixed.toml");
 
+/// The shared `session` fixture: the commented v2 `mini` plus the scenes
+/// `groove` (kick `k4`, acid `a1`) and `break` (hat `h`).
+pub const SESSION: &str = include_str!("../../../tune-song/tests/fixtures/session.toml");
+
 /// Parses `src` (which must be valid) and compiles it at the song's rate
 /// (48 kHz by default).
 pub fn compiled(src: &str) -> Arc<CompiledSong> {

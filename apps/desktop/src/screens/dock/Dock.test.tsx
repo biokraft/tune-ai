@@ -169,7 +169,7 @@ describe("Dock", () => {
     expect(screen.getByRole("button", { name: "a1" })).toHaveAttribute("aria-current", "true");
     await user.click(screen.getByRole("button", { name: "None" }));
     expect(client.named("set_section_play")).toEqual([
-      { cmd: "set_section_play", args: { section: 1, track: "acid", pattern: null } },
+      { cmd: "set_section_play", args: { section: 1, track: "acid", clip: null } },
     ]);
     expect(screen.queryByRole("button", { name: "None" })).toBeNull();
   });

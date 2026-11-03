@@ -32,7 +32,7 @@ describe("StepsTab", () => {
       .getAllByRole("button", { name: /Step \d+ accent/ })
       .find((b) => !b.hasAttribute("disabled"))!;
     fireEvent.click(acc);
-    expect(sent[0]).toMatchObject({ cmd: "set_acid_step", args: { accent: true } });
+    expect(sent[0]).toMatchObject({ cmd: "set_acid_step", args: { clip: "a1", accent: true } });
   });
 
   it("shows one group per drum track and emphasises the docked one", () => {
@@ -45,7 +45,7 @@ describe("StepsTab", () => {
   it("fires set_drum_step from the grid", () => {
     const { fired } = setup("kick", 1);
     fireEvent.click(screen.getByRole("button", { name: "kick step 1: hit" }));
-    expect(fired[0]).toMatchObject({ cmd: "set_drum_step" });
+    expect(fired[0]).toMatchObject({ cmd: "set_drum_step", args: { clip: "k4", index: 0 } });
   });
 
   it("says so when the docked track plays nothing in the section", () => {

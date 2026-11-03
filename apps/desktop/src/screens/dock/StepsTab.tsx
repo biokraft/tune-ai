@@ -82,7 +82,7 @@ function LiveDrumGrid({
     <DrumGrid
       rows={rows}
       playingStep={same ? stepInPattern(song, section, step, length) : null}
-      onSet={(pattern, index, hit) => fire({ cmd: "set_drum_step", args: { pattern, index, hit } })}
+      onSet={(clip, index, hit) => fire({ cmd: "set_drum_step", args: { clip, index, hit } })}
     />
   );
 }
@@ -143,7 +143,7 @@ export const StepsTab = memo(function StepsTab({
           onChange={(index: number, s: AcidStep) =>
             void send({
               cmd: "set_acid_step",
-              args: { pattern: pattern.id, index, note: s.note, accent: s.accent, slide: s.slide },
+              args: { clip: pattern.id, index, note: s.note, accent: s.accent, slide: s.slide },
             }).catch(() => {})
           }
         />

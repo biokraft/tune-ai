@@ -17,8 +17,9 @@ use crate::doc::effective_value;
 use crate::path::{SongPath, TrackField};
 
 /// One value that differs between two songs.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Change {
+    #[ts(type = "string")]
     pub path: SongPath,
     pub old: Value,
     pub new: Value,
@@ -26,6 +27,10 @@ pub struct Change {
 
 /// Every difference between `old` and `new`, in song-file order (the mix
 /// right after `song.bpm`, as `[mix]` follows `[song]`).
+///
+/// After the clips come the scenes: `scenes.<s>` for a scene in one song
+/// only, `scenes` when the scenes in both are in another relative order, and
+/// one `scenes.<s>.slots.<t>` per slot whose clip differs.
 ///
 /// A changed section count or order gives one `sections` change. Otherwise
 /// sections are compared field by field (`bars`, `name`, `play.<t>`,
@@ -113,6 +118,35 @@ pub fn diff_songs(old: &Song, new: &Song) -> Vec<Change> {
             SongPath::ClipBars { clip: name.clone() },
             SongPath::ClipNotes { clip: name },
         ] {
+            let (a, b) = both(&p);
+            push(p, a, b);
+        }
+    }
+
+    for name in union(old.scenes.keys(), new.scenes.keys()) {
+        if old.scenes.contains_key(&name) != new.scenes.contains_key(&name) {
+            let p = SongPath::Scene { scene: name };
+            let (a, b) = both(&p);
+            push(p, a, b);
+        }
+    }
+    if scenes_reordered(old, new) {
+        let p = SongPath::Scenes;
+        let (a, b) = both(&p);
+        push(p, a, b);
+    }
+    for (name, o) in &old.scenes {
+        let Some(n) = new.scenes.get(name) else {
+            continue;
+        };
+        for track in union(o.slots.keys(), n.slots.keys()) {
+            if o.slots.get(&track) == n.slots.get(&track) {
+                continue;
+            }
+            let p = SongPath::SceneSlot {
+                scene: name.clone(),
+                track,
+            };
             let (a, b) = both(&p);
             push(p, a, b);
         }
@@ -292,6 +326,18 @@ fn relative_lanes(song: &Song, i: usize) -> Option<Vec<LanePart<'_>>> {
         .collect();
     parts.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
     Some(parts)
+}
+
+/// Whether the scenes in both songs are in a different relative order.
+pub(crate) fn scenes_reordered(old: &Song, new: &Song) -> bool {
+    let shared = |a: &Song, b: &Song| -> Vec<String> {
+        a.scenes
+            .keys()
+            .filter(|k| b.scenes.contains_key(*k))
+            .cloned()
+            .collect()
+    };
+    shared(old, new) != shared(new, old)
 }
 
 /// Whether the section list changed in count, or holds the same sections

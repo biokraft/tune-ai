@@ -6,15 +6,19 @@
 //! at once, each with a 1-based `line:column`. It reads format versions 1
 //! and 2; [`Song::to_toml`] writes version 2, and [`migrate`] rewrites a
 //! version 1 file as version 2, keeping its comments. [`move_section`] and its
-//! siblings edit the arrangement one section at a time.
+//! siblings edit the arrangement one section at a time, [`add_track`] and its
+//! siblings the tracks and their devices, [`add_clip`] and its siblings the
+//! clip pool, [`add_scene`] and its siblings the session scenes.
 
 #![forbid(unsafe_code)]
 
 mod arrange;
+mod edit;
 mod error;
 mod migrate;
 mod model;
 mod raw;
+mod scenes;
 pub mod toml_doc;
 mod validate;
 mod watch;
@@ -23,19 +27,29 @@ mod write;
 use std::path::Path;
 
 pub use arrange::{
-    ArrangeError, Arranged, LaneOrigin, delete_section, duplicate_section, move_section,
-    resize_section, set_section_play,
+    ArrangeError, Arranged, LaneOrigin, delete_section, duplicate_section, insert_section,
+    move_section, resize_section, set_section_play,
+};
+pub use edit::{
+    EditOpError, Edited, Removed, RemovedSlot, add_clip, add_effect, add_lane, add_placement,
+    add_track, check_new_clip, duplicate_clip, move_effect, move_placement, remove_clip,
+    remove_effect, remove_lane, remove_placement, remove_track, rename_clip, rename_device,
+    rename_track, resize_placement, set_instrument, set_lane_points,
 };
 pub use error::{LoadError, SongError};
 pub use migrate::{Migration, migrate};
 pub use model::{
     Clip, DEFAULT_VELOCITY, Device, Lane, MIX_TRACK_ID, MasterMode, Mix, MixUnit, NOTE_CLIP_BARS,
-    Note, NoteClip, Placement, SECTION_BARS, Section, SectionPlay, Song, TICKS_PER_STEP, Track,
-    find_mix_param, lane_value, parse_pitch, pitch_name, round_split_value, section_bars_error,
+    Note, NoteClip, Placement, SECTION_BARS, Scene, Section, SectionPlay, Song, TICKS_PER_STEP,
+    Track, find_mix_param, lane_value, parse_pitch, pitch_name, round_split_value,
+    section_bars_error,
 };
+pub use scenes::{add_scene, move_scene, remove_scene, rename_scene, set_slot};
 pub use tune_modules::{ClipKind, ModuleDescriptor, Registry, SettingSpec};
 pub use watch::{RawReload, Reload, SongWatcher};
-pub use write::{notes_toml, placements_toml};
+pub use write::{
+    clip_table_toml, fx_entry_toml, notes_toml, placements_toml, scene_table_toml, track_table_toml,
+};
 
 /// The newest song format version, the one [`Song::to_toml`] writes.
 pub const FORMAT_VERSION: u32 = 2;

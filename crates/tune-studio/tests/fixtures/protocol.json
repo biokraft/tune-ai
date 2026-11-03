@@ -13,6 +13,12 @@
       }
     },
     {
+      "cmd": "resolve_offered",
+      "args": {
+        "reapply": true
+      }
+    },
+    {
       "cmd": "play",
       "args": {
         "from_bar": 4
@@ -37,6 +43,44 @@
       }
     },
     {
+      "cmd": "launch_clip",
+      "args": {
+        "track": "acid",
+        "scene": "groove"
+      }
+    },
+    {
+      "cmd": "launch_scene",
+      "args": {
+        "scene": "groove"
+      }
+    },
+    {
+      "cmd": "stop_clip",
+      "args": {
+        "track": "hat"
+      }
+    },
+    {
+      "cmd": "back_to_arrangement",
+      "args": {
+        "track": null
+      }
+    },
+    {
+      "cmd": "undo"
+    },
+    {
+      "cmd": "redo"
+    },
+    {
+      "cmd": "set_value",
+      "args": {
+        "path": "tracks.acid.acid303.cutoff",
+        "value": 820
+      }
+    },
+    {
       "cmd": "set_param",
       "args": {
         "track": "acid",
@@ -46,17 +90,18 @@
       }
     },
     {
-      "cmd": "set_fx_mode",
+      "cmd": "set_device_setting",
       "args": {
         "track": "acid",
         "device": "dist",
-        "mode": "hard"
+        "setting": "mode",
+        "value": "hard"
       }
     },
     {
       "cmd": "set_acid_step",
       "args": {
-        "pattern": "a1",
+        "clip": "a1",
         "index": 3,
         "note": 36,
         "accent": true,
@@ -66,7 +111,7 @@
     {
       "cmd": "set_drum_step",
       "args": {
-        "pattern": "k4",
+        "clip": "k4",
         "index": 5,
         "hit": "accent"
       }
@@ -102,7 +147,7 @@
       "args": {
         "section": 1,
         "track": "kick",
-        "pattern": null
+        "clip": null
       }
     },
     {
@@ -116,15 +161,229 @@
       }
     },
     {
-      "cmd": "undo"
-    },
-    {
-      "cmd": "redo"
-    },
-    {
-      "cmd": "resolve_offered",
+      "cmd": "add_track",
       "args": {
-        "reapply": true
+        "track": "bass",
+        "instrument": "acid303"
+      }
+    },
+    {
+      "cmd": "remove_track",
+      "args": {
+        "track": "bass"
+      }
+    },
+    {
+      "cmd": "rename_track",
+      "args": {
+        "track": "acid",
+        "to": "bass"
+      }
+    },
+    {
+      "cmd": "add_effect",
+      "args": {
+        "track": "acid",
+        "module": "eq",
+        "id": null,
+        "index": 0
+      }
+    },
+    {
+      "cmd": "remove_effect",
+      "args": {
+        "track": "acid",
+        "device": "dist"
+      }
+    },
+    {
+      "cmd": "move_effect",
+      "args": {
+        "track": "acid",
+        "device": "dist",
+        "index": 1
+      }
+    },
+    {
+      "cmd": "rename_device",
+      "args": {
+        "track": "acid",
+        "device": "dist",
+        "to": "drive2"
+      }
+    },
+    {
+      "cmd": "set_instrument",
+      "args": {
+        "track": "acid",
+        "module": "kick"
+      }
+    },
+    {
+      "cmd": "add_clip",
+      "args": {
+        "clip": "lead",
+        "kind": "notes",
+        "steps": null,
+        "bars": 2,
+        "notes": [
+          {
+            "start": 0,
+            "pitch": "C3",
+            "len": 2
+          }
+        ]
+      }
+    },
+    {
+      "cmd": "remove_clip",
+      "args": {
+        "clip": "k4"
+      }
+    },
+    {
+      "cmd": "rename_clip",
+      "args": {
+        "clip": "a1",
+        "to": "bass1"
+      }
+    },
+    {
+      "cmd": "duplicate_clip",
+      "args": {
+        "clip": "h",
+        "to": "h2"
+      }
+    },
+    {
+      "cmd": "add_placement",
+      "args": {
+        "track": "acid",
+        "clip": "a1",
+        "at": 1,
+        "bars": 2,
+        "offset": null
+      }
+    },
+    {
+      "cmd": "move_placement",
+      "args": {
+        "track": "acid",
+        "at": 3,
+        "to": 1
+      }
+    },
+    {
+      "cmd": "resize_placement",
+      "args": {
+        "track": "acid",
+        "at": 3,
+        "bars": 1
+      }
+    },
+    {
+      "cmd": "remove_placement",
+      "args": {
+        "track": "kick",
+        "at": 3
+      }
+    },
+    {
+      "cmd": "add_section",
+      "args": {
+        "name": "break",
+        "bars": 2,
+        "index": 1
+      }
+    },
+    {
+      "cmd": "rename_section",
+      "args": {
+        "index": 1,
+        "name": "drop"
+      }
+    },
+    {
+      "cmd": "add_scene",
+      "args": {
+        "scene": "jam",
+        "index": 1
+      }
+    },
+    {
+      "cmd": "remove_scene",
+      "args": {
+        "scene": "groove"
+      }
+    },
+    {
+      "cmd": "rename_scene",
+      "args": {
+        "scene": "groove",
+        "to": "drop"
+      }
+    },
+    {
+      "cmd": "move_scene",
+      "args": {
+        "scene": "break",
+        "index": 0
+      }
+    },
+    {
+      "cmd": "set_slot",
+      "args": {
+        "scene": "groove",
+        "track": "acid",
+        "clip": "a1"
+      }
+    },
+    {
+      "cmd": "add_lane",
+      "args": {
+        "param": "mix.reverb.size",
+        "at": 1,
+        "bars": 4,
+        "points": [
+          [
+            0.0,
+            0.2
+          ],
+          [
+            4.0,
+            0.6
+          ]
+        ]
+      }
+    },
+    {
+      "cmd": "remove_lane",
+      "args": {
+        "param": "acid.acid303.cutoff",
+        "at": 3
+      }
+    },
+    {
+      "cmd": "set_lane_points",
+      "args": {
+        "param": "acid.acid303.cutoff",
+        "at": 3,
+        "points": [
+          [
+            0.0,
+            0.3
+          ],
+          [
+            2.0,
+            0.9
+          ]
+        ]
+      }
+    },
+    {
+      "cmd": "undo_run",
+      "args": {
+        "run": "r1"
       }
     }
   ],
@@ -968,14 +1227,18 @@
     },
     {
       "event": "applied",
-      "source": "human",
+      "source": "claude",
       "changes": [
         {
-          "path": "tracks.acid.acid303.cutoff",
-          "old": 500,
-          "new": 820
+          "path": "song.bpm",
+          "old": 120,
+          "new": 130
         }
-      ]
+      ],
+      "run": {
+        "id": "r1",
+        "title": "open the filter"
+      }
     },
     {
       "event": "external_change",

@@ -13,7 +13,7 @@ use super::{as_integer, section_table, track_table};
 
 /// What a section operation does to the `[[sections]]` tables themselves.
 #[derive(Clone, Copy)]
-pub(super) enum Tables {
+pub(super) enum Tables<'a> {
     /// Nothing: only what plays changes.
     Keep,
     /// Moves section `.0` to index `.1`.
@@ -23,18 +23,20 @@ pub(super) enum Tables {
     Delete(usize),
     /// Section `.0` gets `bars = .1`.
     Bars(usize, u32),
+    /// A new section named `.1` of `.2` bars goes in at index `.0`.
+    Insert(usize, &'a str, u32),
 }
 
 /// Applies `tables` to the sections, written as `[[sections]]` or as an
 /// inline array. The indices were checked by the section operation.
-pub(super) fn section_tables(doc: &mut DocumentMut, tables: Tables) -> Option<()> {
+pub(super) fn section_tables(doc: &mut DocumentMut, tables: Tables<'_>) -> Option<()> {
     match tables {
         Tables::Keep => return Some(()),
         Tables::Bars(index, bars) => {
             section_table(doc, index)?.put("bars", toml_edit::Value::from(i64::from(bars)));
             return Some(());
         }
-        Tables::Move(..) | Tables::Duplicate(_) | Tables::Delete(_) => {}
+        Tables::Move(..) | Tables::Duplicate(_) | Tables::Delete(_) | Tables::Insert(..) => {}
     }
     match doc.as_table_mut().get_mut("sections")? {
         Item::ArrayOfTables(aot) => match tables {
@@ -49,6 +51,13 @@ pub(super) fn section_tables(doc: &mut DocumentMut, tables: Tables) -> Option<()
             Tables::Delete(index) => {
                 aot.remove(index);
             }
+            Tables::Insert(index, name, bars) => {
+                let mut table = Table::new();
+                table.decor_mut().set_prefix("\n");
+                table.insert("name", toml_edit::value(name));
+                table.insert("bars", toml_edit::value(i64::from(bars)));
+                aot.insert(index, table);
+            }
             Tables::Keep | Tables::Bars(..) => {}
         },
         Item::Value(toml_edit::Value::Array(array)) => reshape(array, |values| match tables {
@@ -62,6 +71,13 @@ pub(super) fn section_tables(doc: &mut DocumentMut, tables: Tables) -> Option<()
             }
             Tables::Delete(index) => {
                 values.remove(index);
+            }
+            Tables::Insert(index, name, bars) => {
+                let mut section = InlineTable::new();
+                section.insert("name", toml_edit::Value::from(name));
+                section.insert("bars", toml_edit::Value::from(i64::from(bars)));
+                section.fmt();
+                values.insert(index, section.into());
             }
             Tables::Keep | Tables::Bars(..) => {}
         }),
@@ -95,7 +111,8 @@ pub(super) fn write_plays(doc: &mut DocumentMut, old: &Song, new: &Song) -> Opti
 /// copy clones the original's table. Of a split stretch whose first piece
 /// is gone, the first piece left reuses the old table, so its comments
 /// stay; any other piece is a new table. Old tables of stretches that are
-/// gone are dropped.
+/// gone are dropped. A song with no `automation` yet gets the list with a
+/// new table per stretch.
 pub(super) fn write_automation(
     doc: &mut DocumentMut,
     old: &Song,
@@ -106,7 +123,19 @@ pub(super) fn write_automation(
     let lanes = arranged.song.automation.iter().zip(reused);
     let empty = arranged.lanes.is_empty();
     match root.get_mut("automation") {
-        None => return empty.then_some(()),
+        None if empty => return Some(()),
+        // The first stretches of a song: every one is a new table.
+        None => {
+            let mut new = ArrayOfTables::new();
+            for lane in &arranged.song.automation {
+                let mut table = Table::new();
+                table.decor_mut().set_prefix("\n");
+                put_lane(Slot::Table(&mut table), None, lane)?;
+                new.push(table);
+            }
+            root.insert("automation", Item::ArrayOfTables(new));
+            return Some(());
+        }
         Some(Item::ArrayOfTables(aot)) => {
             let mut new = ArrayOfTables::new();
             for (lane, reuse) in lanes {
@@ -168,7 +197,7 @@ fn reused_tables(origins: &[LaneOrigin]) -> Vec<Option<usize>> {
                 taken.push(i);
                 Some(i)
             }
-            LaneOrigin::Split(_) => None,
+            LaneOrigin::Split(_) | LaneOrigin::New => None,
         })
         .collect()
 }
@@ -177,7 +206,7 @@ fn reused_tables(origins: &[LaneOrigin]) -> Vec<Option<usize>> {
 /// held: only the values that differ from it are put, so the others keep
 /// their text. A new table (`before` is `None`) gets every key.
 fn put_lane(mut slot: Slot<'_>, before: Option<&Lane>, lane: &Lane) -> Option<()> {
-    if before.is_none() {
+    if before.is_none_or(|b| b.track != lane.track || b.param != lane.param) {
         let param = format!("{}.{}", lane.track, lane.param);
         slot.put("param", toml_edit::Value::from(param));
     }
@@ -297,5 +326,108 @@ pub(super) fn rerank(doc: &mut DocumentMut, song: &Song, start: isize) {
                 }),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tune_song::parse_song;
+
+    use super::*;
+
+    const SONG: &str = "[song]\nversion = 2\nname = \"t\"\nbpm = 120\n\n\
+        [tracks.kick]\ninstrument = \"kick\"\n\n\
+        [[sections]]\nname = \"a\"\nbars = 4\n\n\
+        # the first\n[[automation]]\nparam = \"kick.kick.decay\"\nat = 1\nbars = 2\npoints = [[0, 0], [2, 1]]\n";
+
+    /// A stretch with no old table gets a table of its own, written after
+    /// the kept one, which keeps its comment.
+    #[test]
+    fn a_new_stretch_gets_a_new_table() {
+        let old = parse_song(SONG).expect("parses");
+        let mut new = old.clone();
+        new.automation.push(Lane {
+            track: "kick".into(),
+            param: "kick.tune".into(),
+            start_bar: 2,
+            bars: 2,
+            points: vec![(0.0, 0.5), (2.0, 0.25)],
+        });
+        let arranged = Arranged {
+            song: new.clone(),
+            lanes: vec![LaneOrigin::Kept(0), LaneOrigin::New],
+        };
+        let mut doc: DocumentMut = SONG.parse().expect("parses");
+        write_automation(&mut doc, &old, &arranged).expect("written");
+        let text = doc.to_string();
+        assert!(text.starts_with(SONG), "{text}");
+        assert!(
+            text.ends_with(
+                "\n[[automation]]\nparam = \"kick.kick.tune\"\nat = 3\nbars = 2\npoints = [[0, 0.5], [2, 0.25]]\n"
+            ),
+            "{text}"
+        );
+        assert_eq!(parse_song(&text).expect("parses"), new);
+    }
+
+    /// A kept stretch whose param changed gets the new `param`.
+    #[test]
+    fn a_kept_stretch_follows_its_new_param() {
+        let old = parse_song(SONG).expect("parses");
+        let mut new = old.clone();
+        new.automation[0].param = "kick.pitch".into();
+        let arranged = Arranged {
+            song: new.clone(),
+            lanes: vec![LaneOrigin::Kept(0)],
+        };
+        let mut doc: DocumentMut = SONG.parse().expect("parses");
+        write_automation(&mut doc, &old, &arranged).expect("written");
+        let text = doc.to_string();
+        assert_eq!(text, SONG.replace("kick.kick.decay", "kick.kick.pitch"));
+    }
+
+    /// A song with no `automation` yet gets the list, one new table per
+    /// stretch, after the text it had.
+    #[test]
+    fn the_first_stretches_create_the_list() {
+        let bare = SONG
+            .split("# the first")
+            .next()
+            .expect("has a lane")
+            .to_owned();
+        let bare = format!("{}\n", bare.trim_end());
+        let old = parse_song(&bare).expect("parses");
+        let mut new = old.clone();
+        new.automation.push(Lane {
+            track: "kick".into(),
+            param: "kick.decay".into(),
+            start_bar: 0,
+            bars: 2,
+            points: vec![(0.0, 0.0), (2.0, 1.0)],
+        });
+        let arranged = Arranged {
+            song: new.clone(),
+            lanes: vec![LaneOrigin::New],
+        };
+        let mut doc: DocumentMut = bare.parse().expect("parses");
+        write_automation(&mut doc, &old, &arranged).expect("written");
+        let text = doc.to_string();
+        assert_eq!(
+            text,
+            format!(
+                "{bare}\n[[automation]]\nparam = \"kick.kick.decay\"\nat = 1\nbars = 2\n\
+                 points = [[0, 0], [2, 1]]\n"
+            )
+        );
+        assert_eq!(parse_song(&text).expect("parses"), new);
+
+        // Nothing to write, nothing created.
+        let mut doc: DocumentMut = bare.parse().expect("parses");
+        let none = Arranged {
+            song: old.clone(),
+            lanes: Vec::new(),
+        };
+        write_automation(&mut doc, &old, &none).expect("written");
+        assert_eq!(doc.to_string(), bare);
     }
 }

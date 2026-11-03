@@ -22,14 +22,16 @@ use tune_song::toml_doc::{
     Slot, element_mut, inline_element, normalize_positions, root_child, walk, walk_mut,
 };
 use tune_song::{
-    ArrangeError, Arranged, Clip, Device, FORMAT_VERSION, MIX_TRACK_ID, Migration, Note, Placement,
-    Registry, SectionPlay, SettingSpec, Song, SongError, TICKS_PER_STEP, Track, find_mix_param,
-    migrate, parse, pitch_name, section_bars_error,
+    ArrangeError, Arranged, Clip, Device, EditOpError, FORMAT_VERSION, MIX_TRACK_ID, Migration,
+    Note, Placement, Registry, SectionPlay, SettingSpec, Song, SongError, TICKS_PER_STEP, Track,
+    find_mix_param, migrate, parse, pitch_name, section_bars_error,
 };
 
 use crate::path::{SongPath, TrackField};
 
 mod arrange;
+mod items;
+mod scenes;
 
 use arrange::{Tables, block_start, rerank, section_tables, write_automation, write_plays};
 
@@ -52,12 +54,27 @@ pub enum EditError {
     BadValue { path: String, message: String },
     #[error("index {index} is out of bounds (there are {len})")]
     OutOfBounds { index: usize, len: usize },
+    /// A bar argument was 0; bars count from 1.
+    #[error("bars are 1-based: `{arg}` must be at least 1")]
+    BadBar { arg: &'static str },
     #[error("a song needs at least one section")]
     LastSection,
     /// A section operation would put a bar past `u32::MAX` (never for a
     /// song the validator accepts).
     #[error("the arrangement would be too long")]
     TooLong,
+    /// A track or device edit the song model refused.
+    #[error("{0}")]
+    Op(#[from] EditOpError),
+    /// The file writes `key` in a valid form the writer cannot edit yet
+    /// (`form` describes it).
+    #[error(
+        "this file writes `{key}` as {form}; the studio can't edit that form yet, so change it by hand"
+    )]
+    UnsupportedForm { key: String, form: String },
+    /// The file writes its scenes in a form `action` cannot edit.
+    #[error("`{action}` needs each scene as its own [scenes.<id>] table; edit this form by hand")]
+    ScenesByHand { action: &'static str },
     #[error("the edit would make the song invalid:\n{}", summary(.0))]
     Invalid(Vec<SongError>),
     /// The studio could not carry out an edit it accepted: a bug, never a
@@ -245,6 +262,14 @@ impl SongDoc {
         self.arrange(result, None, Tables::Delete(index))
     }
 
+    /// Inserts an empty section `name` of `bars` bars before section `index`
+    /// (`index` equal to the section count appends), as
+    /// [`insert_section`](tune_song::insert_section) does.
+    pub fn insert_section(&mut self, index: usize, name: &str, bars: u32) -> Result<(), EditError> {
+        let result = tune_song::insert_section(&self.song, index, name, bars);
+        self.arrange(result, None, Tables::Insert(index, name, bars))
+    }
+
     /// Writes the result of a section operation into the text (see the
     /// module docs) and commits it. A result equal to the current song
     /// changes nothing.
@@ -252,7 +277,7 @@ impl SongDoc {
         &mut self,
         result: Result<Arranged, ArrangeError>,
         path: Option<&SongPath>,
-        tables: Tables,
+        tables: Tables<'_>,
     ) -> Result<(), EditError> {
         let arranged = result.map_err(|e| arrange_error(e, path))?;
         if arranged.song == self.song {
@@ -407,6 +432,17 @@ pub fn effective_value(song: &Song, path: &SongPath) -> Option<Value> {
                     .collect(),
             )
         }
+        SongPath::Scenes => Value::Array(song.scenes.keys().cloned().map(Value::from).collect()),
+        SongPath::Scene { scene } => {
+            let slots = &song.scenes.get(scene)?.slots;
+            json!({ "slots": slots })
+        }
+        SongPath::SceneSlot { scene, track } => song
+            .scenes
+            .get(scene)?
+            .slots
+            .get(track)
+            .map_or(Value::Null, |clip| Value::from(clip.as_str())),
         SongPath::Sections => Value::Array(
             song.sections
                 .iter()
@@ -439,7 +475,20 @@ pub fn placement_json(p: &Placement) -> Value {
 }
 
 /// A number as JSON, exact integers as integers (`-6`, not `-6.0`).
-fn num(v: f64) -> Value {
+/// The spec of a lane's param: `param` of track `track`, or the mix param
+/// `param` when `track` is [`MIX_TRACK_ID`]. `None` for a setting or an
+/// unknown param.
+pub(crate) fn lane_param_spec(song: &Song, track: &str, param: &str) -> Option<&'static ParamSpec> {
+    if track == MIX_TRACK_ID {
+        return find_mix_param(param).map(|(_, _, spec)| spec);
+    }
+    match locate(song.tracks.get(track)?, param)? {
+        Target::Param(_, _, spec) | Target::Strip(spec) => Some(spec),
+        Target::Setting(..) => None,
+    }
+}
+
+pub(crate) fn num(v: f64) -> Value {
     match as_integer(v) {
         Some(i) => Value::from(i),
         None => serde_json::Number::from_f64(v).map_or(Value::Null, Value::Number),
@@ -677,17 +726,90 @@ fn apply(
             let v = toml_edit::Value::from(string()?);
             section_table(doc, *i).ok_or_else(missing)?.put("name", v);
         }
+        SongPath::SceneSlot { scene, track } => {
+            let clip = match value {
+                Value::Null => None,
+                Value::String(clip) if clip.is_empty() => None,
+                Value::String(clip) => Some(clip.as_str()),
+                _ => return Err(bad("expected a clip id or null")),
+            };
+            let scene_table = root_child(doc, "scenes")
+                .and_then(|s| s.child(scene))
+                .filter(|_| song.scenes.contains_key(scene))
+                .ok_or_else(missing)?;
+            put_slot(scene_table, track, clip).ok_or_else(missing)?;
+        }
         SongPath::SectionBars(_) | SongPath::SectionPlay { .. } => {
             unreachable!("SongDoc::set runs these as section operations")
         }
         SongPath::Version
         | SongPath::Track { .. }
         | SongPath::SectionLanes(_)
-        | SongPath::Sections => {
+        | SongPath::Sections
+        | SongPath::Scenes
+        | SongPath::Scene { .. } => {
             return Err(EditError::ReadOnly(path.to_string()));
         }
     }
     Ok(())
+}
+
+/// Sets (`Some`) or clears (`None`) the slot of `track` in a scene's table:
+/// the key of its `slots` table, inline or not. A scene without `slots` gets
+/// them, and the last slot's removal takes the `slots` key with it.
+fn put_slot(mut scene: Slot<'_>, track: &str, clip: Option<&str>) -> Option<()> {
+    let Some(clip) = clip else {
+        let present = match &scene {
+            Slot::Table(t) => t.contains_key("slots"),
+            Slot::Inline(t) => t.contains_key("slots"),
+        };
+        if !present {
+            return Some(());
+        }
+        let emptied = {
+            let slots = match &mut scene {
+                Slot::Table(t) => Slot::of(t.get_mut("slots")?)?,
+                Slot::Inline(t) => Slot::Inline(t.get_mut("slots")?.as_inline_table_mut()?),
+            };
+            remove_slot(slots, track)
+        };
+        if emptied {
+            scene.remove("slots");
+        }
+        return Some(());
+    };
+    scene
+        .child_or_new("slots")?
+        .put(track, toml_edit::Value::from(clip));
+    Some(())
+}
+
+/// Removes `track` from a `slots` table and says whether the `slots` key
+/// should go too: only an inline table that this removal emptied (a `slots`
+/// table with a header keeps its header and comments, and an already empty
+/// one is left as it is). An inline table keeps the space before its closing
+/// brace.
+fn remove_slot(slots: Slot<'_>, track: &str) -> bool {
+    match slots {
+        Slot::Table(t) => {
+            t.remove(track);
+            false
+        }
+        Slot::Inline(t) => {
+            let was_last = t.iter().last().is_some_and(|(k, _)| k == track);
+            let suffix = t
+                .get(track)
+                .and_then(|v| v.decor().suffix().and_then(|s| s.as_str()))
+                .map(str::to_owned);
+            if t.remove(track).is_none() {
+                return false;
+            }
+            if let (true, Some(suffix), Some((_, last))) = (was_last, suffix, t.iter_mut().last()) {
+                last.decor_mut().set_suffix(suffix);
+            }
+            t.is_empty()
+        }
+    }
 }
 
 /// The TOML array for a `clips.<c>.notes` value, laid out as

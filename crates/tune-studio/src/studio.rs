@@ -29,13 +29,15 @@ use serde_json::{Value, json};
 use tune_engine::{AudioOut, CompiledSong, LiveController, LiveError, ParamTarget, live};
 use tune_song::{RawReload, SongWatcher};
 
-use crate::command::Command;
+use crate::action::{Action, ActionKind, ActionsOutcome, Origin, RunTag, Via};
+use crate::command::{Command, StudioCommand};
 use crate::core::{ExternalChange, StudioCore};
 use crate::diff::Change;
 use crate::doc::{EditError, effective_value};
 use crate::error::{ErrorView, StudioError};
 use crate::log::Source;
 use crate::path::SongPath;
+use crate::session::{self, OffArrangement, SessionAction};
 use crate::view::StudioState;
 
 /// The actor's tick: playhead events go out at this rate while playing.
@@ -58,6 +60,7 @@ const RELEASE_GUARD: Duration = Duration::from_millis(200);
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
+#[derive(ts_rs::TS)]
 pub enum Event {
     /// The whole studio state, after anything in it changed.
     State(StudioState),
@@ -65,15 +68,19 @@ pub enum Event {
     /// `step` counts 16ths from the song start, `bar = step / 16` and
     /// `beat = step % 16 / 4`.
     Playhead {
+        #[ts(type = "number")]
         step: u64,
         bar: u32,
         beat: u32,
         playing: bool,
     },
-    /// A client's edit (or undo, redo, re-apply) changed the song.
+    /// A client's edit (or undo, redo, re-apply) changed the song, or an
+    /// agent's action through [`StudioHandle::run_actions`] did.
     Applied {
         source: Source,
         changes: Vec<Change>,
+        /// The run the agent's action belongs to.
+        run: Option<RunTag>,
     },
     /// The file changed on disk (Claude, an editor, git).
     ExternalChange(ExternalChange),
@@ -87,7 +94,7 @@ pub struct StudioConfig {
     /// The device playback goes to.
     pub audio: Box<dyn AudioOut>,
     /// The directory holding `songs/<name>/song.toml`; relative song paths
-    /// in [`Command::OpenSong`] resolve against it.
+    /// in [`StudioCommand::OpenSong`] resolve against it.
     pub songs_root: PathBuf,
 }
 
@@ -168,8 +175,7 @@ impl Drop for Inner {
 
 impl StudioHandle {
     /// Runs `cmd` and returns its result: `null` for most commands, the
-    /// song list for `list_songs`, the state for `get_state`, the changes for `undo`/`redo`, and
-    /// `{"automated": true}` for a knob released on an automated param.
+    /// song list for `list_songs`, the state for `get_state`, and the changes for `undo`/`redo`.
     /// Blocks for at most 5 s.
     pub fn call(&self, cmd: Command) -> Result<Value, StudioError> {
         let (reply_tx, reply_rx) = mpsc::channel();
@@ -179,6 +185,61 @@ impl StudioHandle {
             .map_err(|_| StudioError::Closed)?;
         match reply_rx.recv_timeout(CALL_TIMEOUT) {
             Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => Err(StudioError::Timeout),
+            Err(RecvTimeoutError::Disconnected) => Err(StudioError::Closed),
+        }
+    }
+
+    /// Runs one action or a batch as `origin`. Edits: as
+    /// [`StudioCore::apply_now`], written at once as one undo step. One live
+    /// or history action: as the UI's command, its log entries (for undo
+    /// and redo) carrying `origin.source`; a batch that holds one gives
+    /// [`StudioError::EditsOnly`]. Blocks for at most 5 s.
+    pub fn run_actions(
+        &self,
+        actions: Vec<Action>,
+        origin: Origin,
+    ) -> Result<ActionsOutcome, StudioError> {
+        self.run_actions_on(None, actions, origin)
+    }
+
+    /// [`run_actions`](Self::run_actions), only while `song` (canonical)
+    /// is the open song: checked in the actor, together with the run, so a
+    /// song switch cannot slip in between. Another song (or none) gives
+    /// [`StudioError::SongChanged`] and changes nothing.
+    pub(crate) fn run_actions_on(
+        &self,
+        song: Option<PathBuf>,
+        actions: Vec<Action>,
+        origin: Origin,
+    ) -> Result<ActionsOutcome, StudioError> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.inner
+            .tx
+            .send(Msg::Actions {
+                song,
+                actions,
+                origin,
+                reply: reply_tx,
+            })
+            .map_err(|_| StudioError::Closed)?;
+        match reply_rx.recv_timeout(CALL_TIMEOUT) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => Err(StudioError::Timeout),
+            Err(RecvTimeoutError::Disconnected) => Err(StudioError::Closed),
+        }
+    }
+
+    /// The path of the song open in the studio, as it was opened; `None`
+    /// while none is (or its file has not parsed yet).
+    pub(crate) fn song_path(&self) -> Result<Option<PathBuf>, StudioError> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.inner
+            .tx
+            .send(Msg::SongPath(reply_tx))
+            .map_err(|_| StudioError::Closed)?;
+        match reply_rx.recv_timeout(CALL_TIMEOUT) {
+            Ok(path) => Ok(path),
             Err(RecvTimeoutError::Timeout) => Err(StudioError::Timeout),
             Err(RecvTimeoutError::Disconnected) => Err(StudioError::Closed),
         }
@@ -202,6 +263,14 @@ impl StudioHandle {
 
 enum Msg {
     Call(Command, Sender<Result<Value, StudioError>>),
+    /// An agent's actions (see [`StudioHandle::run_actions_on`]).
+    Actions {
+        song: Option<PathBuf>,
+        actions: Vec<Action>,
+        origin: Origin,
+        reply: Sender<Result<ActionsOutcome, StudioError>>,
+    },
+    SongPath(Sender<Option<PathBuf>>),
     Subscribe(Sender<Event>),
     /// A change of the song file; `epoch` names the watcher that saw it,
     /// so reports for a song no longer open are dropped.
@@ -244,6 +313,11 @@ struct Player {
     /// The loop changed and has not reached the engine yet; it goes after
     /// any waiting swap, so the engine clamps it against the new song.
     loop_unsent: bool,
+    /// Session actions checked but not sent yet, oldest first: each goes
+    /// once the newest swap plays (see [`Actor::send_cues`]).
+    cues: VecDeque<SessionAction>,
+    /// The playing generation the actor last saw, to notice a swap landing.
+    landed: u64,
 }
 
 impl Player {
@@ -315,6 +389,9 @@ struct Actor {
     drag: Option<Drag>,
     /// The last knob released: track, param and when.
     released: Option<(String, String, Instant)>,
+    /// The tracks the session actions took off the arrangement this
+    /// playback: no lane drives them, so a knob released there writes.
+    off_arrangement: OffArrangement,
     /// The last watcher's epoch.
     epoch: u64,
     /// When the last write of pending edits failed, if it did.
@@ -337,6 +414,7 @@ impl Actor {
             loop_bars: None,
             drag: None,
             released: None,
+            off_arrangement: OffArrangement::default(),
             epoch: 0,
             flush_failed_at: None,
             last_state: None,
@@ -352,11 +430,10 @@ impl Actor {
                     // A drag changes nothing shown; skip building the state.
                     let shown = !matches!(
                         cmd,
-                        Command::SetParam { commit: false, .. }
-                            | Command::ListSongs
-                            | Command::GetState
+                        Command::Action(Action::SetParam { commit: false, .. })
+                            | Command::Studio(StudioCommand::ListSongs | StudioCommand::GetState)
                     );
-                    let repeat = matches!(cmd, Command::GetState);
+                    let repeat = matches!(cmd, Command::Studio(StudioCommand::GetState));
                     let result = self.handle(cmd);
                     if shown {
                         self.publish_if_stale();
@@ -368,6 +445,23 @@ impl Actor {
                     if repeat && let Some(message) = self.migration_error() {
                         self.emit(Event::Error { message });
                     }
+                }
+                Ok(Msg::Actions {
+                    song,
+                    actions,
+                    origin,
+                    reply,
+                }) => {
+                    let result = match song {
+                        Some(want) if !self.has_open(&want) => Err(StudioError::SongChanged),
+                        _ => self.run_actions(&actions, &origin),
+                    };
+                    self.publish_if_stale();
+                    let _ = reply.send(result);
+                }
+                Ok(Msg::SongPath(reply)) => {
+                    let path = self.song.as_ref().map(|s| s.core.path().to_owned());
+                    let _ = reply.send(path);
                 }
                 Ok(Msg::Subscribe(tx)) => {
                     if tx.send(Event::State(self.state())).is_ok() {
@@ -401,34 +495,165 @@ impl Actor {
 
     fn handle(&mut self, cmd: Command) -> Result<Value, StudioError> {
         match cmd {
-            Command::ListSongs => self.list_songs(),
-            Command::GetState => Ok(serde_json::to_value(self.state()).unwrap_or(Value::Null)),
-            Command::OpenSong { path } => {
+            Command::Studio(cmd) => self.handle_studio(cmd),
+            Command::Action(action) => self.handle_action(action),
+        }
+    }
+
+    fn handle_studio(&mut self, cmd: StudioCommand) -> Result<Value, StudioError> {
+        match cmd {
+            StudioCommand::ListSongs => self.list_songs(),
+            StudioCommand::GetState => {
+                Ok(serde_json::to_value(self.state()).unwrap_or(Value::Null))
+            }
+            StudioCommand::OpenSong { path } => {
                 let path = self.under_root(&path)?;
                 self.open(&path)?;
                 self.emit_state();
                 Ok(Value::Null)
             }
-            Command::Play { from_bar } => self.play(from_bar),
-            Command::Stop => {
+            StudioCommand::ResolveOffered { reapply } => self.resolve_offered(reapply),
+        }
+    }
+
+    /// Live and history actions drive the player and the undo history; an
+    /// edit goes through [`StudioCore::apply_edit`], a run undo through
+    /// [`StudioCore::apply_now`]. Every edit is named, so a new action
+    /// without an arm here does not compile.
+    fn handle_action(&mut self, action: Action) -> Result<Value, StudioError> {
+        match action {
+            Action::Play { from_bar } => self.play(from_bar, None),
+            Action::Stop => {
                 self.stop();
                 self.emit_state();
                 Ok(Value::Null)
             }
-            Command::SeekBar { bar } => self.seek(bar),
-            Command::SetLoop { bars } => self.set_loop(bars),
-            Command::SetParam {
+            Action::SeekBar { bar } => self.seek(bar),
+            Action::SetLoop { bars } => self.set_loop(bars),
+            Action::LaunchClip { track, scene } => {
+                self.session(SessionAction::LaunchClip { track, scene })
+            }
+            Action::LaunchScene { scene } => self.session(SessionAction::LaunchScene { scene }),
+            Action::StopClip { track } => self.session(SessionAction::StopClip { track }),
+            Action::BackToArrangement { track } => {
+                self.session(SessionAction::BackToArrangement { track })
+            }
+            Action::Undo => self.undo_redo(true),
+            Action::Redo => self.undo_redo(false),
+            Action::SetParam {
                 track,
                 param,
                 value,
                 commit: false,
             } => self.drag(track, param, value),
-            cmd @ Command::SetParam { commit: true, .. } => self.release(&cmd),
-            Command::Undo => self.undo_redo(true),
-            Command::Redo => self.undo_redo(false),
-            Command::ResolveOffered { reapply } => self.resolve_offered(reapply),
-            edit => self.edit(&edit),
+            action @ Action::SetParam { commit: true, .. } => self.release(&action),
+            // The producer's "Undo this run": written at once, one step.
+            action @ Action::UndoRun { .. } => {
+                let mut out = self.apply_now(&[action], &Origin::human())?;
+                Ok(out.results.pop().unwrap_or(Value::Null))
+            }
+            edit @ (Action::SetValue { .. }
+            | Action::SetDeviceSetting { .. }
+            | Action::SetAcidStep { .. }
+            | Action::SetDrumStep { .. }
+            | Action::MoveSection { .. }
+            | Action::ResizeSection { .. }
+            | Action::DuplicateSection { .. }
+            | Action::DeleteSection { .. }
+            | Action::SetSectionPlay { .. }
+            | Action::SetTrackMix { .. }
+            | Action::AddTrack { .. }
+            | Action::RemoveTrack { .. }
+            | Action::RenameTrack { .. }
+            | Action::AddEffect { .. }
+            | Action::RemoveEffect { .. }
+            | Action::MoveEffect { .. }
+            | Action::RenameDevice { .. }
+            | Action::SetInstrument { .. }
+            | Action::AddClip { .. }
+            | Action::RemoveClip { .. }
+            | Action::RenameClip { .. }
+            | Action::DuplicateClip { .. }
+            | Action::AddPlacement { .. }
+            | Action::MovePlacement { .. }
+            | Action::ResizePlacement { .. }
+            | Action::RemovePlacement { .. }
+            | Action::AddSection { .. }
+            | Action::RenameSection { .. }
+            | Action::AddScene { .. }
+            | Action::RemoveScene { .. }
+            | Action::RenameScene { .. }
+            | Action::MoveScene { .. }
+            | Action::SetSlot { .. }
+            | Action::AddLane { .. }
+            | Action::RemoveLane { .. }
+            | Action::SetLanePoints { .. }) => self.edit(&edit),
         }
+    }
+
+    /// Whether the open song is `song` (canonical).
+    fn has_open(&self, song: &Path) -> bool {
+        self.song
+            .as_ref()
+            .and_then(|s| fs::canonicalize(s.core.path()).ok())
+            .is_some_and(|open| open == song)
+    }
+
+    /// An agent's actions: one live or history action runs as the UI's
+    /// command would; edits are written at once by
+    /// [`StudioCore::apply_now`].
+    fn run_actions(
+        &mut self,
+        actions: &[Action],
+        origin: &Origin,
+    ) -> Result<ActionsOutcome, StudioError> {
+        let outcome =
+            |changes: Vec<Change>, result: Value, file_hash: Option<String>| ActionsOutcome {
+                via: Via::Studio,
+                changes,
+                results: vec![result],
+                file_hash,
+                migrated_from: None,
+            };
+        match actions {
+            [Action::Undo] | [Action::Redo] => {
+                let undo = matches!(actions, [Action::Undo]);
+                let changes = self.undo_redo_changes(undo, origin.source)?;
+                let hash = (!changes.is_empty())
+                    .then(|| self.core().map(StudioCore::disk_hash))
+                    .transpose()?;
+                let result = serde_json::to_value(&changes).unwrap_or(Value::Null);
+                Ok(outcome(changes, result, hash))
+            }
+            [one] if one.kind() != ActionKind::Edit => {
+                let result = self.handle_action(one.clone())?;
+                Ok(outcome(Vec::new(), result, None))
+            }
+            _ => self.apply_now(actions, origin),
+        }
+    }
+
+    /// Edits written at once; the engine swaps them in without ending a
+    /// knob drag, which the agent's edit did not touch.
+    fn apply_now(
+        &mut self,
+        actions: &[Action],
+        origin: &Origin,
+    ) -> Result<ActionsOutcome, StudioError> {
+        let core = self.core_mut()?;
+        // The text decides, not the `Song`: its equality ignores the order
+        // of the scenes, so a scene move would look like no change.
+        let before = core.text();
+        let result = core.apply_now(actions, origin);
+        // The flush first may take in an unseen change.
+        self.report_unreported();
+        // Even a failed log write leaves the new song in place.
+        if self.core()?.text() != before {
+            self.song_changed(false);
+        }
+        let out = result?;
+        self.announce_applied(origin.source, origin.run.clone(), out.changes.clone());
+        Ok(out)
     }
 
     /// The sorted `songs/*/song.toml` paths under the songs root, relative
@@ -559,7 +784,15 @@ impl Actor {
         }
     }
 
-    fn play(&mut self, from_bar: Option<u32>) -> Result<Value, StudioError> {
+    /// Starts playback at `from_bar`, else at the cursor. A session action
+    /// `first` (the launch that starts playback) is cued against the first
+    /// song before the device starts, so it lands at that bar line even
+    /// when the device plays its first block at once.
+    fn play(
+        &mut self,
+        from_bar: Option<u32>,
+        first: Option<SessionAction>,
+    ) -> Result<Value, StudioError> {
         let song = self.core()?.song().clone();
         let bar = from_bar
             .unwrap_or(self.cursor_bar)
@@ -569,23 +802,42 @@ impl Actor {
         let rate = self.audio.sample_rate(wanted).map_err(StudioError::Audio)?;
         let compiled = Arc::new(CompiledSong::new(&song, rate));
         let (controller, processor) = live(compiled.clone(), bar, self.loop_range());
-        let stream = self.audio.start(processor).map_err(StudioError::Audio)?;
         self.player = Some(Player {
-            _stream: stream,
+            // Until the device starts.
+            _stream: Box::new(()),
             controller,
             rate,
             songs: VecDeque::from([(0, compiled)]),
             retry: None,
             loop_unsent: false,
+            cues: first.into_iter().collect(),
+            landed: 0,
         });
+        self.send_cues();
+        let stream = match self.audio.start(processor) {
+            Ok(stream) => stream,
+            Err(e) => {
+                // Not `stop`: the cursor stays where the last playback
+                // left it, not at the bar this one never played.
+                self.player = None;
+                self.off_arrangement.clear();
+                return Err(StudioError::Audio(e));
+            }
+        };
+        if let Some(player) = &mut self.player {
+            player._stream = stream;
+        }
         self.cursor_bar = bar;
         self.send_drag();
         self.emit_state();
         Ok(Value::Null)
     }
 
-    /// Stops playback, leaving the cursor at the bar it reached.
+    /// Stops playback, leaving the cursor at the bar it reached. The
+    /// session state goes with it: the next playback starts with every
+    /// track on the arrangement.
     fn stop(&mut self) {
+        self.off_arrangement.clear();
         if let Some(player) = self.player.take() {
             let total = self.total_bars();
             self.cursor_bar = player.bar(total);
@@ -637,9 +889,17 @@ impl Actor {
     }
 
     /// A knob let go: the value is written, unless a lane drives the param
-    /// at the current bar; either way the live override ends.
-    fn release(&mut self, cmd: &Command) -> Result<Value, StudioError> {
-        let Command::SetParam { track, param, .. } = cmd else {
+    /// at the playhead (never on a track a session action took off the
+    /// arrangement), where the stretch under it moves by the knob's step
+    /// instead (see [`Core::lane_shift`]); either way the live override ends.
+    fn release(&mut self, action: &Action) -> Result<Value, StudioError> {
+        let Action::SetParam {
+            track,
+            param,
+            value,
+            ..
+        } = action
+        else {
             unreachable!()
         };
         if self
@@ -650,41 +910,77 @@ impl Actor {
             self.drag = None;
         }
         self.released = Some((track.clone(), param.clone(), Instant::now()));
-        let bar = self.current_bar();
+        let at = self.current_position();
+        let off_arrangement = self.off_arrangement.contains(track);
         let core = &mut self.song.as_mut().ok_or(StudioError::NoSong)?.core;
-        if core.is_automated(track, param, bar) {
-            self.clear_overrides();
-            return Ok(json!({ "automated": true }));
-        }
-        let result = core.apply_edit(cmd, Instant::now());
+        let shift = (!off_arrangement)
+            .then(|| core.lane_shift(track, param, *value, at))
+            .flatten();
+        let result = core.apply_edit(shift.as_ref().unwrap_or(action), Instant::now());
         // The override goes even when the edit fails or changes nothing.
         self.song_changed(true);
         let changes = result?;
-        self.announce_applied(changes);
+        self.announce_applied(Source::Human, None, changes);
         Ok(Value::Null)
     }
 
-    fn edit(&mut self, cmd: &Command) -> Result<Value, StudioError> {
-        let changes = self.core_mut()?.apply_edit(cmd, Instant::now())?;
+    /// A live session action: checked against the open song, then queued
+    /// for [`send_cues`](Self::send_cues). Stopped, a launch starts playback
+    /// at the cursor (a bar line, so it lands at once), and a stop or a
+    /// return to the arrangement changes nothing. Nothing is written,
+    /// logged or undoable.
+    fn session(&mut self, action: SessionAction) -> Result<Value, StudioError> {
+        session::check(self.core()?.song(), &action).map_err(EditError::from)?;
+        let Some(player) = &mut self.player else {
+            return match action {
+                SessionAction::LaunchClip { .. } | SessionAction::LaunchScene { .. } => {
+                    self.play(None, Some(action))
+                }
+                SessionAction::StopClip { .. } | SessionAction::BackToArrangement { .. } => {
+                    Ok(Value::Null)
+                }
+            };
+        };
+        player.cues.push_back(action);
+        self.send_cues();
+        Ok(Value::Null)
+    }
+
+    fn edit(&mut self, action: &Action) -> Result<Value, StudioError> {
+        let changes = self.core_mut()?.apply_edit(action, Instant::now())?;
         if !changes.is_empty() {
             self.song_changed(false);
-            self.announce_applied(changes);
+            self.announce_applied(Source::Human, None, changes);
         }
         Ok(Value::Null)
     }
 
+    /// The producer's undo or redo, its changes as the command's result.
     fn undo_redo(&mut self, undo: bool) -> Result<Value, StudioError> {
+        let changes = self.undo_redo_changes(undo, Source::Human)?;
+        Ok(serde_json::to_value(&changes).unwrap_or(Value::Null))
+    }
+
+    /// Undo or redo, logged as `source`.
+    fn undo_redo_changes(
+        &mut self,
+        undo: bool,
+        source: Source,
+    ) -> Result<Vec<Change>, StudioError> {
         let core = self.core_mut()?;
-        let result = if undo { core.undo() } else { core.redo() };
+        let result = if undo {
+            core.undo(source)
+        } else {
+            core.redo(source)
+        };
         // Undo and redo flush first, which may take in an unseen change.
         self.report_unreported();
         let changes = result?;
-        let value = serde_json::to_value(&changes).unwrap_or(Value::Null);
         if !changes.is_empty() {
             self.song_changed(false);
-            self.announce_applied(changes);
+            self.announce_applied(source, None, changes.clone());
         }
-        Ok(value)
+        Ok(changes)
     }
 
     fn resolve_offered(&mut self, reapply: bool) -> Result<Value, StudioError> {
@@ -695,7 +991,7 @@ impl Actor {
             self.emit_state();
         } else {
             self.song_changed(false);
-            self.announce_applied(changes);
+            self.announce_applied(Source::Human, None, changes);
         }
         Ok(Value::Null)
     }
@@ -823,12 +1119,59 @@ impl Actor {
         }
     }
 
-    /// Ends every knob override by swapping the newest song in again.
-    fn clear_overrides(&mut self) {
-        if let Some(player) = &mut self.player {
-            player.retry = Some(true);
+    /// Sends the waiting session cues once the newest swap plays (no swap
+    /// waits to be sent, and the engine plays the last one sent), each
+    /// resolved against that song: the controller stamps a cue with the
+    /// last swap's generation and the engine drops one stamped with
+    /// another, and a cue's indices must name the song the engine plays.
+    /// A cue that no longer resolves (an edit since took its scene or track
+    /// away, or emptied its slot) is dropped with an error event; a full
+    /// queue leaves the rest for the next tick. Only a sent cue changes
+    /// which tracks are off the arrangement.
+    fn send_cues(&mut self) {
+        let Some(player) = &mut self.player else {
+            return;
+        };
+        let mut errors = Vec::new();
+        while player.retry.is_none()
+            && player.controller.playing_generation() == player.sent_generation()
+        {
+            let Some(action) = player.cues.pop_front() else {
+                break;
+            };
+            let song = player.latest().clone();
+            let Some(cue) = session::resolve(&song, &action) else {
+                errors.push(session::dropped(&song, &action));
+                continue;
+            };
+            match player.controller.cue(cue) {
+                Ok(()) => self.off_arrangement.apply(&action, &song),
+                Err(LiveError::QueueFull) => {
+                    player.cues.push_front(action);
+                    break;
+                }
+                Err(e) => errors.push(format!("cannot send `{}`: {e}", action.name())),
+            }
         }
-        self.send_swap();
+        for message in errors {
+            self.emit(Event::Error { message });
+        }
+    }
+
+    /// Once a swap lands, forgets the tracks the song now playing no longer
+    /// has: the engine compares the ids of the songs that land, so a renamed
+    /// or new track follows the arrangement (a swap replaced before it
+    /// landed never counts).
+    fn follow_landed_swap(&mut self) {
+        let Some(player) = &mut self.player else {
+            return;
+        };
+        let generation = player.controller.playing_generation();
+        if generation != player.landed {
+            player.landed = generation;
+            let song = player.playing().clone();
+            self.off_arrangement.retain(&song);
+        }
     }
 
     /// Sends the held knob's value as an override, resolved against the
@@ -889,7 +1232,9 @@ impl Actor {
                     beat: (step % 16 / 4) as u32,
                     playing: true,
                 });
+                self.follow_landed_swap();
                 self.send_swap();
+                self.send_cues();
                 self.send_loop();
                 self.refresh_drag();
             }
@@ -923,12 +1268,18 @@ impl Actor {
         self.song.as_ref().map_or(0, |s| s.core.song().total_bars())
     }
 
-    /// The bar a knob release is judged at: the playing bar, else the
-    /// cursor.
-    fn current_bar(&self) -> u32 {
-        match &self.player {
-            Some(player) => player.bar(self.total_bars()),
-            None => self.cursor_bar,
+    /// Where a knob release is judged, in 0-based bars to the step: the
+    /// playhead, else the cursor (bar 0 once the song has finished).
+    fn current_position(&mut self) -> f64 {
+        let total = self.total_bars();
+        match &mut self.player {
+            Some(player) if !player.controller.finished() => {
+                let position = player.controller.position();
+                let step = player.playing().clock.step_at(position);
+                (step as f64 / 16.0).min(f64::from(total))
+            }
+            Some(_) => 0.0,
+            None => f64::from(self.cursor_bar),
         }
     }
 
@@ -959,11 +1310,14 @@ impl Actor {
         }
     }
 
-    fn announce_applied(&mut self, changes: Vec<Change>) {
+    /// Tells every client what `source` changed (in `run`), then the new
+    /// state.
+    fn announce_applied(&mut self, source: Source, run: Option<RunTag>, changes: Vec<Change>) {
         if !changes.is_empty() {
             self.emit(Event::Applied {
-                source: Source::Human,
+                source,
                 changes,
+                run,
             });
         }
         self.emit_state();

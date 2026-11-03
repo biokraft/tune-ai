@@ -5,7 +5,8 @@
 //! edit of the burst. Each write is one undo step holding the whole text
 //! before and after, so undo restores the file byte for byte, comments
 //! included. Every write, undo and redo appends `human` entries to the edit
-//! log, one per changed path.
+//! log, one per changed path, each naming the action that made it (`undo`
+//! and `redo` for those), then the write's action record.
 //!
 //! The file also changes from outside: Claude through `tune set` or by
 //! editing it, an editor, git. [`StudioCore::on_disk_text`] takes each new
@@ -28,23 +29,29 @@
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::slice;
 use std::time::{Duration, Instant};
 
+use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::Value;
-use tune_dsp::DrumPattern;
-use tune_dsp::acid303::{AcidPattern, AcidStep};
-use tune_song::{Clip, FORMAT_VERSION, Song};
+use tune_song::{FORMAT_VERSION, Song, lane_value, round_split_value};
 
-use crate::command::Command;
+use crate::action::{
+    Action, ActionKind, ActionsOutcome, ApplyCtx, Origin, Via, apply_action, apply_all,
+};
 use crate::diff::{Change, diff_files, diff_songs, is_whole_replace, version_change};
-use crate::doc::{EditError, SongDoc};
+use crate::doc::{SongDoc, lane_param_spec};
 use crate::error::{ErrorView, StudioError};
-use crate::log::{EditLog, Source, text_hash};
-use crate::path::{SongPath, TrackField};
+use crate::log::{ActionRecord, EditEntry, EditLog, Source, entries_for, text_hash};
+use crate::path::SongPath;
 use crate::set::write_atomic;
+use crate::target::{TargetChange, target_changes};
 use crate::view::SongView;
 
+/// A knob's shift of a lane stretch is rounded to 1 / this (four decimal
+/// places of the normalized value), so the file keeps short numbers.
+const LANE_SHIFT_SCALE: f64 = 1e4;
 /// Quiet time after the last edit of a burst before it is written.
 pub const WRITE_DEBOUNCE: Duration = Duration::from_millis(150);
 /// Most undo steps kept; the oldest goes first.
@@ -52,8 +59,6 @@ pub const UNDO_DEPTH: usize = 500;
 /// How many of the studio's own recent writes are remembered, so the file
 /// watcher can tell them from external edits.
 pub const OWN_WRITE_RING: usize = 8;
-/// Committed knob and mix values keep this many significant digits.
-const SIGNIFICANT_DIGITS: usize = 4;
 
 /// One undo step: the whole file before and after one write burst (or one
 /// external change).
@@ -66,16 +71,16 @@ pub struct UndoEntry {
 }
 
 /// An edit applied in memory but not yet written, with the changes it made
-/// at the time. The command is kept so it can be applied again onto a
+/// at the time. The action is kept so it can be applied again onto a
 /// different document (when an external change arrives first).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PendingEdit {
-    pub command: Command,
+    pub action: Action,
     pub changes: Vec<Change>,
 }
 
 /// What a change on disk did to the open song.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
 pub struct ExternalChange {
     /// `claude` when the edit log holds a `claude` entry with the file's
     /// hash, otherwise `external`.
@@ -182,8 +187,9 @@ impl StudioCore {
 
     /// Writes the document, migrated from format `from` in memory, over the
     /// older text as one of the studio's own writes, logs it as one
-    /// `external` `song.version` change and makes it one undo step. When the
-    /// write fails, nothing is logged or pushed and the reason is kept.
+    /// `external` `song.version` change (a `migrate` record) and makes it
+    /// one undo step. When the write fails, nothing is logged or pushed and
+    /// the reason is kept.
     fn write_migration(&mut self, from: u32) {
         let text = self.doc.text();
         let hash = match self.write(&text) {
@@ -196,7 +202,12 @@ impl StudioCore {
             }
         };
         let changes: Vec<Change> = version_change(from, FORMAT_VERSION).into_iter().collect();
-        if let Err(e) = self.log.append_changes(Source::External, &changes, &hash) {
+        let ts = Timestamp::now();
+        let entries = entries_for(ts, Source::External, &changes, &hash, None, None);
+        // The format changes, not the song.
+        let targets = target_changes(&self.disk_song, self.doc.song());
+        let record = ActionRecord::new(ts, Source::External, ["migrate"], None, targets, &hash);
+        if let Err(e) = self.log.append_logged(&entries, &record) {
             // The file is migrated either way; say that the log missed it.
             self.migration_error = Some(format!(
                 "the song was upgraded and saved, but the edit log could not be written: {e}"
@@ -230,25 +241,29 @@ impl StudioCore {
         self.migration_error.as_deref()
     }
 
-    /// Applies an edit command in memory and returns what it changed. The
+    /// Applies an edit action in memory and returns what it changed. The
     /// file is written later, by [`flush`](Self::flush). An edit that
-    /// changes nothing is not recorded. Commands that are not edits
-    /// (transport, song choice, undo, a live knob drag) give
-    /// [`StudioError::NotAnEdit`]; while the file on disk does not parse,
-    /// every edit gives [`StudioError::FileInvalid`].
-    pub fn apply_edit(&mut self, cmd: &Command, now: Instant) -> Result<Vec<Change>, StudioError> {
+    /// changes nothing is not recorded. Actions that are not edits
+    /// (transport, undo, a live knob drag) give [`StudioError::NotAnEdit`];
+    /// while the file on disk does not parse, every edit gives
+    /// [`StudioError::FileInvalid`].
+    pub fn apply_edit(
+        &mut self,
+        action: &Action,
+        now: Instant,
+    ) -> Result<Vec<Change>, StudioError> {
         if !self.file_errors.is_empty() {
             return Err(StudioError::FileInvalid);
         }
         let mut doc = self.doc.clone();
-        apply_command(&mut doc, cmd)?;
+        self.apply(&mut doc, action)?;
         if doc.text() == self.doc.text() {
             return Ok(Vec::new());
         }
         let changes = diff_songs(self.doc.song(), doc.song());
         self.doc = doc;
         self.pending.push(PendingEdit {
-            command: cmd.clone(),
+            action: action.clone(),
             changes: changes.clone(),
         });
         self.last_edit = Some(now);
@@ -300,13 +315,20 @@ impl StudioCore {
             return Ok(Vec::new());
         }
         let hash = self.write(&text)?;
-        self.clear_pending();
         let changes = diff_files(
             self.disk_version,
             &self.disk_song,
             FORMAT_VERSION,
             self.doc.song(),
         );
+        // Each change is logged under the pending action that made it last.
+        let names: Vec<Option<&'static str>> = changes
+            .iter()
+            .map(|c| self.pending_action_name(&c.path))
+            .collect();
+        let actions: Vec<&'static str> = self.pending.iter().map(|e| e.action.name()).collect();
+        let targets = target_changes(&self.disk_song, self.doc.song());
+        self.clear_pending();
         let before = std::mem::replace(&mut self.disk_text, text.clone());
         self.disk_version = FORMAT_VERSION;
         self.disk_song = self.doc.song().clone();
@@ -317,8 +339,24 @@ impl StudioCore {
             changes: changes.clone(),
         });
         self.redo.clear();
-        self.log_human(&changes, &hash)?;
+        self.log_changes(
+            Source::Human,
+            &changes,
+            &hash,
+            |i| names[i],
+            &actions,
+            targets,
+        )?;
         Ok(changes)
+    }
+
+    /// The name of the pending action that last changed `path`, if any.
+    fn pending_action_name(&self, path: &SongPath) -> Option<&'static str> {
+        self.pending
+            .iter()
+            .rev()
+            .find(|e| e.changes.iter().any(|c| c.path == *path))
+            .map(|e| e.action.name())
     }
 
     /// Takes a new text of the song file (from the watcher, or read by
@@ -365,7 +403,8 @@ impl StudioCore {
         if source == Source::External {
             // Best effort: the change is adopted even if the log is not
             // writable, as it is already on disk.
-            let _ = self.log_changes(Source::External, &changes, &hash);
+            let targets = target_changes(&self.disk_song, doc.song());
+            let _ = self.log_changes(Source::External, &changes, &hash, |_| None, &[], targets);
         }
         let replaced = is_whole_replace(&self.disk_text, &text);
         let before = std::mem::replace(&mut self.disk_text, text.clone());
@@ -411,12 +450,12 @@ impl StudioCore {
                 .any(|c| touched.iter().any(|p| paths_overlap(p, &c.path)));
             if !conflicts {
                 let mut trial = next.clone();
-                if apply_command(&mut trial, &edit.command).is_ok() {
+                if self.apply(&mut trial, &edit.action).is_ok() {
                     if trial.text() != next.text() {
                         let changes = diff_songs(next.song(), trial.song());
                         ext.merged.extend(changes.iter().cloned());
                         self.pending.push(PendingEdit {
-                            command: edit.command,
+                            action: edit.action,
                             changes,
                         });
                         next = trial;
@@ -489,14 +528,13 @@ impl StudioCore {
         let mut applied = false;
         for edit in offered {
             let mut trial = self.doc.clone();
-            if apply_command(&mut trial, &edit.command).is_err() || trial.text() == self.doc.text()
-            {
+            if self.apply(&mut trial, &edit.action).is_err() || trial.text() == self.doc.text() {
                 continue;
             }
             let changes = diff_songs(self.doc.song(), trial.song());
             self.doc = trial;
             self.pending.push(PendingEdit {
-                command: edit.command,
+                action: edit.action,
                 changes,
             });
             applied = true;
@@ -521,9 +559,9 @@ impl StudioCore {
     }
 
     /// Flushes pending edits, then restores the text before the last undo
-    /// step and logs the reversed changes as `human`. Nothing to undo gives
-    /// no changes.
-    pub fn undo(&mut self) -> Result<Vec<Change>, StudioError> {
+    /// step and logs the reversed changes as `source`, under the action
+    /// `undo`. Nothing to undo gives no changes.
+    pub fn undo(&mut self, source: Source) -> Result<Vec<Change>, StudioError> {
         self.flush()?;
         if !self.file_errors.is_empty() {
             return Err(StudioError::FileInvalid);
@@ -532,9 +570,10 @@ impl StudioCore {
             return Ok(Vec::new());
         };
         match self.restore(&entry.before) {
-            Ok((changes, hash)) => {
+            Ok((changes, targets, hash)) => {
                 self.redo.push(entry);
-                self.log_human(&changes, &hash)?;
+                let undo = |_| Some("undo");
+                self.log_changes(source, &changes, &hash, undo, &["undo"], targets)?;
                 Ok(changes)
             }
             Err(e) => {
@@ -544,8 +583,9 @@ impl StudioCore {
         }
     }
 
-    /// Re-applies the last undone step (see [`undo`](Self::undo)).
-    pub fn redo(&mut self) -> Result<Vec<Change>, StudioError> {
+    /// Re-applies the last undone step (see [`undo`](Self::undo)), logged
+    /// under the action `redo`.
+    pub fn redo(&mut self, source: Source) -> Result<Vec<Change>, StudioError> {
         self.flush()?;
         if !self.file_errors.is_empty() {
             return Err(StudioError::FileInvalid);
@@ -554,9 +594,10 @@ impl StudioCore {
             return Ok(Vec::new());
         };
         match self.restore(&entry.after) {
-            Ok((changes, hash)) => {
+            Ok((changes, targets, hash)) => {
                 self.push_undo(entry);
-                self.log_human(&changes, &hash)?;
+                let redo = |_| Some("redo");
+                self.log_changes(source, &changes, &hash, redo, &["redo"], targets)?;
                 Ok(changes)
             }
             Err(e) => {
@@ -564,6 +605,84 @@ impl StudioCore {
                 Err(e)
             }
         }
+    }
+
+    /// Runs edit actions at once, as `origin`: writes the pending edits
+    /// first (their own `human` step, through [`flush`](Self::flush), so an
+    /// unseen change on disk is merged first), then applies every action to
+    /// a copy (all or nothing), writes the result, pushes one undo step with
+    /// `origin.source`, clears redo and logs one entry per change with its
+    /// action's name and the run. A `set_param` here is a plain write: no
+    /// automation check. A file in an older format (adopted from disk and
+    /// not written since) is written in the newest, with a `song.version`
+    /// change first, and the write's record lists the actions, the run and
+    /// the targets they changed. Changing nothing writes nothing. A live or
+    /// history action gives [`StudioError::EditsOnly`]; while the file does
+    /// not parse, [`StudioError::FileInvalid`].
+    pub fn apply_now(
+        &mut self,
+        actions: &[Action],
+        origin: &Origin,
+    ) -> Result<ActionsOutcome, StudioError> {
+        if !self.file_errors.is_empty() {
+            return Err(StudioError::FileInvalid);
+        }
+        if let Some(live) = actions.iter().find(|a| a.kind() != ActionKind::Edit) {
+            return Err(StudioError::EditsOnly {
+                action: live.name().to_owned(),
+            });
+        }
+        self.flush()?;
+        if !self.file_errors.is_empty() {
+            return Err(StudioError::FileInvalid);
+        }
+        let mut doc = self.doc.clone();
+        let ctx = ApplyCtx {
+            log: Some(&self.log),
+        };
+        let applied = apply_all(&mut doc, actions, &ctx, self.disk_version, |e, _| e)?;
+        let text = doc.text();
+        if text == self.doc.text() {
+            return Ok(ActionsOutcome {
+                via: Via::Studio,
+                changes: Vec::new(),
+                results: applied.results,
+                file_hash: None,
+                migrated_from: None,
+            });
+        }
+        let hash = self.write(&text)?;
+        let targets = target_changes(self.doc.song(), doc.song());
+        let migrated_from = (self.disk_version != FORMAT_VERSION).then_some(self.disk_version);
+        let before = std::mem::replace(&mut self.disk_text, text.clone());
+        self.disk_version = FORMAT_VERSION;
+        self.disk_song = doc.song().clone();
+        self.doc = doc;
+        self.push_undo(UndoEntry {
+            before,
+            after: text,
+            source: origin.source,
+            changes: applied.changes.clone(),
+        });
+        self.redo.clear();
+        let ts = Timestamp::now();
+        let run = origin.run.as_ref();
+        let entries = applied.entries(ts, origin.source, &hash, run);
+        let names = actions.iter().map(Action::name);
+        let record = ActionRecord::new(ts, origin.source, names, run, targets, &hash);
+        self.append_log(&entries, &record)?;
+        Ok(ActionsOutcome {
+            via: Via::Studio,
+            changes: applied.changes,
+            results: applied.results,
+            file_hash: Some(hash),
+            migrated_from,
+        })
+    }
+
+    /// The hash of the text on disk, as the studio last wrote or read it.
+    pub(crate) fn disk_hash(&self) -> String {
+        text_hash(&self.disk_text)
     }
 
     /// Whether `bar` (0-based) lies in a stretch of the lane for this
@@ -576,9 +695,42 @@ impl StudioCore {
             .any(|l| l.track == track && l.param == param && l.span().contains(&bar))
     }
 
+    /// The edit a knob released at `value` (plain) makes on an automated
+    /// param: the stretch of the lane under `at` (0-based bars, fractional)
+    /// moves up or down by the step from the lane's value there to `value`,
+    /// each point held to 0..=1, so the curve keeps its shape. `None` when no
+    /// stretch of the lane covers `at`.
+    pub fn lane_shift(&self, track: &str, param: &str, value: f64, at: f64) -> Option<Action> {
+        let song = self.doc.song();
+        let bar = at.max(0.0).floor() as u32;
+        let lane = song
+            .automation
+            .iter()
+            .find(|l| l.track == track && l.param == param && l.span().contains(&bar))?;
+        let spec = lane_param_spec(song, track, param)?;
+        let now = lane_value(&lane.points, at - f64::from(lane.start_bar));
+        let step = (spec.to_normalized(value) - now) * LANE_SHIFT_SCALE;
+        let step = step.round() / LANE_SHIFT_SCALE;
+        let points = lane
+            .points
+            .iter()
+            .map(|&(bar, v)| [bar, round_split_value((v + step).clamp(0.0, 1.0))])
+            .collect();
+        Some(Action::SetLanePoints {
+            param: format!("{track}.{param}"),
+            at: lane.start_bar + 1,
+            points,
+        })
+    }
+
     /// The current song, pending edits included.
     pub fn song(&self) -> &Song {
         self.doc.song()
+    }
+
+    /// The song text as it stands in memory.
+    pub fn text(&self) -> String {
+        self.doc.text()
     }
 
     pub fn path(&self) -> &Path {
@@ -620,6 +772,20 @@ impl StudioCore {
         self.is_own_write(hash) && !fs::read_to_string(&self.path).is_ok_and(|now| now == text)
     }
 
+    /// Applies `action` to `doc`, a copy of the document (see
+    /// [`apply_action`]).
+    fn apply(&self, doc: &mut SongDoc, action: &Action) -> Result<(), StudioError> {
+        self.apply_one(doc, action).map(drop)
+    }
+
+    /// [`apply`](Self::apply), keeping the action's result.
+    fn apply_one(&self, doc: &mut SongDoc, action: &Action) -> Result<Value, StudioError> {
+        let ctx = ApplyCtx {
+            log: Some(&self.log),
+        };
+        apply_action(doc, action, &ctx)
+    }
+
     fn clear_pending(&mut self) {
         self.pending.clear();
         self.last_edit = None;
@@ -642,19 +808,24 @@ impl StudioCore {
 
     /// Writes a snapshot and adopts it as both the document and the disk
     /// text, dropping pending edits (there are none: callers flush first).
-    /// Returns the changes from the previous disk text and the new hash.
-    fn restore(&mut self, text: &str) -> Result<(Vec<Change>, String), StudioError> {
+    /// Returns the changes and the target changes from the previous disk
+    /// text, and the new hash.
+    fn restore(
+        &mut self,
+        text: &str,
+    ) -> Result<(Vec<Change>, Vec<TargetChange>, String), StudioError> {
         let doc = SongDoc::parse(text)
             .map_err(|errs| StudioError::Load(errs.iter().map(ErrorView::from).collect()))?;
         let hash = self.write(text)?;
         let version = text_version(&doc);
         let changes = diff_files(self.disk_version, &self.disk_song, version, doc.song());
+        let targets = target_changes(&self.disk_song, doc.song());
         self.disk_song = doc.song().clone();
         self.disk_text = text.to_owned();
         self.disk_version = version;
         self.doc = doc;
         self.clear_pending();
-        Ok((changes, hash))
+        Ok((changes, targets, hash))
     }
 
     fn push_undo(&mut self, entry: UndoEntry) {
@@ -664,17 +835,30 @@ impl StudioCore {
         }
     }
 
-    fn log_human(&self, changes: &[Change], hash: &str) -> Result<(), StudioError> {
-        self.log_changes(Source::Human, changes, hash)
-    }
-
+    /// Logs one entry per change, all from `source`, each under the action
+    /// name `action` gives for its index, then the write's record of
+    /// `actions` and `targets`, in one append. These writes are in no run.
     fn log_changes(
         &self,
         source: Source,
         changes: &[Change],
         hash: &str,
+        action: impl Fn(usize) -> Option<&'static str>,
+        actions: &[&str],
+        targets: Vec<TargetChange>,
     ) -> Result<(), StudioError> {
-        self.log.append_changes(source, changes, hash).map_err(|e| {
+        let ts = Timestamp::now();
+        let entries: Vec<_> = changes
+            .iter()
+            .enumerate()
+            .flat_map(|(i, c)| entries_for(ts, source, slice::from_ref(c), hash, action(i), None))
+            .collect();
+        let record = ActionRecord::new(ts, source, actions.iter().copied(), None, targets, hash);
+        self.append_log(&entries, &record)
+    }
+
+    fn append_log(&self, entries: &[EditEntry], record: &ActionRecord) -> Result<(), StudioError> {
+        self.log.append_logged(entries, record).map_err(|e| {
             StudioError::Io(format!(
                 "the song was written, but the edit log failed: {e}"
             ))
@@ -685,132 +869,6 @@ impl StudioCore {
 /// The format version of the text `doc` was parsed from.
 fn text_version(doc: &SongDoc) -> u32 {
     doc.migrated_from().unwrap_or(FORMAT_VERSION)
-}
-
-/// Applies one edit command to `doc`, all or nothing. Works on any document,
-/// so a pending command can be applied again onto a newer file.
-fn apply_command(doc: &mut SongDoc, cmd: &Command) -> Result<(), StudioError> {
-    match cmd {
-        Command::SetParam {
-            track,
-            param,
-            value,
-            commit: true,
-        } => {
-            let path = SongPath::param(track, param);
-            doc.set(&path, &Value::from(round_significant(*value)))?;
-        }
-        Command::SetFxMode {
-            track,
-            device,
-            mode,
-        } => {
-            let path = SongPath::TrackParam {
-                track: track.clone(),
-                param: format!("{device}.mode"),
-            };
-            doc.set(&path, &Value::from(mode.as_str()))?;
-        }
-        Command::SetAcidStep {
-            pattern,
-            index,
-            note,
-            accent,
-            slide,
-        } => {
-            let path = SongPath::Clip {
-                clip: pattern.clone(),
-            };
-            let mut steps = match pattern_steps(doc, &path, pattern)? {
-                Clip::Acid(p) => p.steps().to_vec(),
-                Clip::Drum(_) | Clip::Notes(_) => {
-                    return Err(bad(&path, "not an acid pattern").into());
-                }
-            };
-            let step = step_mut(&mut steps, *index)?;
-            *step = AcidStep {
-                note: *note,
-                accent: note.is_some() && *accent,
-                slide: note.is_some() && *slide,
-            };
-            let p = AcidPattern::new(steps).map_err(|e| bad(&path, &e.to_string()))?;
-            doc.set(&path, &Value::from(p.to_string()))?;
-        }
-        Command::SetDrumStep {
-            pattern,
-            index,
-            hit,
-        } => {
-            let path = SongPath::Clip {
-                clip: pattern.clone(),
-            };
-            let mut hits = match pattern_steps(doc, &path, pattern)? {
-                Clip::Drum(p) => p.hits().to_vec(),
-                Clip::Acid(_) | Clip::Notes(_) => {
-                    return Err(bad(&path, "not a drum pattern").into());
-                }
-            };
-            *step_mut(&mut hits, *index)? = (*hit).into();
-            let p = DrumPattern::new(hits).map_err(|e| bad(&path, &e.to_string()))?;
-            doc.set(&path, &Value::from(p.to_string()))?;
-        }
-        Command::MoveSection { from, to } => doc.move_section(*from, *to)?,
-        Command::ResizeSection { index, bars } => {
-            doc.set(&SongPath::SectionBars(*index), &Value::from(*bars))?;
-        }
-        Command::DuplicateSection { index } => doc.duplicate_section(*index)?,
-        Command::DeleteSection { index } => doc.delete_section(*index)?,
-        Command::SetSectionPlay {
-            section,
-            track,
-            pattern,
-        } => {
-            let path = SongPath::SectionPlay {
-                section: *section,
-                track: track.clone(),
-            };
-            let value = pattern.as_deref().map_or(Value::Null, Value::from);
-            doc.set(&path, &value)?;
-        }
-        Command::SetTrackMix {
-            track,
-            gain_db,
-            pan,
-            mute,
-            solo,
-        } => {
-            // One copy for all fields, so a refused field leaves none set.
-            let mut next = doc.clone();
-            let field = |field| SongPath::TrackField {
-                track: track.clone(),
-                field,
-            };
-            let numbers = [(TrackField::GainDb, gain_db), (TrackField::Pan, pan)];
-            for (f, v) in numbers {
-                if let Some(v) = v {
-                    next.set(&field(f), &Value::from(round_significant(*v)))?;
-                }
-            }
-            for (f, v) in [(TrackField::Mute, mute), (TrackField::Solo, solo)] {
-                if let Some(v) = v {
-                    next.set(&field(f), &Value::Bool(*v))?;
-                }
-            }
-            *doc = next;
-        }
-        Command::SetParam { commit: false, .. }
-        | Command::ListSongs
-        | Command::GetState
-        | Command::OpenSong { .. }
-        | Command::Play { .. }
-        | Command::Stop
-        | Command::SeekBar { .. }
-        | Command::SetLoop { .. }
-        | Command::Undo
-        | Command::Redo
-        | Command::ResolveOffered { .. } => return Err(StudioError::NotAnEdit),
-    }
-    Ok(())
 }
 
 /// Whether an edit of one path can change the value at the other: the
@@ -835,64 +893,8 @@ fn holds(whole: &SongPath, part: &SongPath) -> bool {
             | SongPath::TrackParam { track: t, .. }
             | SongPath::SectionPlay { track: t, .. },
         ) => t == track,
+        (SongPath::Scenes, SongPath::Scene { .. }) => true,
+        (SongPath::Scene { scene }, SongPath::SceneSlot { scene: s, .. }) => s == scene,
         _ => false,
-    }
-}
-
-fn pattern_steps<'d>(
-    doc: &'d SongDoc,
-    path: &SongPath,
-    pattern: &str,
-) -> Result<&'d Clip, EditError> {
-    doc.song()
-        .clips
-        .get(pattern)
-        .ok_or_else(|| EditError::NoSuchTarget(path.to_string()))
-}
-
-fn step_mut<T>(steps: &mut [T], index: usize) -> Result<&mut T, EditError> {
-    let len = steps.len();
-    steps
-        .get_mut(index)
-        .ok_or(EditError::OutOfBounds { index, len })
-}
-
-fn bad(path: &SongPath, message: &str) -> EditError {
-    EditError::BadValue {
-        path: path.to_string(),
-        message: message.to_owned(),
-    }
-}
-
-/// `v` rounded to [`SIGNIFICANT_DIGITS`] significant digits, as the nearest
-/// double to the short decimal (`823.456789` gives `823.5`).
-fn round_significant(v: f64) -> f64 {
-    if !v.is_finite() || v == 0.0 {
-        return v;
-    }
-    format!("{v:.prec$e}", prec = SIGNIFICANT_DIGITS - 1)
-        .parse()
-        .unwrap_or(v)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rounds_to_four_significant_digits() {
-        for (v, want) in [
-            (823.456789, 823.5),
-            (2394.0, 2394.0),
-            (12_346.0, 12_350.0),
-            (-6.123456, -6.123),
-            (0.333333, 0.3333),
-            (0.000_123_456, 0.000_123_5),
-            (500.0, 500.0),
-            (0.0, 0.0),
-        ] {
-            assert_eq!(round_significant(v), want, "{v}");
-        }
-        assert!(round_significant(f64::NAN).is_nan());
     }
 }

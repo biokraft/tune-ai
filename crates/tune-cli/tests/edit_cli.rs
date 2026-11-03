@@ -23,8 +23,16 @@ fn fixture_of(name: &str) -> (TempDir, PathBuf) {
     (dir, song)
 }
 
+/// One studio directory per test process, so no test reads the real `~/.tune`.
+fn studio_dir() -> &'static Path {
+    static DIR: std::sync::OnceLock<TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
+}
+
 fn tune() -> Command {
-    Command::cargo_bin("tune").unwrap()
+    let mut c = Command::cargo_bin("tune").unwrap();
+    c.env("TUNE_STUDIO_DIR", studio_dir());
+    c
 }
 
 fn json_out(cmd: &mut Command) -> Value {
@@ -55,10 +63,18 @@ fn set_writes_and_logs_claude() {
         assert!(text.contains(c), "lost comment {c}");
     }
     assert_eq!(v["file_hash"], text_hash(&text));
-    let log = fs::read_to_string(dir.path().join("edits.jsonl")).unwrap();
-    let last: Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+    let last = last_entry(dir.path());
     assert_eq!(last["source"], "claude");
     assert_eq!(last["file_hash"], text_hash(&text));
+}
+
+/// The last line of the edit log that is an entry (not an action record).
+fn last_entry(dir: &Path) -> Value {
+    let log = fs::read_to_string(dir.join("edits.jsonl")).unwrap();
+    let mut lines = log
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap());
+    lines.rfind(|v| v.get("record").is_none()).unwrap()
 }
 
 #[test]
@@ -147,8 +163,7 @@ fn set_same_clip_on_a_phase_shifted_section_is_a_change() {
         text.contains("{ at = 3, clip = \"k3\", bars = 2 }"),
         "{text}"
     );
-    let log = fs::read_to_string(dir.path().join("edits.jsonl")).unwrap();
-    let last: Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+    let last = last_entry(dir.path());
     assert_eq!(
         (&last["source"], &last["path"]),
         (&"claude".into(), &"sections[1].play.k".into())
@@ -439,5 +454,48 @@ bars = 1
             .iter()
             .any(|e| e["path"] == "clips.lead.notes" && e["source"] == "claude"),
         "{v}"
+    );
+}
+
+#[test]
+fn set_writes_a_slot() {
+    let dir = tempfile::tempdir().unwrap();
+    let song = dir.path().join("song.toml");
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/session.toml"),
+        &song,
+    )
+    .unwrap();
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "scenes.groove.slots.hat=h",
+        "--json",
+    ]));
+    assert_eq!(v["ok"], true);
+    assert_eq!(
+        v["changes"][0],
+        serde_json::json!({ "path": "scenes.groove.slots.hat", "old": null, "new": "h" })
+    );
+    let text = fs::read_to_string(&song).unwrap();
+    assert!(
+        text.contains("slots = { kick = \"k4\", acid = \"a1\", hat = \"h\" }"),
+        "{text}"
+    );
+
+    let v = json_out(tune().args([
+        "set",
+        song.to_str().unwrap(),
+        "scenes.groove.slots.hat=",
+        "--json",
+    ]));
+    assert_eq!(
+        v["changes"][0],
+        serde_json::json!({ "path": "scenes.groove.slots.hat", "old": "h", "new": null })
+    );
+    let text = fs::read_to_string(&song).unwrap();
+    assert!(
+        text.contains("slots = { kick = \"k4\", acid = \"a1\" }"),
+        "{text}"
     );
 }

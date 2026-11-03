@@ -8,8 +8,9 @@ import {
 } from "@tune/ui";
 import { memo, useMemo } from "react";
 import type { Command, ParamView, SongView, TrackView } from "../../client/protocol";
-import { whyNoDuck } from "../../lib/song";
+import { laneValueAt, whyNoDuck } from "../../lib/song";
 import type { HighlightKind } from "../../store/studioStore";
+import { useKnobStep } from "../../store/useStudio";
 import { useHelp } from "../help";
 import { useParamDrag } from "../useParamDrag";
 
@@ -35,8 +36,9 @@ export function splitMaster(params: ParamView[]): { gain: ParamView[]; limiter: 
   };
 }
 
-/** One mixer channel; re-renders only when its track changes. */
+/** One mixer channel; re-renders when its song changes and, playing, per step. */
 const MixerStrip = memo(function MixerStrip({
+  song,
   track,
   noDuck,
   fire,
@@ -46,6 +48,7 @@ const MixerStrip = memo(function MixerStrip({
   onHelp,
   compact,
 }: {
+  song: SongView;
   track: TrackView;
   noDuck: string | null;
   fire(cmd: Command): void;
@@ -56,7 +59,11 @@ const MixerStrip = memo(function MixerStrip({
   compact?: boolean;
 }) {
   const drag = useParamDrag(track.id, send, track.strip);
-  const strip = track.strip.map((p) => ({ ...p, value: drag.valueOf(p) }));
+  const step = useKnobStep();
+  const strip = track.strip.map((p) => ({
+    ...p,
+    value: drag.valueOf(p, laneValueAt(song, track.id, p.id, step)),
+  }));
   return (
     <TrackStrip
       track={track}
@@ -112,7 +119,9 @@ export const MixerTab = memo(function MixerTab({
     [mix.delay, mix.reverb, mix.master_params],
   );
   const drag = useParamDrag("mix", send, all);
-  const live = (params: ParamView[]) => params.map((p) => ({ ...p, value: drag.valueOf(p) }));
+  const step = useKnobStep();
+  const live = (params: ParamView[]) =>
+    params.map((p) => ({ ...p, value: drag.valueOf(p, laneValueAt(song, "mix", p.id, step)) }));
   const onParam = (id: string, v: number, commit: boolean) =>
     commit ? drag.commit(id, v) : drag.change(id, v);
   const automated = (id: string) =>
@@ -139,6 +148,7 @@ export const MixerTab = memo(function MixerTab({
         <MixerStrip
           key={t.id}
           compact
+          song={song}
           track={t}
           noDuck={whyNoDuck(mix.duck_source, t.id)}
           fire={fire}

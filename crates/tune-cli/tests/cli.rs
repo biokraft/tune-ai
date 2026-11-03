@@ -264,3 +264,51 @@ fn dist_values_without_dist_note_bypass() {
     let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
     assert!(!stderr.contains("bypassed"), "{stderr}");
 }
+
+#[test]
+fn actions_lists_the_catalog() {
+    let studios = tempfile::tempdir().unwrap();
+    let out = tune()
+        .env("TUNE_STUDIO_DIR", studios.path())
+        .args(["actions", "--json"])
+        .assert()
+        .success();
+    let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(v["ok"], true);
+    let actions = v["actions"].as_array().unwrap();
+    let find = |name: &str| {
+        actions
+            .iter()
+            .find(|a| a["name"] == name)
+            .unwrap_or_else(|| panic!("no `{name}` in {actions:?}"))
+    };
+    let set_value = find("set_value");
+    assert_eq!(set_value["kind"], "edit");
+    assert!(!set_value["help"].as_str().unwrap().is_empty());
+    let args: Vec<(&str, &str, bool)> = set_value["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| {
+            (
+                a["name"].as_str().unwrap(),
+                a["type"].as_str().unwrap(),
+                a["required"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(args, [("path", "path", true), ("value", "json", true)]);
+    assert_eq!(find("play")["kind"], "live");
+    assert_eq!(find("undo")["kind"], "history");
+
+    // The text form: one line per action, then one per argument.
+    let out = tune()
+        .env("TUNE_STUDIO_DIR", studios.path())
+        .arg("actions")
+        .assert()
+        .success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(text.contains("\nset_value  edit  "), "{text}");
+    assert!(text.contains("\n    path: path  "), "{text}");
+    assert!(text.contains("\n    from_bar: int, optional  "), "{text}");
+}

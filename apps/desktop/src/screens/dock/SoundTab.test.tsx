@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { goldenState } from "../../client/fakeClient";
+import { goldenState, stateEvent } from "../../client/fakeClient";
 import type { Command, FxView, ParamView, SongView } from "../../client/protocol";
-import type { HighlightKind } from "../../store/studioStore";
+import type { HighlightKind, StudioStore, StudioView } from "../../store/studioStore";
+import { StudioStoreContext } from "../../store/useStudio";
 import { HelpLine, HelpProvider } from "../help";
 import { BIG, SMALL, SoundTab } from "./SoundTab";
 
@@ -18,6 +19,8 @@ function setup(
     automatedIn?: number | null;
     result?: unknown;
     song?: SongView;
+    /** The cursor's bar (the transport is stopped). */
+    cursorBar?: number;
   } = {},
 ) {
   const shown = opts.song ?? song;
@@ -29,19 +32,46 @@ function setup(
   });
   const fire = vi.fn((c: Command) => void fired.push(c));
   render(
-    <HelpProvider>
-      <SoundTab
-        song={shown}
-        track={shown.tracks.find((t) => t.id === trackId)!}
-        automatedIn={opts.automatedIn ?? 1}
-        highlights={opts.highlights ?? new Map()}
-        send={send}
-        fire={fire}
-      />
-      <HelpLine />
-    </HelpProvider>,
+    <StudioStoreContext.Provider value={storeAt(opts.cursorBar ?? 0)}>
+      <HelpProvider>
+        <SoundTab
+          song={shown}
+          track={shown.tracks.find((t) => t.id === trackId)!}
+          automatedIn={opts.automatedIn ?? 1}
+          highlights={opts.highlights ?? new Map()}
+          send={send}
+          fire={fire}
+        />
+        <HelpLine />
+      </HelpProvider>
+    </StudioStoreContext.Provider>,
   );
   return { sent, fired };
+}
+
+/** A store whose stopped transport has its cursor at `bar`. */
+function storeAt(bar: number): StudioStore {
+  const { event: _, ...state } = stateEvent((s) => (s.cursor_bar = bar));
+  const view: StudioView = {
+    state,
+    playhead: null,
+    highlights: new Map(),
+    notice: null,
+    runUndo: null,
+    noticeUndoable: false,
+    selectedSection: null,
+    connection: "open",
+    message: null,
+  };
+  return {
+    get: () => view,
+    subscribe: () => () => {},
+    send: () => Promise.resolve(null),
+    undoRun: () => Promise.resolve(null),
+    select: () => {},
+    dismissNotice: () => {},
+    dismissMessage: () => {},
+  };
 }
 
 /** The golden song with the acid's fx chain replaced by `fx`. */
@@ -83,7 +113,10 @@ describe("SoundTab", () => {
     const { fired } = setup();
     fireEvent.click(screen.getByRole("radio", { name: "Hard" }));
     expect(fired).toEqual([
-      { cmd: "set_fx_mode", args: { track: "acid", device: "dist", mode: "hard" } },
+      {
+        cmd: "set_device_setting",
+        args: { track: "acid", device: "dist", setting: "mode", value: "hard" },
+      },
     ]);
   });
 
@@ -182,14 +215,18 @@ describe("SoundTab", () => {
     expect(screen.getByText(/How fast the filter closes/)).toBeInTheDocument();
   });
 
-  it("says when a release on an automated knob was not written", async () => {
-    setup("acid", { result: { automated: true } });
-    fireEvent.keyDown(screen.getByRole("slider", { name: "Cutoff" }), { key: "ArrowUp" });
-    expect(
-      await screen.findByText(
-        "Cutoff follows its automation here — you heard your change, but it wasn't saved. Ask Claude to change the automation.",
-      ),
-    ).toBeInTheDocument();
+  it("shows an automated knob at its lane's value, not the static one", () => {
+    // Bar 3 is one bar into section b's cutoff stretch: the lane reads 0.45.
+    setup("acid", { cursorBar: 3 });
+    const cutoff = screen.getByRole("slider", { name: "Cutoff" });
+    expect(Number(cutoff.getAttribute("aria-valuenow"))).toBeCloseTo(
+      314 * Math.pow(2394 / 314, 0.45),
+      6,
+    );
+    expect(screen.getByRole("slider", { name: "Resonance" })).toHaveAttribute(
+      "aria-valuenow",
+      String(song.tracks[1]!.params.find((p) => p.id === "acid303.resonance")!.value),
+    );
   });
 
   it("marks knobs automated where a release would land", () => {

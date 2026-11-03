@@ -6,7 +6,7 @@
 use indexmap::{IndexMap, IndexSet};
 use tune_dsp::acid303::{AcidPattern, PatternError};
 use tune_dsp::{DrumPattern, DrumPatternError, ParamSpec, STRIP_DUCK_DEPTH, STRIP_PARAMS};
-use tune_modules::ClipKind;
+use tune_modules::{ClipKind, ModuleDescriptor};
 
 use super::tracks::{TrackShape, find_in, or_list, param_ids, spec_ids, unknown_param};
 use super::{BARS, Duck, MAX_SONG_BARS, check_id, unknown_track};
@@ -102,36 +102,19 @@ pub(super) fn v1(
     }
 }
 
-/// Reads a v2 arrangement: the clip pool, the sections, each track's
+/// Reads a v2 arrangement (`kinds` from [`clip_kinds`]): the clip pool, the sections, each track's
 /// placements and the top-level stretches.
 pub(super) fn v2(
     raw: &RawSong,
     shapes: &IndexMap<&str, TrackShape>,
+    kinds: &IndexMap<&str, Option<ClipKind>>,
     duck: &Duck<'_>,
     tracks: &mut IndexMap<String, Track>,
     errors: &mut Errors,
 ) -> Arrangement {
-    // Every declared clip, with its kind when that is valid.
-    let mut kinds: IndexMap<&str, Option<ClipKind>> = IndexMap::new();
     let mut clips = IndexMap::new();
     for (id, c) in &raw.clips {
-        check_id(id, "clip", errors);
-        let kind = c.kind.as_ref().and_then(|k| {
-            let kind = ClipKind::from_name(&k.value);
-            if kind.is_none() {
-                let expected: Vec<&str> = ClipKind::ALL.iter().map(|k| k.name()).collect();
-                errors.at(
-                    &k.span,
-                    format!(
-                        "unknown clip kind `{}` (expected {})",
-                        k.value,
-                        or_list(&expected)
-                    ),
-                );
-            }
-            kind
-        });
-        kinds.insert(id.value.as_str(), kind);
+        let kind = kinds[id.value.as_str()];
         let clip = match (kind, &c.steps) {
             (Some(ClipKind::Notes), _) => note_clip(id, c, errors),
             (Some(kind), Some(steps)) => clip_steps("clip", id, kind, steps, errors),
@@ -170,7 +153,7 @@ pub(super) fn v2(
         let Some(shape) = shapes.get(id.value.as_str()) else {
             continue;
         };
-        let play = placements(&id.value, &t.play, shape, &kinds, total, errors);
+        let play = placements(&id.value, &t.play, shape, kinds, total, errors);
         if let (Some(play), Some(track)) = (play, tracks.get_mut(&id.value)) {
             track.play = play;
         }
@@ -209,6 +192,58 @@ pub(super) fn v2(
         sections,
         automation,
     }
+}
+
+/// Every declared clip of a v2 file, with its kind when that is valid. Checks
+/// the clip ids and records an unknown kind.
+pub(super) fn clip_kinds<'a>(
+    raw: &'a RawSong,
+    errors: &mut Errors,
+) -> IndexMap<&'a str, Option<ClipKind>> {
+    let mut kinds = IndexMap::new();
+    for (id, c) in &raw.clips {
+        check_id(id, "clip", errors);
+        let kind = c.kind.as_ref().and_then(|k| {
+            let kind = ClipKind::from_name(&k.value);
+            if kind.is_none() {
+                let expected: Vec<&str> = ClipKind::ALL.iter().map(|k| k.name()).collect();
+                errors.at(
+                    &k.span,
+                    format!(
+                        "unknown clip kind `{}` (expected {})",
+                        k.value,
+                        or_list(&expected)
+                    ),
+                );
+            }
+            kind
+        });
+        kinds.insert(id.value.as_str(), kind);
+    }
+    kinds
+}
+
+/// Why `module` (the instrument of `track`) cannot play clip `clip` of `kind`.
+pub(super) fn cannot_play(
+    clip: &str,
+    kind: ClipKind,
+    track: &str,
+    module: &ModuleDescriptor,
+) -> String {
+    // Every instrument plays notes clips; the others are what tells
+    // instruments apart.
+    let plays: Vec<&str> = ClipKind::ALL
+        .iter()
+        .filter(|k| **k != ClipKind::Notes && module.plays(**k))
+        .map(|k| k.name())
+        .collect();
+    format!(
+        "clip `{clip}` is {} {} clip; track `{track}` ({}) plays {} clips",
+        article(kind.name()),
+        kind.name(),
+        module.name,
+        or_list(&plays)
+    )
 }
 
 fn no_sections(errors: &mut Errors) {
@@ -560,24 +595,7 @@ fn placements(
                     if let Some(module) = shape.module()
                         && !module.plays(*kind)
                     {
-                        // Every instrument plays notes clips; the others are
-                        // what tells instruments apart.
-                        let plays: Vec<&str> = ClipKind::ALL
-                            .iter()
-                            .filter(|k| **k != ClipKind::Notes && module.plays(**k))
-                            .map(|k| k.name())
-                            .collect();
-                        errors.at(
-                            &clip.span,
-                            format!(
-                                "clip `{}` is {} {} clip; track `{track}` ({}) plays {} clips",
-                                clip.value,
-                                article(kind.name()),
-                                kind.name(),
-                                module.name,
-                                or_list(&plays)
-                            ),
-                        );
+                        errors.at(&clip.span, cannot_play(&clip.value, *kind, track, module));
                     }
                 }
                 // A clip with an unknown kind has its own error.

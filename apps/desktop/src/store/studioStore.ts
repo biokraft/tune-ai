@@ -1,9 +1,19 @@
-import type { Command, ExternalChange, StudioEvent, StudioState } from "../client/protocol";
+import type {
+  Command,
+  ExternalChange,
+  RunTag,
+  RunUndo,
+  StudioEvent,
+  StudioState,
+} from "../client/protocol";
 import { LOST_CONNECTION, type StudioClient } from "../client/StudioClient";
 import { changedSteps } from "./changedSteps";
 
 /** How long a change from outside stays highlighted. */
 export const HIGHLIGHT_MS = 4000;
+
+/** The toast's change: from the song file (`run` null) or an agent's applied edit with its run. */
+export type Notice = ExternalChange & { run: RunTag | null };
 
 export type HighlightKind = "claude" | "external";
 
@@ -16,7 +26,9 @@ export type StudioView = {
    */
   highlights: Map<string, HighlightKind>;
   /** The last change on disk, until dismissed. */
-  notice: ExternalChange | null;
+  notice: Notice | null;
+  /** What undoing the notice's run did, until the notice goes. */
+  runUndo: RunUndo | null;
   /**
    * Whether one undo still reverts the notice's change: not when it merged pending edits, and no
    * longer once a local edit, undo, redo or re-apply (an `applied` event from a human) lands on
@@ -34,6 +46,8 @@ export type StudioStore = {
   subscribe(l: () => void): () => void;
   send(cmd: Command): Promise<unknown>;
   select(i: number | null): void;
+  /** Undo every change of an agent run; the answer shows in the toast. */
+  undoRun(run: string): Promise<unknown>;
   dismissNotice(): void;
   dismissMessage(): void;
 };
@@ -52,9 +66,10 @@ function highlightKeys(path: string, old: unknown, next: unknown): string[] {
 const FORMAT_VERSION = 2;
 
 /** The notice for a song file upgraded from format `from` on open, as one change on disk. */
-function migrationChange(from: number): ExternalChange {
+function migrationChange(from: number): Notice {
   return {
     source: "external",
+    run: null,
     changes: [{ path: "song.version", old: from, new: FORMAT_VERSION }],
     replaced: false,
     merged: [],
@@ -70,6 +85,7 @@ export function createStudioStore(client: StudioClient): StudioStore {
     playhead: null,
     highlights: new Map(),
     notice: null,
+    runUndo: null,
     noticeUndoable: false,
     selectedSection: null,
     connection: "open",
@@ -111,7 +127,7 @@ export function createStudioStore(client: StudioClient): StudioStore {
   /** The song path the last state named: a different one is a newly opened song. */
   let openPath: string | null = null;
   /** The notice that says the open song was migrated, while it stands. */
-  let migrationNotice: ExternalChange | null = null;
+  let migrationNotice: Notice | null = null;
 
   const adopt = (state: StudioState) => {
     const patch: Partial<StudioView> = {
@@ -124,6 +140,7 @@ export function createStudioStore(client: StudioClient): StudioStore {
       // Opening upgraded the file: say so once, with an Undo while one undo reverts it.
       migrationNotice = migrationChange(state.migrated_from);
       patch.notice = migrationNotice;
+      patch.runUndo = null;
       patch.noticeUndoable = true;
     } else if (
       state.migrated_from === null &&
@@ -160,6 +177,22 @@ export function createStudioStore(client: StudioClient): StudioStore {
             e.changes.flatMap((c) => highlightKeys(c.path, c.old, c.new)),
             e.source,
           );
+          if (e.source === "claude") {
+            // The same toast an agent's edit on disk raises, plus its run for "Undo this run".
+            set({
+              notice: {
+                source: "claude",
+                changes: e.changes,
+                run: e.run,
+                replaced: false,
+                merged: [],
+                offered: [],
+                errors: [],
+              },
+              runUndo: null,
+              noticeUndoable: true,
+            });
+          }
         } else if (view.noticeUndoable) {
           // The undo stack now has this edit on top, so Undo would revert it instead.
           set({ noticeUndoable: false });
@@ -177,7 +210,13 @@ export function createStudioStore(client: StudioClient): StudioStore {
         const worth = change.changes.length > 0 || change.offered.length > 0 || change.replaced;
         // Merged pending edits were written on top as their own undo step, so one undo would
         // revert those, not this change.
-        if (worth) set({ notice: change, noticeUndoable: change.merged.length === 0 });
+        if (worth) {
+          set({
+            notice: { ...change, run: null },
+            runUndo: null,
+            noticeUndoable: change.merged.length === 0,
+          });
+        }
         break;
       }
       case "error":
@@ -201,22 +240,41 @@ export function createStudioStore(client: StudioClient): StudioStore {
     if (state && stateEvents === seenBefore) adopt(state);
   }, report);
 
+  /** Runs whose undo is in flight. */
+  const undoing = new Set<string>();
+
+  const send = (cmd: Command) => {
+    const p = client.call(cmd);
+    p.catch(report);
+    return p;
+  };
+
   return {
     get: () => view,
     subscribe(l) {
       listeners.add(l);
       return () => listeners.delete(l);
     },
-    send(cmd) {
-      const p = client.call(cmd);
-      p.catch(report);
-      return p;
-    },
+    send,
     select(i) {
       set({ selectedSection: view.state ? clampSelection(view.state, i) : i });
     },
+    async undoRun(run) {
+      // A second click before the first answer would only report "nothing to undo" over it.
+      if (undoing.has(run)) return null;
+      undoing.add(run);
+      let result: unknown;
+      try {
+        result = await send({ cmd: "undo_run", args: { run } });
+      } finally {
+        undoing.delete(run);
+      }
+      // Only a toast still about this run takes the answer.
+      if (view.notice?.run?.id === run) set({ runUndo: result as RunUndo, noticeUndoable: false });
+      return result;
+    },
     dismissNotice() {
-      if (view.notice) set({ notice: null, noticeUndoable: false });
+      if (view.notice) set({ notice: null, runUndo: null, noticeUndoable: false });
     },
     dismissMessage() {
       if (view.message) set({ message: null });

@@ -8,8 +8,9 @@ import {
 } from "@tune/ui";
 import { memo, useMemo } from "react";
 import type { Command, FxView, ParamView, SongView, TrackView } from "../../client/protocol";
-import { sentenceCase, whyNoDuck } from "../../lib/song";
+import { laneValueAt, sentenceCase, whyNoDuck } from "../../lib/song";
 import type { HighlightKind } from "../../store/studioStore";
+import { useKnobStep } from "../../store/useStudio";
 import { useHelp } from "../help";
 import { useParamDrag } from "../useParamDrag";
 
@@ -81,12 +82,8 @@ export const SoundTab = memo(function SoundTab({
     () => [...track.params, ...track.fx.flatMap((f) => f.params), ...track.strip],
     [track.params, track.fx, track.strip],
   );
-  const drag = useParamDrag(track.id, send, allParams, (id) => {
-    const p = allParams.find((x) => x.id === id);
-    help.note(
-      `${sentenceCase(p?.label ?? id)} follows its automation here — you heard your change, but it wasn't saved. Ask Claude to change the automation.`,
-    );
-  });
+  const drag = useParamDrag(track.id, send, allParams);
+  const step = useKnobStep();
 
   const lanes = automatedIn === null ? undefined : song.sections[automatedIn]?.lanes;
   const automated = (id: string) =>
@@ -95,7 +92,11 @@ export const SoundTab = memo(function SoundTab({
   const onParam = (id: string, v: number, commit: boolean) =>
     commit ? drag.commit(id, v) : drag.change(id, v);
   const live = (params: ParamView[]): ParamSpecView[] =>
-    params.map((p) => ({ ...p, label: sentenceCase(p.label), value: drag.valueOf(p) }));
+    params.map((p) => ({
+      ...p,
+      label: sentenceCase(p.label),
+      value: drag.valueOf(p, laneValueAt(song, track.id, p.id, step)),
+    }));
 
   // The 303 shows its big knobs, then its small ones; any other instrument shows all at "sm".
   const acid = track.instrument === "acid303";
@@ -104,7 +105,10 @@ export const SoundTab = memo(function SoundTab({
     : track.params;
   const big = new Set(acid ? BIG.flatMap((id) => byShortId(track.params, id)?.id ?? []) : []);
 
-  const strip = track.strip.map((p) => ({ ...p, value: drag.valueOf(p) }));
+  const strip = track.strip.map((p) => ({
+    ...p,
+    value: drag.valueOf(p, laneValueAt(song, track.id, p.id, step)),
+  }));
   const knobbed = knobbedFx(track.fx);
 
   return (
@@ -138,7 +142,10 @@ export const SoundTab = memo(function SoundTab({
                   value={fx.mode}
                   highlight={highlight(`${fx.id}.mode`)}
                   onChange={(mode) =>
-                    fire({ cmd: "set_fx_mode", args: { track: track.id, device: fx.id, mode } })
+                    fire({
+                      cmd: "set_device_setting",
+                      args: { track: track.id, device: fx.id, setting: "mode", value: mode },
+                    })
                   }
                 />
               ) : undefined

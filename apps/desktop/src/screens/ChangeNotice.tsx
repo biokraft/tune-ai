@@ -1,16 +1,20 @@
 import { cn, IconButton } from "@tune/ui";
-import type { Change, ExternalChange, SongView } from "../client/protocol";
-import { describeChanges } from "../lib/describeChange";
+import type { Change, RunUndo, SongView } from "../client/protocol";
+import { describeChanges, describeTarget } from "../lib/describeChange";
+import type { Notice } from "../store/studioStore";
 
 export type ChangeNoticeProps = {
   /** The last change on disk, until dismissed. */
-  notice: ExternalChange | null;
+  notice: Notice | null;
   /** The studio's offered edits (state.offered): the source of truth once it arrives. */
   offered: Change[];
   /** Whether Undo still reverts this change (no local edit has landed on top of it). */
   canUndo: boolean;
+  /** What undoing the notice's run did; it replaces the toast's text. */
+  runUndo?: RunUndo | null;
   song: SongView | null;
   onUndo(): void;
+  onUndoRun?(run: string): void;
   onResolve(reapply: boolean): void;
   onDismiss(): void;
 };
@@ -18,7 +22,7 @@ export type ChangeNoticeProps = {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Whether the notice has anything to say. */
-export function hasChangeNotice(notice: ExternalChange | null, offered: Change[]): boolean {
+export function hasChangeNotice(notice: Notice | null, offered: Change[]): boolean {
   return notice !== null || offered.length > 0;
 }
 
@@ -30,8 +34,10 @@ export function ChangeNotice({
   notice,
   offered,
   canUndo,
+  runUndo = null,
   song,
   onUndo,
+  onUndoRun,
   onResolve,
   onDismiss,
 }: ChangeNoticeProps) {
@@ -74,6 +80,16 @@ export function ChangeNotice({
         ? `The song file was replaced. Re-apply ${plural(pending, "unsaved edit")}?`
         : "The song file was replaced.";
     actions = pending > 0 ? resolve : [dismiss];
+  } else if (notice && runUndo) {
+    const { reverted, kept } = runUndo;
+    text =
+      reverted.length === 0 && kept.length === 0
+        ? "Nothing to undo: this run is already undone."
+        : `Undid this run: ${plural(reverted.length, "change")}.`;
+    if (kept.length > 0) {
+      text += ` Kept ${plural(kept.length, "change")} made since: ${kept.map((k) => describeTarget(k, song)).join(", ")}.`;
+    }
+    actions = [dismiss];
   } else if (notice) {
     const who = notice.source === "claude" ? "Claude" : "The song file";
     text = `${who} changed ${plural(notice.changes.length, "thing")}: ${describeChanges(notice.changes, song)}`;
@@ -89,6 +105,9 @@ export function ChangeNotice({
               claude,
             ),
           ]
+        : []),
+      ...(notice.run && onUndoRun
+        ? [button("Undo this run", () => onUndoRun(notice.run!.id), "Undo this run", true)]
         : []),
       ...(pending > 0 ? resolve : []),
       dismiss,
@@ -127,6 +146,7 @@ export function ChangeNotice({
         <span className={claude ? "text-agent" : "text-ink2"}>
           {claude ? "Claude" : "Song file"}
         </span>
+        {claude && notice?.run?.title && <span className="text-ink2"> · {notice.run.title}</span>}
       </p>
       <p className="text-[12.5px] leading-snug">{text}</p>
       {offer && <p className="text-[12.5px] leading-snug text-ink2">{offer}</p>}

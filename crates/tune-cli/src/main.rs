@@ -34,10 +34,14 @@ enum Command {
     Serve(ServeArgs),
     /// Edit song values by path, logged as Claude's edits.
     Set(SetArgs),
+    /// Run an action (see `tune actions`) on a song, logged as Claude's edit.
+    Do(DoArgs),
     /// Show the edit log: what the producer and Claude changed.
     Changes(ChangesArgs),
     /// List every instrument and effect parameter.
     Params(JsonArgs),
+    /// List every action the studio runs, with its arguments.
+    Actions(JsonArgs),
     /// Measure loudness, balance and brightness, and draw a spectrogram.
     Analyze(AnalyzeArgs),
     /// Compare a render or song against a reference track.
@@ -157,6 +161,47 @@ struct SetArgs {
     /// Edits as PATH=VALUE, e.g. tracks.acid.acid303.cutoff=820 (all or nothing).
     #[arg(required = true, value_name = "PATH=VALUE")]
     assignments: Vec<String>,
+    #[command(flatten)]
+    run: RunArgs,
+    /// Print JSON instead of text.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct RunArgs {
+    /// Tag the edits with this run id (default: $TUNE_RUN).
+    #[arg(long, value_name = "ID")]
+    run: Option<String>,
+    /// A one-line title for the run (default: $TUNE_RUN_TITLE).
+    #[arg(long, value_name = "TEXT")]
+    run_title: Option<String>,
+}
+
+impl RunArgs {
+    fn flags(&self) -> cmd::set::RunFlags {
+        cmd::set::RunFlags {
+            run: self.run.clone(),
+            run_title: self.run_title.clone(),
+        }
+    }
+}
+
+#[derive(Args)]
+struct DoArgs {
+    /// Song file (TOML).
+    song: PathBuf,
+    /// The action's name, e.g. set_value; `tune actions` lists them.
+    #[arg(conflicts_with = "batch", required_unless_present = "batch")]
+    action: Option<String>,
+    /// The action's arguments as NAME=VALUE (or a bare value, in order).
+    #[arg(value_name = "ARG", requires = "action")]
+    args: Vec<String>,
+    /// Read a JSON array of actions from stdin; all or nothing, edits only.
+    #[arg(long)]
+    batch: bool,
+    #[command(flatten)]
+    run: RunArgs,
     /// Print JSON instead of text.
     #[arg(long)]
     json: bool,
@@ -439,7 +484,15 @@ fn main() -> ExitCode {
             ui: a.ui,
             json: a.json,
         }),
-        Command::Set(a) => cmd::set::run(&a.song, &a.assignments, a.json),
+        Command::Set(a) => cmd::set::run(&a.song, &a.assignments, &a.run.flags(), a.json),
+        Command::Do(a) => cmd::do_action::run(&cmd::do_action::Args {
+            song: &a.song,
+            action: a.action.as_deref(),
+            args: &a.args,
+            batch: a.batch,
+            run: a.run.flags(),
+            json: a.json,
+        }),
         Command::Changes(a) => cmd::changes::run(&cmd::changes::Args {
             song: &a.song,
             since: a.since.as_deref(),
@@ -471,6 +524,7 @@ fn main() -> ExitCode {
         }),
         Command::Refs(a) => cmd::refs::run(a.json),
         Command::Params(a) => cmd::params::run(a.json),
+        Command::Actions(a) => cmd::actions::run(a.json),
         Command::Render303(a) => finish(a.json, run(&a)),
     }
 }

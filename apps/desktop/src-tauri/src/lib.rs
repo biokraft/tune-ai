@@ -2,10 +2,16 @@
 //! The tune studio in a native window.
 
 use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError};
 
 use tauri::{Emitter, Manager, State};
 use tune_audio::CpalOut;
-use tune_studio::{Command, Studio, StudioConfig, StudioHandle};
+use tune_studio::{Command, ControlServer, Studio, StudioConfig, StudioHandle};
+
+/// The studio's control endpoint, so `tune do` and `tune set` on the open
+/// song go through the app. Taken at exit: Tauri does not drop managed
+/// state, and dropping the server removes its endpoint file.
+struct Control(Mutex<Option<ControlServer>>);
 
 /// The song to open at start: `--song <path>` first, then the `TUNE_SONG`
 /// value. An empty value counts as unset.
@@ -39,6 +45,16 @@ pub fn on_exit(handle: &StudioHandle) {
     handle.shutdown();
 }
 
+/// Stops the control endpoint and removes its file, before the studio stops.
+fn stop_control(control: &Control) {
+    let server = control
+        .0
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    drop(server);
+}
+
 /// Opens the window with the studio behind it.
 pub fn run() {
     let app = tauri::Builder::default()
@@ -67,6 +83,11 @@ pub fn run() {
                         }
                     }
                 })?;
+            // Without it the CLI edits the file instead: log it, go on.
+            let control = ControlServer::start_or_warn(handle.clone())
+                .map_err(|warning| eprintln!("{warning}"))
+                .ok();
+            app.manage(Control(Mutex::new(control)));
             app.manage(handle);
             Ok(())
         })
@@ -74,10 +95,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tune");
     app.run(|app, event| {
-        if let tauri::RunEvent::Exit = event
-            && let Some(handle) = app.try_state::<StudioHandle>()
-        {
-            on_exit(&handle);
+        if let tauri::RunEvent::Exit = event {
+            if let Some(control) = app.try_state::<Control>() {
+                stop_control(&control);
+            }
+            if let Some(handle) = app.try_state::<StudioHandle>() {
+                on_exit(&handle);
+            }
         }
     });
 }
@@ -85,6 +109,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tune_studio::Action;
 
     const MINI: &str = include_str!("../../../../crates/tune-song/tests/fixtures/mini.toml");
 
@@ -106,17 +131,40 @@ mod tests {
         )
         .expect("spawns");
         handle
-            .call(Command::SetParam {
+            .call(Command::Action(Action::SetParam {
                 track: "acid".into(),
                 param: "acid303.cutoff".into(),
                 value: 823.456,
                 commit: true,
-            })
+            }))
             .expect("commit");
         // The 150 ms debounce has not fired yet.
         assert!(!std::fs::read_to_string(&path).unwrap().contains("823.5"));
         on_exit(&handle);
         assert!(std::fs::read_to_string(&path).unwrap().contains("823.5"));
+    }
+
+    #[test]
+    fn the_control_endpoint_comes_and_goes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("song.toml");
+        std::fs::write(&path, MINI).expect("write song");
+        let handle = Studio::spawn(
+            StudioConfig {
+                audio: Box::new(tune_audio::NullOut::new()),
+                songs_root: dir.path().to_owned(),
+            },
+            Some(path.clone()),
+        )
+        .expect("spawns");
+        let studios = dir.path().join("studios");
+        let control = Control(Mutex::new(Some(
+            ControlServer::start(handle.clone(), &studios).expect("starts"),
+        )));
+        assert!(tune_studio::find_studio(&studios, &path).is_some());
+        stop_control(&control);
+        assert_eq!(std::fs::read_dir(&studios).unwrap().count(), 0);
+        on_exit(&handle);
     }
 
     #[test]

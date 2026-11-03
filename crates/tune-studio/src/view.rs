@@ -8,12 +8,12 @@ use tune_song::{
     Clip, ClipKind, Device, Lane, MasterMode, MixUnit, Placement, SectionPlay, Song, TICKS_PER_STEP,
 };
 
-use crate::command::DrumHitDto;
+use crate::action::DrumHitDto;
 use crate::diff::Change;
 use crate::error::ErrorView;
 
 /// Everything the UI shows outside the song itself.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
 pub struct StudioState {
     pub path: Option<String>,
     pub song: Option<SongView>,
@@ -34,7 +34,7 @@ pub struct StudioState {
 }
 
 /// The open song.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
 pub struct SongView {
     pub name: String,
     pub bpm: f64,
@@ -48,7 +48,7 @@ pub struct SongView {
 
 /// The `[mix]` table: the master stage, the duck source and the shared
 /// buses, with defaults filled in.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
 pub struct MixView {
     /// `"clip"` or `"limit"`.
     pub master: String,
@@ -66,7 +66,7 @@ pub struct MixView {
 }
 
 /// One mixer channel.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
 pub struct TrackView {
     pub id: String,
     /// The instrument's module name, e.g. `acid303`.
@@ -90,7 +90,7 @@ pub struct TrackView {
 }
 
 /// One clip placed on a track.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
 pub struct PlacementView {
     /// 0-based.
     pub start_bar: u32,
@@ -106,7 +106,7 @@ pub struct PlacementView {
 }
 
 /// A param's spec plus its value in this song: everything a knob needs.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
 pub struct ParamView {
     /// Full id, e.g. `acid303.cutoff`.
     pub id: String,
@@ -115,6 +115,7 @@ pub struct ParamView {
     pub min: f64,
     pub max: f64,
     /// `"linear"` or `"exponential"`.
+    #[ts(type = "\"linear\" | \"exponential\"")]
     pub curve: String,
     pub default: f64,
     pub help: String,
@@ -125,7 +126,7 @@ pub struct ParamView {
 }
 
 /// One effect in a track's chain.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
 pub struct FxView {
     /// The device id, e.g. `eq` or `eq2`: the prefix of its param ids.
     pub id: String,
@@ -140,6 +141,7 @@ pub struct FxView {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
+#[derive(ts_rs::TS)]
 pub enum PatternView {
     Acid {
         id: String,
@@ -157,7 +159,7 @@ pub enum PatternView {
 }
 
 /// One note of a note clip, positions in 16th steps.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
 pub struct NoteView {
     pub start: f64,
     /// MIDI note.
@@ -166,7 +168,7 @@ pub struct NoteView {
     pub vel: u8,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
 pub struct AcidStepView {
     /// MIDI note, or `None` for a rest.
     pub note: Option<u8>,
@@ -175,7 +177,7 @@ pub struct AcidStepView {
 }
 
 /// A stretch of the arrangement.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
 pub struct SectionView {
     pub name: String,
     /// 0-based.
@@ -190,7 +192,7 @@ pub struct SectionView {
 }
 
 /// One automation stretch as one section shows it.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
 pub struct LaneView {
     pub track: String,
     /// Full param id, e.g. `acid303.cutoff`.

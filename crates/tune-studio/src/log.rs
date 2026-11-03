@@ -4,6 +4,11 @@
 //! appends the producer's edits and external changes; `tune set` appends
 //! Claude's, tagged with the hash of the file it wrote. Claude reads the
 //! log to see what the producer changed.
+//!
+//! Each write appends one [`EditEntry`] per changed path, then one
+//! [`ActionRecord`]: the write's undo targets, which a run undo reads.
+//! A record has no `path`, so it never reads as an entry, and a log
+//! written before records existed reads as it did.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -13,11 +18,14 @@ use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
+use crate::action::RunTag;
 use crate::diff::Change;
+use crate::target::TargetChange;
 
 /// Who made an edit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(ts_rs::TS)]
 pub enum Source {
     Human,
     Claude,
@@ -37,6 +45,117 @@ pub struct EditEntry {
     /// FNV-1a hash of the file text after the edit (see [`text_hash`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_hash: Option<String>,
+    /// The name of the action that made the change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    /// The run the change belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_title: Option<String>,
+}
+
+/// One write of the song: who made it, the actions that made it, the run
+/// it belongs to and what it changed, as undo targets. Serialized with
+/// `"record": "action"` after `source`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(into = "RecordLine", from = "RecordLine")]
+pub struct ActionRecord {
+    pub ts: Timestamp,
+    pub source: Source,
+    /// The names of the actions, each once, in the order they first ran:
+    /// `undo`, `redo` and `migrate` for those writes, none for an external
+    /// change.
+    pub actions: Vec<String>,
+    pub run: Option<String>,
+    pub run_title: Option<String>,
+    /// `target_changes(song before, song after)`.
+    pub targets: Vec<TargetChange>,
+    /// FNV-1a hash of the file text after the write (see [`text_hash`]).
+    pub file_hash: Option<String>,
+}
+
+impl ActionRecord {
+    /// The record of a write stamped `ts` that left the file with hash
+    /// `file_hash`, its action names kept once each, in order.
+    pub(crate) fn new<'a>(
+        ts: Timestamp,
+        source: Source,
+        actions: impl IntoIterator<Item = &'a str>,
+        run: Option<&RunTag>,
+        targets: Vec<TargetChange>,
+        file_hash: &str,
+    ) -> Self {
+        let mut names: Vec<String> = Vec::new();
+        for name in actions {
+            if !names.iter().any(|n| n == name) {
+                names.push(name.to_owned());
+            }
+        }
+        Self {
+            ts,
+            source,
+            actions: names,
+            run: run.map(|r| r.id.clone()),
+            run_title: run.and_then(|r| r.title.clone()),
+            targets,
+            file_hash: Some(file_hash.to_owned()),
+        }
+    }
+}
+
+/// An [`ActionRecord`] as its line holds it.
+#[derive(Clone, Serialize, Deserialize)]
+struct RecordLine {
+    #[serde(serialize_with = "ser_ts", deserialize_with = "de_ts")]
+    ts: Timestamp,
+    source: Source,
+    record: RecordKind,
+    actions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run_title: Option<String>,
+    targets: Vec<TargetChange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file_hash: Option<String>,
+}
+
+/// The `record` field: what kind of record a line holds.
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum RecordKind {
+    Action,
+}
+
+impl From<ActionRecord> for RecordLine {
+    fn from(r: ActionRecord) -> Self {
+        Self {
+            ts: r.ts,
+            source: r.source,
+            record: RecordKind::Action,
+            actions: r.actions,
+            run: r.run,
+            run_title: r.run_title,
+            targets: r.targets,
+            file_hash: r.file_hash,
+        }
+    }
+}
+
+impl From<RecordLine> for ActionRecord {
+    fn from(l: RecordLine) -> Self {
+        let RecordKind::Action = l.record;
+        Self {
+            ts: l.ts,
+            source: l.source,
+            actions: l.actions,
+            run: l.run,
+            run_title: l.run_title,
+            targets: l.targets,
+            file_hash: l.file_hash,
+        }
+    }
 }
 
 fn ser_ts<S: Serializer>(ts: &Timestamp, s: S) -> Result<S::Ok, S::Error> {
@@ -66,33 +185,19 @@ impl EditLog {
         }
     }
 
-    /// Appends one entry per change, all from `source`, stamped now and
-    /// carrying `file_hash` (the file after the changes).
-    pub(crate) fn append_changes(
-        &self,
-        source: Source,
-        changes: &[Change],
-        file_hash: &str,
-    ) -> io::Result<()> {
-        let ts = Timestamp::now();
-        let entries: Vec<EditEntry> = changes
-            .iter()
-            .map(|c| EditEntry {
-                ts,
-                source,
-                path: c.path.to_string(),
-                old: c.old.clone(),
-                new: c.new.clone(),
-                file_hash: Some(file_hash.to_owned()),
-            })
-            .collect();
-        self.append(&entries)
-    }
-
     /// Appends the entries as lines, in one `O_APPEND` write so concurrent
     /// writers never interleave inside a batch.
     pub fn append(&self, entries: &[EditEntry]) -> io::Result<()> {
-        if entries.is_empty() {
+        self.append_write(entries, None)
+    }
+
+    /// The entries, then the record, in one `O_APPEND` write.
+    pub fn append_write(
+        &self,
+        entries: &[EditEntry],
+        record: Option<&ActionRecord>,
+    ) -> io::Result<()> {
+        if entries.is_empty() && record.is_none() {
             return Ok(());
         }
         let mut buf = Vec::new();
@@ -100,11 +205,60 @@ impl EditLog {
             serde_json::to_writer(&mut buf, e).map_err(io::Error::other)?;
             buf.push(b'\n');
         }
+        if let Some(record) = record {
+            serde_json::to_writer(&mut buf, record).map_err(io::Error::other)?;
+            buf.push(b'\n');
+        }
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.file)?;
         file.write_all(&buf)
+    }
+
+    /// [`append_write`](Self::append_write) for one write of the song: its
+    /// record is left out, and so nothing is written, when the write logs
+    /// no entry and changes no target.
+    pub(crate) fn append_logged(
+        &self,
+        entries: &[EditEntry],
+        record: &ActionRecord,
+    ) -> io::Result<()> {
+        let changed = !entries.is_empty() || !record.targets.is_empty();
+        self.append_write(entries, changed.then_some(record))
+    }
+
+    /// Every action record, in file order; lines that are not records are
+    /// skipped. A line that says `"record": "action"` but does not read as
+    /// one is an [`io::ErrorKind::InvalidData`] error naming its line
+    /// (1-based), so a run undo never misses a record unnoticed.
+    pub fn read_records(&self) -> io::Result<Vec<ActionRecord>> {
+        let text = match fs::read(&self.file) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let mut records = Vec::new();
+        for (i, line) in text.lines().enumerate() {
+            let damaged = || {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("the edit log has a damaged record at line {}", i + 1),
+                )
+            };
+            let Ok(value) = serde_json::from_str::<Value>(line) else {
+                // A cut-off record line still says what it is.
+                if line.contains(r#""record":"action""#) {
+                    return Err(damaged());
+                }
+                continue;
+            };
+            if value.get("record").and_then(Value::as_str) != Some("action") {
+                continue;
+            }
+            records.push(serde_json::from_value(value).map_err(|_| damaged())?);
+        }
+        Ok(records)
     }
 
     /// Entries with `ts > since` (all when `None`), oldest first. Lines that
@@ -140,6 +294,31 @@ impl EditLog {
             Err(e) => Err(e),
         }
     }
+}
+
+/// One entry per change, all stamped `ts`.
+pub(crate) fn entries_for(
+    ts: Timestamp,
+    source: Source,
+    changes: &[Change],
+    file_hash: &str,
+    action: Option<&str>,
+    run: Option<&RunTag>,
+) -> Vec<EditEntry> {
+    changes
+        .iter()
+        .map(|c| EditEntry {
+            ts,
+            source,
+            path: c.path.to_string(),
+            old: c.old.clone(),
+            new: c.new.clone(),
+            file_hash: Some(file_hash.to_owned()),
+            action: action.map(str::to_owned),
+            run: run.map(|r| r.id.clone()),
+            run_title: run.and_then(|r| r.title.clone()),
+        })
+        .collect()
 }
 
 /// FNV-1a 64 of the UTF-8 bytes as 16 lowercase hex digits.

@@ -2,8 +2,16 @@ use assert_cmd::Command;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
+/// One studio directory per test process, so no test reads the real `~/.tune`.
+fn studio_dir() -> &'static Path {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
+}
+
 fn tune() -> Command {
-    Command::cargo_bin("tune").unwrap()
+    let mut c = Command::cargo_bin("tune").unwrap();
+    c.env("TUNE_STUDIO_DIR", studio_dir());
+    c
 }
 
 fn mini() -> PathBuf {
@@ -757,4 +765,52 @@ bars = 2
         .fold(0.0_f32, f32::max);
     let dbfs = 20.0 * f64::from(peak).log10();
     assert!(dbfs > -60.0, "acid stem peak {dbfs} dBFS");
+}
+
+fn session() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../tune-song/tests/fixtures/session.toml")
+}
+
+#[test]
+fn info_lists_scenes() {
+    let out = tune()
+        .arg("info")
+        .arg(session())
+        .arg("--json")
+        .assert()
+        .success();
+    let v = json_of(&out.get_output().stdout);
+    assert_eq!(
+        v["scenes"],
+        json!([
+            {"id": "groove", "slots": {"kick": "k4", "acid": "a1"}},
+            {"id": "break", "slots": {"hat": "h"}},
+        ])
+    );
+    let out = tune().arg("info").arg(session()).assert().success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(
+        text.lines()
+            .any(|l| l == "scenes: groove (kick k4, acid a1), break (hat h)"),
+        "{text}"
+    );
+
+    let out = tune()
+        .arg("info")
+        .arg(v2("mini.toml"))
+        .arg("--json")
+        .assert()
+        .success();
+    assert_eq!(json_of(&out.get_output().stdout)["scenes"], json!([]));
+    let out = tune().arg("info").arg(v2("mini.toml")).assert().success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(!text.contains("scenes:"), "{text}");
+
+    let out = tune()
+        .arg("validate")
+        .arg(session())
+        .arg("--json")
+        .assert()
+        .success();
+    assert_eq!(json_of(&out.get_output().stdout)["ok"], true);
 }
