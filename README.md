@@ -2,177 +2,211 @@
 
 # TuneAI
 
-A Rust music workstation. The first milestone is a faithful port of the
-Open303 TB-303 emulation, rendered to WAV through the `tune` command line tool.
-The studio app is called TuneAI; the command-line tool is still `tune`.
+**A free, open source music workstation that a human and an AI agent drive
+together, built so you can learn music production by watching and doing.**
 
-## Prerequisites
+> **Status: paused, open for takers.** The engine, the song format, the agent
+> command line and a working prototype studio are real and tested. The
+> DAW-class UI and the in-app agent are designed but not built. I'm setting
+> this down for now. Fork it, build on it, send pull requests.
 
-- macOS on Apple Silicon
-- Rust (stable, edition 2024) and cargo
-- [go-task](https://taskfile.dev) (`task`)
-- Node.js and pnpm 9 (for the studio app)
+## Why this exists
 
-## Usage
+I always wanted to learn music production. Somewhere along the way I started
+building the tools instead, because I love building software, and this turned
+into one more side project. It got far enough that I think it is worth other
+people's time: a faithful Rust port of the TB-303 acid bass, a sample-accurate
+engine, songs as plain text files, and a command line an AI agent can drive
+without a GUI.
+
+I have to focus on the projects I should actually be finishing, so TuneAI goes
+on the shelf for an indefinite time. I might come back to it, because I still
+want to learn production. If you want to pick it up before then, please do.
+Everything I planned is written down in this repo (see
+[where the plans are](#where-to-find-what)), so you don't have to guess where
+it was heading.
+
+## The idea
+
+Free, agentic production software that anyone can use to learn production
+interactively.
+
+- **Songs are text.** A song is one TOML file: tempo, tracks, clips, sections,
+  automation. It diffs in git, a human can read it, and an agent can edit it.
+- **Human and agent are equals.** Everything you can do with a knob or a step
+  grid, the agent can do through the same action layer. Every agent edit shows
+  up on screen (ringed in cyan) and can be undone.
+- **The agent can't hear, so it gets ears.** Offline rendering plus loudness,
+  frequency balance and spectrogram analysis, and comparison against a
+  reference track, let an agent catch objective problems like clipping, mud, or
+  a section where nothing changes. Your ears stay the final judge.
+- **Learning is the point.** The planned *teach mode* has the agent perform one
+  action at a time. It highlights the control it is about to touch and explains
+  in a speech bubble what it does and why. You can pause, ask "why?", or take
+  over ("let me try") and have it check your result. Vibe with the agent, watch
+  it work, learn, then do more by hand.
+- **Start with acid techno.** The 303 is the heart of the project. The first
+  milestone is a finished ~4-minute acid track.
+
+The full design is in [`docs/superpowers/specs/`](docs/superpowers/specs/) and
+the phased plan in [`docs/roadmap.md`](docs/roadmap.md).
+
+### The vision, in mockups
+
+I designed the target studio in Claude Design: a fixed-viewport app shell (an
+app, not a website), a browser on the left, arrangement and editors in the
+middle, device chains and mixer at the bottom, and a chat dock on the right.
+It also covers agent edits, the permission model for "big" changes, and the
+teach-mode spotlight and speech bubble flow. 28 boards are in
+[`docs/design/studio-canvas/`](docs/design/studio-canvas/), indexed in
+`canvas.json`. The files need Claude Design's canvas runtime (`support.js`),
+which is not in this repo, so they do not render on their own yet. Static
+image exports of the key boards are still to come. Until then,
+[`docs/superpowers/specs/2026-10-21-studio-design-handover.md`](docs/superpowers/specs/2026-10-21-studio-design-handover.md)
+and [`docs/superpowers/specs/2026-10-21-studio-ux-brief.md`](docs/superpowers/specs/2026-10-21-studio-ux-brief.md)
+describe every screen in words.
+
+## What works today
+
+- **A 303 that matches the original code.** A Rust port of
+  [Open303](https://github.com/RobinSchmidt/Open303), checked sample for sample
+  against the C++ reference (1e-12 tolerance at module level).
+- **Drums and effects:** 909-style kick, clap, hats and ride; distortion, EQ, a
+  dotted-eighth delay, a short reverb, kick-triggered ducking, a master
+  limiter.
+- **One engine, two modes:** offline render to WAV and lock-free live playback
+  with hot reload, bitwise identical for the same song.
+- **Song format v2:** devices, a clip pool (acid, drum and timed-note clips),
+  placements, scenes and slots for session play, automation lanes.
+- **The `tune` CLI**, `--json` everywhere: `validate`, `info`, `render`, `play`,
+  `set`, `do`, `actions`, `changes`, `analyze`, `compare`, `serve` and more.
+- **An action layer** shared by the UI and the CLI, with undo and one-step undo
+  of a whole agent run.
+- **A prototype studio** (Tauri + React): transport, 303 panel, step
+  sequencer, drum grid, arrangement, mixer, and the edit log with Claude's
+  edits ringed in cyan.
+- **[`songs/first-acid`](songs/first-acid/song.toml):** a full 4-minute acid
+  techno track, mixed to about -8.8 LUFS, with the reasoning for each musical
+  choice in the comments.
+- 800+ Rust tests, JS tests, and a privacy check that keeps audio and personal
+  data out of git.
+
+What does not exist yet: the DAW-class UI, the sampler and sample browser, the
+in-app agent chat, teach mode, MIDI, third-party plugin hosting. See
+[the roadmap](#roadmap-and-where-to-jump-in).
+
+## Quick start
+
+Developed on macOS on Apple Silicon. Other platforms are untested; the audio
+backend (`cpal`) is cross-platform, but the demo tasks use macOS `afplay`.
+
+Prerequisites: Rust (stable, edition 2024), [go-task](https://taskfile.dev),
+Node.js and pnpm 9.
 
 ```sh
-task setup    # install the git pre-commit hook (once per clone)
-task verify   # format check, clippy, tests, privacy check
-task demo     # render and play the demo 303 line
+git clone https://github.com/biokraft/tune-ai.git && cd tune-ai
+task setup    # install the pre-commit privacy hook (once per clone)
+task verify   # format, lint, typecheck, tests, privacy check
+task demo     # render and play a demo 303 line
+task first-acid                                # render and play the full track
+task studio SONG=songs/first-acid/song.toml    # the desktop studio
+task serve  SONG=songs/first-acid/song.toml    # or in a browser on :4580
 ```
 
-## Songs
+The full guide to the CLI, the studio, mixing and analysis is
+[`docs/usage.md`](docs/usage.md).
 
-A song is one TOML file: tracks, patterns and an arrangement of sections with
-parameter automation. See `crates/tune-song/tests/fixtures/mini.toml` for a
-small one, and `songs/first-acid/song.toml` (`task first-acid`) for a full
-4-minute acid track with notes on each musical choice.
+## Where to find what
 
-```sh
-cargo run --release -p tune-cli -- validate path/to/song.toml
-cargo run --release -p tune-cli -- info path/to/song.toml
-cargo run --release -p tune-cli -- render path/to/song.toml --bars 1..4 --out scratch/part.wav
-cargo run --release -p tune-cli -- play path/to/song.toml --loop 1..4
-```
-
-`play` uses the default audio device and hot-reloads: save the file and the
-change is heard at the next step without stopping. A file with errors prints
-them and the previous version keeps playing. `--device null` runs without
-sound. Every command takes `--json`.
-
-## Mixing
-
-A track can carry an EQ, send to a shared dotted-eighth delay and a short
-reverb, and duck under the kick. The master is a soft clipper by default;
-`master = "limit"` switches to a true-peak limiter for loud masters.
-
-```toml
-[mix]
-master = "limit"
-params = { "delay.feedback" = 40, "reverb.size" = 30, "master.gain" = 6 }
-
-[tracks.acid]
-instrument = "acid303"
-params = { "send.delay" = -12, "send.reverb" = -18, "duck.depth" = 6 }
-fx = [{ type = "eq", params = { "eq.low_cut" = 85 } }]
-```
-
-```sh
-tune set songs/first-acid/song.toml tracks.acid.send.delay=-9 mix.master.gain=8
-tune set songs/first-acid/song.toml mix.master=limit mix.duck_source=kick
-tune render songs/first-acid/song.toml --bars 81..96 --out scratch/drop.wav
-```
-
-`tune render` reports `max_reduction_db`, how far the limiter pulled peaks
-down; keep it under about 9 dB. `tune params` lists every id and range. The
-limiter delays the output by 1.75 ms (not compensated). A hot reload keeps
-the reverb tail and the limiter; a tempo change, or a delay bus appearing or
-going, restarts the delay, so its echoes stop. Switching the master mode
-crossfades between the clipper and the limiter over 10 ms without a gap.
-
-## Open the studio
-
-The studio is the song on screen: play it, twist the 303's knobs, edit steps
-and drum hits, and rearrange sections. Every edit is written back to
-`song.toml` (comments kept) 150 ms after you stop moving, so Claude and the
-studio always work on the same file. When Claude edits the song, what it
-changed lights up in cyan, with an Undo.
-
-```sh
-task install                                  # once: JS dependencies
-task studio SONG=songs/first-acid/song.toml   # the desktop window
-```
-
-Or in a browser: run `task serve SONG=songs/first-acid/song.toml` and open
-http://127.0.0.1:4580/.
-
-| Key | Does |
+| Path | What is there |
 | --- | --- |
-| Space | Play / stop |
-| Cmd+Z / Shift+Cmd+Z | Undo / redo |
-| L | Loop the selected section (again to clear) |
-| Knob: drag up or down | Turn it (Shift: 10x finer) |
-| Knob: arrows, Page Up/Down, Home/End | Nudge (Shift: finer), big step, min/max |
-| 303 step: Up/Down | Note up or down a semitone (Shift: an octave) |
-| 303 step: Left/Right | Previous / next step |
-| 303 step: A, S, R | Toggle accent, slide, rest |
-| Arrangement: Cmd+D | Duplicate the selected section |
-| Arrangement: Delete | Delete the selected section |
-| Arrangement: Alt+Left/Right | Move the selected section |
+| [`crates/tune-dsp`](crates/tune-dsp) | DSP library: the 303 port, drums, effects. No UI or I/O. |
+| [`crates/tune-modules`](crates/tune-modules) | Instrument and effect traits and the module registry. |
+| [`crates/tune-song`](crates/tune-song) | Song file model: parse, validate, canonical write, migration, edits. |
+| [`crates/tune-engine`](crates/tune-engine) | Compiles a song, renders offline or plays live, session launches. |
+| [`crates/tune-studio`](crates/tune-studio) | Studio core: actions, undo, edit log, external-change merge. |
+| [`crates/tune-analysis`](crates/tune-analysis) | The agent's ears: loudness, spectrum, spectrogram, comparison. |
+| [`crates/tune-audio`](crates/tune-audio) | Audio output (`cpal`) and a null output for tests. |
+| [`crates/tune-cli`](crates/tune-cli) | The `tune` binary. |
+| [`crates/open303-ref`](crates/open303-ref) | Test-only C++ reference build for parity tests. |
+| [`apps/desktop`](apps/desktop) | The studio app: React + Vite frontend, Tauri host. |
+| [`packages/ui`](packages/ui) | `@tune/ui`: knobs, sequencers, arrangement, mixer, theme tokens. |
+| [`songs/`](songs) | Committed songs. |
+| [`third_party/open303`](third_party/open303) | Vendored Open303 sources, unmodified. |
+| [`docs/roadmap.md`](docs/roadmap.md) | The phased plan and open decisions. |
+| [`docs/superpowers/specs/`](docs/superpowers/specs) | Design specs, including the approved Phase 2 model. |
+| [`docs/superpowers/plans/`](docs/superpowers/plans) | Plans 1 to 10: how everything built so far was done, step by step. |
+| [`docs/design/`](docs/design) | Claude Design mockups of the target studio. |
+| [`docs/research/`](docs/research) | Genre notes and a survey of music-as-code tools. |
+| [`docs/brand/`](docs/brand) | Logo, colours, wordmark. |
+| [`AGENTS.md`](AGENTS.md) | Everything a coding agent needs: layout, notation, workflow, rules. |
 
-Each edit is logged to `edits.jsonl` next to the song (local, gitignored);
-`tune changes <song>` lists it.
+## Roadmap and where to jump in
 
-## Analyse a render
+Full detail in [`docs/roadmap.md`](docs/roadmap.md). In short:
 
-`tune analyze` measures loudness, frequency balance and brightness and draws a
-spectrogram; `tune compare` sets a render against a reference track. Both take
-a song file or an audio file (WAV, MP3, FLAC, AAC). PNGs go to `scratch/`.
+1. **Product and UX design.** Mockups exist; they need a final review and
+   exports.
+2. **Modular model and engine foundations.** Done (plans 7 to 10).
+3. **Samples and the browser.** Sampler instrument, sample library, file
+   browser with preview, drag and drop. *Not started.*
+4. **The new UI.** Implement the design on top of the real engine: app shell,
+   arrangement, piano roll, device rack, mixer, session grid. *Not started.*
+5. **The in-app agent.** Chat dock, harness (OpenCode or the Claude Agent SDK,
+   settled by a short spike), skills, memories, visible agent actions, teach
+   mode. *Not started.*
+6. **Learning test:** build a real acid techno track in the new UI.
+7. **Expand:** mastering chain, more synths, MIDI mapping, hardtekk tooling.
 
-```sh
-tune analyze songs/first-acid/song.toml --sections --png
-tune analyze songs/first-acid/song.toml --bars 33..64 --png
-tune analyze ~/Music/reference.mp3 --png
-tune compare songs/first-acid/song.toml ~/Music/reference.mp3 --bars 33..64 --ref-seconds 90..150 --png
-```
+Good places to start:
 
-Put INPUT before `--png` (or write `--png=PATH`). To refer to a reference by
-name, add `[refs]` `name = "~/Music/reference.mp3"` to `tune.local.toml` in the
-repo root (gitignored), or drop files into `refs/`, then
-`tune compare songs/first-acid/song.toml --ref name` (or
-`tune analyze --ref name --png`). `tune refs` lists what is
-configured. The numbers are hints; trust your ears. Reference tracks, PNGs and
-the local config never go into git.
+- **Phase 3 (samples).** Well-scoped and independent of the UI. Start with the
+  sampler instrument as a `tune-modules` module.
+- **Phase 4 (UI).** The biggest chunk and the most visible. The action layer it
+  needs already exists.
+- **The open decisions** at the end of the roadmap, such as which agent harness
+  to use. A short spike and a written recommendation is a real contribution.
+- **Cross-platform support.** Linux and Windows builds, replacing `afplay` in
+  the tasks.
+- **More songs, more synths,** and a better ear for what makes the mix work.
 
-## Hear the 303
+## Pick it up with a coding agent
 
-```sh
-task demo
-```
+This repo is set up to be continued by an agent such as Claude Code, Codex or
+OpenCode. The work so far was built that way.
 
-This renders a demo acid line to `scratch/demo.wav` (gitignored) and plays it
-with `afplay`. To tweak it, call the CLI directly. `--set ID=VALUE` takes the
-plain value in the knob's own unit (table below). `--sweep ID=FROM:TO` moves a
-knob across the render and takes normalized values from 0 to 1. A pattern
-loops to fill `--bars`.
+1. Point the agent at [`AGENTS.md`](AGENTS.md). It holds the layout, the song
+   notation, how an agent works with `tune`, the loop for editing and
+   listening to a song, and the rules.
+2. Have it read [`docs/roadmap.md`](docs/roadmap.md) and the spec for the phase
+   you want.
+3. Work the way the earlier phases were done: write a spec, then a plan under
+   `docs/superpowers/plans/`, then execute the plan task by task. Plans 1 to 10
+   show the format. They were written for the
+   [superpowers](https://github.com/obra/superpowers) skills, but any
+   plan-then-execute loop works.
+4. Run `task verify` before every commit. It is the same gate a contributor
+   has to pass.
 
-```sh
-# more resonance (80 %), filter opening over the whole clip
-cargo run --release -p tune-cli -- render-303 --demo \
-  --set acid303.resonance=80 --sweep acid303.cutoff=0.2:0.9 \
-  --out scratch/squelch.wav
+Some rules to hand your agent up front, all in `AGENTS.md`: never commit audio,
+keep the Rust port bit-faithful to Open303 (never loosen a parity tolerance),
+keep output deterministic, and never copy GPL code (for example JC303).
 
-# your own pattern: one token per 16th, "." rest, "!" accent, "~" slide
-cargo run --release -p tune-cli -- render-303 \
-  --pattern "C2 . C2! D#2~ . C2 Bb1 . C2 . C2! . D#2 . Bb1~ C2" --bars 4 \
-  --out scratch/mine.wav
+## Contributing and forking
 
-# hard distortion, 24 dB of drive
-cargo run --release -p tune-cli -- render-303 --demo --dist hard \
-  --set dist.drive=24 --out scratch/hard.wav
-```
+Forks are welcome, and so are contributions to this repo. Read
+[`CONTRIBUTING.md`](CONTRIBUTING.md) first. In short: open an issue before a
+large change, keep commits small and conventional, and run `task verify`.
+I may be slow to respond, so please don't take it personally. If you would
+rather take the project in your own direction, fork it; the license lets you.
 
-| Id | Range | Unit |
-| --- | --- | --- |
-| `acid303.waveform` | 0 to 1 | saw to square |
-| `acid303.tuning` | 400 to 480 | Hz |
-| `acid303.cutoff` | 314 to 2394 | Hz |
-| `acid303.resonance` | 0 to 100 | % |
-| `acid303.env_mod` | 0 to 100 | % |
-| `acid303.decay` | 200 to 2000 | ms |
-| `acid303.accent` | 0 to 100 | % |
-| `acid303.volume` | -60 to 0 | dB |
-| `acid303.slide_time` | 0 to 200 | ms |
-| `dist.drive` | 0 to 48 | dB |
-| `dist.mix` | 0 to 1 | dry to wet |
-| `dist.output` | -24 to 6 | dB |
+## Credits
 
-To A/B against a reference track, keep the reference outside the repo and play
-the two back to back:
+- [Open303](https://github.com/RobinSchmidt/Open303) by Robin Schmidt (MIT) is
+  the reference the 303 is ported from, including Takuya Ooura's FFT package.
+- Typefaces: Manrope and JetBrains Mono (SIL OFL 1.1).
+- Details and license texts in [`THIRD_PARTY.md`](THIRD_PARTY.md).
 
-```sh
-afplay path/to/your/reference.mp3
-afplay scratch/demo.wav
-```
+## License
 
-Audio never goes into git; the privacy check blocks audio files.
+[MIT](LICENSE).
