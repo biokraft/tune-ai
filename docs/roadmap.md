@@ -1,6 +1,6 @@
 # tune-ai roadmap
 
-Written 2026-10-21 from the producer's notes after Plans 1–5 landed. Each
+Written 2026-10-21 from the producer's notes after Plans 1–5 landed; "Where we are" last updated 2026-11-03. Each
 phase below becomes one or more specs and plans under `docs/superpowers/`
 before anything is built. Phases are ordered; work inside a phase can be
 reordered.
@@ -28,6 +28,12 @@ Plan 6 reskinned the studio onto the Claude Design "Dusk Glass" look: a
 glass transport, the timeline, a dock under the timeline with Sound, Steps
 and Mixer tabs, and a toast card for Claude's edits. It added no features,
 so the studio is still a working prototype until Phase 4 replaces it.
+
+Since then, Plans 7 to 10 landed, which finished Phase 2: song format v2
+(devices, a clip pool, placements, note clips), the action layer shared by the
+UI and the CLI with undo and one-step run undo, and scenes with a session view
+in the engine. Knob moves on an automated parameter now edit its lane. Phases
+3 to 7 below have not started. The project is paused; see the README.
 
 ## Direction
 
