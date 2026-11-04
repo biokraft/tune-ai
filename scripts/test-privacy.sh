@@ -69,6 +69,9 @@ add_case "image png" shot.png 1 "shot.png: image file"
 add_case "image upper jpg" docs/a.JPG 1 "docs/a.JPG: image file"
 add_case "image webp" docs/a.webp 1 "docs/a.webp: image file"
 add_case "app icon allowed" apps/desktop/src-tauri/icons/32x32.png 0 ""
+add_case "readme image allowed" docs/images/studio.webp 0 ""
+add_case "image beside readme images" docs/images-old/a.png 1 "docs/images-old/a.png: image file"
+add_case "image nested under docs" docs/design/images/a.png 1 "docs/design/images/a.png: image file"
 
 new_repo
 echo "see ${U1}someone/file" > "$T/a.txt"; git -C "$T" add a.txt
