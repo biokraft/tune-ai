@@ -115,6 +115,18 @@ describe every screen in words.
 - 800+ Rust tests, JS tests, and a privacy check that keeps audio and personal
   data out of git.
 
+This is the prototype studio as it runs today (`task serve`), with the 303
+docked under the arrangement:
+
+![The prototype studio today: the first-acid arrangement with five tracks and
+automation lanes under the acid track, and the 303's sound panel docked below
+with the voice, EQ, distortion and mixer strip](docs/images/studio-today-sound.webp)
+
+| | |
+| --- | --- |
+| ![The 303 step sequencer docked under the arrangement: sixteen steps with note, accent and slide](docs/images/studio-today-steps.webp) | ![The target base view from the Claude Design mockups, with the chat dock on the right](docs/images/mockup-studio.webp) |
+| **Today: the 303's steps.** Note, accent and slide per step, written back to `song.toml`. | **The target.** The same song in the designed studio, with the chat dock. See [the mockups](#the-vision-in-mockups). |
+
 What does not exist yet: the DAW-class UI, the sampler and sample browser, the
 in-app agent chat, teach mode, MIDI, third-party plugin hosting. See
 [the roadmap](#roadmap-and-where-to-jump-in).
@@ -161,7 +173,7 @@ The full guide to the CLI, the studio, mixing and analysis is
 | [`docs/superpowers/specs/`](docs/superpowers/specs) | Design specs, including the approved Phase 2 model. |
 | [`docs/superpowers/plans/`](docs/superpowers/plans) | Plans 1 to 10: how everything built so far was done, step by step. |
 | [`docs/design/`](docs/design) | Claude Design mockups of the target studio. |
-| [`docs/images/`](docs/images) | README images: exports of the key mockup boards. |
+| [`docs/images/`](docs/images) | README images: exports of the key mockup boards and screenshots of today's studio. |
 | [`docs/research/`](docs/research) | Genre notes and a survey of music-as-code tools. |
 | [`docs/brand/`](docs/brand) | Logo, colours, wordmark. |
 | [`AGENTS.md`](AGENTS.md) | Everything a coding agent needs: layout, notation, workflow, rules. |
