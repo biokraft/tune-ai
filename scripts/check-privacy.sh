@@ -15,6 +15,8 @@ ALLOWLIST="scripts/privacy-allowlist.txt"
 AUDIO_RE='\.(wav|mp3|flac|aif|aiff|ogg|m4a|aac)(\.tmp)?$'
 IMAGE_RE='\.(png|jpe?g|gif|webp)$'
 ICONS_DIR='apps/desktop/src-tauri/icons/'
+# Curated README images (design mockups); every other image stays out.
+README_IMAGES_DIR='docs/images/'
 # Home-directory prefixes, assembled so this file never holds them literally.
 HOME_RE='(/Us''ers/|/ho''me/)[A-Za-z0-9._-]+'
 EMAIL_RE='[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
@@ -60,7 +62,8 @@ while IFS= read -r -d '' f; do
     refs/*) report "$f" "reference folder"; continue ;;
   esac
 
-  if printf '%s' "$f" | grep -qiE "$IMAGE_RE" && [ "${f#"$ICONS_DIR"}" = "$f" ]; then
+  if printf '%s' "$f" | grep -qiE "$IMAGE_RE" && [ "${f#"$ICONS_DIR"}" = "$f" ] &&
+    [ "${f#"$README_IMAGES_DIR"}" = "$f" ]; then
     report "$f" "image file"
     continue
   fi

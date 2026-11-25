@@ -57,11 +57,35 @@ I designed the target studio in Claude Design: a fixed-viewport app shell (an
 app, not a website), a browser on the left, arrangement and editors in the
 middle, device chains and mixer at the bottom, and a chat dock on the right.
 It also covers agent edits, the permission model for "big" changes, and the
-teach-mode spotlight and speech bubble flow. 28 boards are in
+teach-mode spotlight and speech bubble flow. None of this UI is built yet;
+these are the target.
+
+![The base view: the arrangement playing the drop, the cutoff lane under the
+acid track, and the chat dock on the right with the agent's last four changes,
+each with its own undo](docs/images/mockup-studio.webp)
+
+*The base view. The producer asked for a harder drop; the agent explains what
+it changed, lists each change with its own undo, and offers "Teach me this".*
+
+| | |
+| --- | --- |
+| ![The 303 docked under the arrangement: voice, EQ, distortion and the mixer strip as a device chain](docs/images/mockup-303-in-dock.webp) | ![Six frames of an agent edit: the request, the automation ramp bending, the change card, and the glow fading to a mark](docs/images/mockup-agent-edit.webp) |
+| **The 303 in the dock.** Click a block and its device chain opens below the timeline. | **An agent edit, frame by frame.** The change animates in place, glows, and leaves a card with an undo. |
+| ![A pending rearrangement: the timeline previews the proposal with hatched and dashed blocks, and the chat asks for approval](docs/images/mockup-approval.webp) | ![Learning mode: the cutoff knob in a spotlight with a speech bubble, and Back, Next, Why and Let me try controls](docs/images/mockup-learning-mode.webp) |
+| **A big change waits for your OK.** The timeline previews it before anything is written. | **Learning mode.** One step at a time, with a spotlight on the control and a "why" for each move. |
+| ![The browser on the left with drum voices and synths, and a Ride being dragged onto the timeline](docs/images/mockup-browser.webp) | ![The full mixer: five channel strips, delay and reverb buses, and the master with limiter and loudness meter](docs/images/mockup-mixer.webp) |
+| **The browser.** Preview a sound and drag it onto the timeline as a new track. | **The mixer.** Strips, sends, the two buses and the master limiter. |
+
+![The listening view: loudness, true peak, band balance, a spectrogram of the whole song, energy by section, and the drop compared against a reference](docs/images/mockup-listening.webp)
+
+*The listening view: what the agent "hears". Loudness, band balance, energy
+per section and a side-by-side spectrogram against a reference track.*
+
+All 28 boards are in
 [`docs/design/studio-canvas/`](docs/design/studio-canvas/), indexed in
-`canvas.json`. The files need Claude Design's canvas runtime (`support.js`),
-which is not in this repo, so they do not render on their own yet. Static
-image exports of the key boards are still to come. Until then,
+`canvas.json`. The images above are exports of eight of them. The board files
+themselves need Claude Design's canvas runtime (`support.js`), which is not in
+this repo, so they do not render on their own.
 [`docs/superpowers/specs/2026-10-21-studio-design-handover.md`](docs/superpowers/specs/2026-10-21-studio-design-handover.md)
 and [`docs/superpowers/specs/2026-10-21-studio-ux-brief.md`](docs/superpowers/specs/2026-10-21-studio-ux-brief.md)
 describe every screen in words.
@@ -90,6 +114,18 @@ describe every screen in words.
   choice in the comments.
 - 800+ Rust tests, JS tests, and a privacy check that keeps audio and personal
   data out of git.
+
+This is the prototype studio as it runs today (`task serve`), with the 303
+docked under the arrangement:
+
+![The prototype studio today: the first-acid arrangement with five tracks and
+automation lanes under the acid track, and the 303's sound panel docked below
+with the voice, EQ, distortion and mixer strip](docs/images/studio-today-sound.webp)
+
+| | |
+| --- | --- |
+| ![The 303 step sequencer docked under the arrangement: sixteen steps with note, accent and slide](docs/images/studio-today-steps.webp) | ![The target base view from the Claude Design mockups, with the chat dock on the right](docs/images/mockup-studio.webp) |
+| **Today: the 303's steps.** Note, accent and slide per step, written back to `song.toml`. | **The target.** The same song in the designed studio, with the chat dock. See [the mockups](#the-vision-in-mockups). |
 
 What does not exist yet: the DAW-class UI, the sampler and sample browser, the
 in-app agent chat, teach mode, MIDI, third-party plugin hosting. See
@@ -137,6 +173,7 @@ The full guide to the CLI, the studio, mixing and analysis is
 | [`docs/superpowers/specs/`](docs/superpowers/specs) | Design specs, including the approved Phase 2 model. |
 | [`docs/superpowers/plans/`](docs/superpowers/plans) | Plans 1 to 10: how everything built so far was done, step by step. |
 | [`docs/design/`](docs/design) | Claude Design mockups of the target studio. |
+| [`docs/images/`](docs/images) | README images: exports of the key mockup boards and screenshots of today's studio. |
 | [`docs/research/`](docs/research) | Genre notes and a survey of music-as-code tools. |
 | [`docs/brand/`](docs/brand) | Logo, colours, wordmark. |
 | [`AGENTS.md`](AGENTS.md) | Everything a coding agent needs: layout, notation, workflow, rules. |
@@ -145,8 +182,8 @@ The full guide to the CLI, the studio, mixing and analysis is
 
 Full detail in [`docs/roadmap.md`](docs/roadmap.md). In short:
 
-1. **Product and UX design.** Mockups exist; they need a final review and
-   exports.
+1. **Product and UX design.** Mockups exist, and eight key boards are
+   exported above; they need a final review.
 2. **Modular model and engine foundations.** Done (plans 7 to 10).
 3. **Samples and the browser.** Sampler instrument, sample library, file
    browser with preview, drag and drop. *Not started.*

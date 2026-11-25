@@ -515,7 +515,9 @@ The producer may have the studio (app or browser) open on the same song.
   (`session id --prefix <task>`), `open http://127.0.0.1:4580/`, `snapshot`,
   interact, and `screenshot scratch/<name>.png`. Read the PNG to see the UI.
   Ctrl-C or `kill` stops the server and writes pending edits (it prints
-  `stopped`). Do not commit screenshots, except curated README images under `docs/images/` (the privacy check blocks all images outside the app icons today; permit `docs/images/` in `scripts/check-privacy.sh` and its test when you add the first one).
+  `stopped`). Do not commit screenshots. The only images in git are the app
+  icons and the curated README images under `docs/images/`; the privacy check
+  blocks every other image.
 - `edits.jsonl` sits next to the song: local and gitignored, never committed.
   Besides one entry per changed path, each write logs one action record
   (`"record": "action"`: the actions, the run and each target's value before
